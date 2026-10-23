@@ -1,4 +1,4 @@
-"""Configurações: Telegram (lembrete diário), listas de referência e planos."""
+"""Configurações: lembrete diário do Telegram, listas de referência e planos."""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -7,7 +7,8 @@ from app.core.deps import Ctx, get_ctx, get_ctx_allow_expired, get_ctx_session
 from app.core.security import decrypt_field, encrypt_field
 from app.services import finance as fin
 from app.services.serializers import tenant_out
-from app.services.telegram import build_daily_reminder, send_message
+from app.routers.telegram import link_status
+from app.services.telegram import build_daily_reminder, reminder_targets, send_message
 
 router = APIRouter(tags=['settings'])
 
@@ -33,12 +34,14 @@ def _mask(value: str | None, visible: int = 4) -> str:
     return '•' * max(0, len(value) - visible) + value[-visible:]
 
 
-def _telegram_out(tenant) -> dict:
-    return {'enabled': bool(tenant.telegram_enabled), 'hour': tenant.telegram_hour or 0,
+def _telegram_out(tenant, ctx: Ctx) -> dict:
+    return {**link_status(ctx),
+            'legacy_configured': bool(tenant.telegram_token and tenant.telegram_chat_id),
+            'enabled': bool(tenant.telegram_enabled), 'hour': tenant.telegram_hour or 0,
             'minute': tenant.telegram_minute or 0,
             'token_masked': _mask(decrypt_field(tenant.telegram_token)),
             'chat_id_masked': _mask(decrypt_field(tenant.telegram_chat_id)),
-            'configured': bool(tenant.telegram_token and tenant.telegram_chat_id)}
+            'configured': bool(reminder_targets(tenant, ctx.uids))}
 
 
 def _tenant(ctx: Ctx):
@@ -49,7 +52,7 @@ def _tenant(ctx: Ctx):
 
 @router.get('/settings/telegram', summary='Configuração do lembrete diário no Telegram')
 def get_telegram(ctx: Ctx = Depends(get_ctx)):
-    return _telegram_out(_tenant(ctx))
+    return _telegram_out(_tenant(ctx), ctx)
 
 
 @router.put('/settings/telegram', summary='Salva a configuração do Telegram')
@@ -62,18 +65,19 @@ def save_telegram(body: TelegramIn, ctx: Ctx = Depends(get_ctx_session)):
         tenant.telegram_chat_id = encrypt_field(body.chat_id.strip())
     tenant.telegram_hour, tenant.telegram_minute = body.hour, body.minute
     db.session.commit()
-    return {'message': 'Configurações do Telegram salvas!', 'telegram': _telegram_out(tenant)}
+    return {'message': 'Configurações do Telegram salvas!', 'telegram': _telegram_out(tenant, ctx)}
 
 
-@router.post('/settings/telegram/test', summary='Envia uma mensagem de teste agora')
+@router.post('/settings/telegram/test', summary='Envia o lembrete de teste agora')
 def test_telegram(ctx: Ctx = Depends(get_ctx)):
     tenant = _tenant(ctx)
-    if not tenant.telegram_token or not tenant.telegram_chat_id:
-        raise HTTPException(status_code=422, detail='Configure o token e o Chat ID antes de testar.')
+    targets = reminder_targets(tenant, ctx.uids)
+    if not targets:
+        raise HTTPException(status_code=422, detail='Conecte o Telegram antes de testar.')
     msg = build_daily_reminder(ctx.members) or '✅ <b>FinFam</b>\n\nNenhuma despesa pendente ou em atraso hoje! 🎉'
-    ok, err = send_message(decrypt_field(tenant.telegram_token), decrypt_field(tenant.telegram_chat_id), msg)
-    if not ok:
-        raise HTTPException(status_code=502, detail=f'Falha ao enviar: {err}')
+    errors = [err for token, chat in targets for ok, err in [send_message(token, chat, msg)] if not ok]
+    if len(errors) == len(targets):
+        raise HTTPException(status_code=502, detail=f'Falha ao enviar: {errors[0]}')
     return {'message': 'Mensagem de teste enviada com sucesso!'}
 
 

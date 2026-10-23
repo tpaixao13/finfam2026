@@ -2,15 +2,16 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, Header, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.core.types import utcnow
-from app.core.db import db
 import hmac
 
+from app.core.config import settings
+from app.core.db import db
 from app.core.security import API_TOKEN_PREFIX, decode_access_token, hash_api_token, session_fingerprint
-from app.models import ApiToken, Tenant, User
+from app.core.types import utcnow
+from app.models import ApiToken, TelegramLink, Tenant, User
 
 bearer = HTTPBearer(auto_error=False, description='JWT do login ou token de API (ffk_...)')
 
@@ -47,11 +48,32 @@ def _unauthorized(detail='Não autenticado.'):
     return HTTPException(status_code=401, detail=detail, headers={'WWW-Authenticate': 'Bearer'})
 
 
-def _resolve(creds: HTTPAuthorizationCredentials | None) -> tuple[User, str]:
+BOT_KEY_PREFIX = 'ffbot_'
+_TelegramChat = Header(None, alias='X-Telegram-Chat', include_in_schema=False)
+
+
+def bot_key_valid(raw: str | None) -> bool:
+    """`Bearer ffbot_<BOT_API_KEY>`: o serviço do bot central (mesmo servidor)."""
+    key = settings.bot_api_key
+    if not raw or not raw.startswith(BOT_KEY_PREFIX) or len(key) < 32:
+        return False
+    return hmac.compare_digest(raw[len(BOT_KEY_PREFIX):].encode(), key.encode())
+
+
+def _resolve(creds: HTTPAuthorizationCredentials | None, chat_id: str | None = None) -> tuple[User, str]:
     """Retorna (usuário, tipo) a partir do header Authorization."""
     if creds is None or not creds.credentials:
         raise _unauthorized()
     raw = creds.credentials
+    if raw.startswith(BOT_KEY_PREFIX):
+        # bot central agindo por uma pessoa: só com a conversa que ELA vinculou
+        if not bot_key_valid(raw):
+            raise _unauthorized('Chave do bot inválida.')
+        link = TelegramLink.query.filter_by(chat_id=str(chat_id or '')).first() if chat_id else None
+        if link is None or link.user is None:
+            raise HTTPException(status_code=401, detail={
+                'code': 'telegram_not_linked', 'message': 'Este Telegram não está vinculado a uma conta do FinFam.'})
+        return link.user, 'api'
     if raw.startswith(API_TOKEN_PREFIX):
         token = ApiToken.query.filter_by(token_hash=hash_api_token(raw), revoked=False).first()
         if token is None or token.user is None:
@@ -78,8 +100,8 @@ def _touch(user: User) -> None:
         db.session.commit()
 
 
-def _build_ctx(creds, allow_expired: bool) -> Ctx:
-    user, kind = _resolve(creds)
+def _build_ctx(creds, allow_expired: bool, chat_id: str | None = None) -> Ctx:
+    user, kind = _resolve(creds, chat_id)
     if user.is_admin or kind == 'admin':
         raise HTTPException(status_code=403, detail='Conta de administrador: use o painel /admin.')
     tenant = db.session.get(Tenant, user.tenant_id) if user.tenant_id else None
@@ -96,12 +118,14 @@ def _build_ctx(creds, allow_expired: bool) -> Ctx:
     return Ctx(user=user, tenant=tenant, members=members, via_api_token=(kind == 'api'))
 
 
-def get_ctx(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> Ctx:
-    return _build_ctx(creds, allow_expired=False)
+def get_ctx(creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+            chat_id: str | None = _TelegramChat) -> Ctx:
+    return _build_ctx(creds, allow_expired=False, chat_id=chat_id)
 
 
-def get_ctx_allow_expired(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> Ctx:
-    return _build_ctx(creds, allow_expired=True)
+def get_ctx_allow_expired(creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+                          chat_id: str | None = _TelegramChat) -> Ctx:
+    return _build_ctx(creds, allow_expired=True, chat_id=chat_id)
 
 
 def _interactive(ctx: Ctx) -> Ctx:
@@ -110,18 +134,26 @@ def _interactive(ctx: Ctx) -> Ctx:
     return ctx
 
 
-def get_ctx_session(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> Ctx:
-    """Ações de conta e credenciais: só com o login do site, nunca com token de API."""
-    return _interactive(_build_ctx(creds, allow_expired=False))
+def get_ctx_session(creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+                    chat_id: str | None = _TelegramChat) -> Ctx:
+    """Ações de conta e credenciais: só com o login do site, nunca com token de API ou bot."""
+    return _interactive(_build_ctx(creds, allow_expired=False, chat_id=chat_id))
 
 
-def get_ctx_session_allow_expired(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> Ctx:
-    return _interactive(_build_ctx(creds, allow_expired=True))
+def get_ctx_session_allow_expired(creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+                                  chat_id: str | None = _TelegramChat) -> Ctx:
+    return _interactive(_build_ctx(creds, allow_expired=True, chat_id=chat_id))
 
 
 def is_owner(ctx: Ctx) -> bool:
     """Dono da família = primeiro membro cadastrado (menor id)."""
     return bool(ctx.members) and ctx.user.id == min(u.id for u in ctx.members)
+
+
+def get_bot(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:
+    """Rotas exclusivas do serviço do bot (vincular conversa)."""
+    if creds is None or not bot_key_valid(creds.credentials):
+        raise HTTPException(status_code=403, detail='Acesso restrito ao bot do FinFam.')
 
 
 def get_admin(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> User:

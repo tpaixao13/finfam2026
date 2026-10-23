@@ -22,7 +22,7 @@ const NAV: { section: string; items: { to: string; icon: string; label: string }
   { section: 'Conta', items: [
     { to: '/family', icon: 'people-fill', label: 'Família' },
     { to: '/settings', icon: 'gear', label: 'Perfil e acesso' },
-    { to: '/telegram', icon: 'telegram', label: 'Telegram' },
+    { to: '/telegram', icon: 'telegram', label: 'Telegram e IA' },
   ] },
 ]
 

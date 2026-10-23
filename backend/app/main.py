@@ -15,8 +15,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.core.config import settings
 from app.core.db import DBSessionMiddleware
 from app.core.migrations import run_migrations
-from app.routers import (admin, auth, cards, dashboard, expenses, family, goals, imports, incomes,
-                         investments, rules, settings as settings_router)
+from app.routers import (admin, ai, auth, cards, dashboard, expenses, family, goals, imports, incomes,
+                         investments, rules, settings as settings_router, telegram)
 
 log = logging.getLogger('finfam')
 
@@ -87,7 +87,7 @@ def create_app() -> FastAPI:
 
     prefix = settings.api_prefix
     for module in (auth, family, dashboard, expenses, incomes, cards, goals, rules, investments,
-                   imports, settings_router, admin):
+                   imports, settings_router, telegram, ai, admin):
         app.include_router(module.router, prefix=prefix)
 
     @app.get(f'{prefix}/health', tags=['meta'], summary='Status da API')

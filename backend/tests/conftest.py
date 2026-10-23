@@ -14,6 +14,9 @@ os.environ.setdefault('ADMIN_INITIAL_PASSWORD', 'admin-pass-123')
 os.environ.setdefault('UPLOAD_DIR', f'{_tmp}/uploads')
 os.environ.setdefault('FRONTEND_DIST', '')
 os.environ.setdefault('RATE_LIMIT_ENABLED', '0')
+os.environ.setdefault('TELEGRAM_BOT_TOKEN', '123:fake-token-de-teste')
+os.environ.setdefault('TELEGRAM_BOT_USERNAME', 'FinFamTesteBot')
+os.environ.setdefault('BOT_API_KEY', 'chave-do-bot-' + 'b' * 40)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

@@ -25,8 +25,8 @@ export function IconButton({ icon, label, variant = 'subtle', className = '', ..
 }
 
 /** Botão que pede confirmação no segundo clique (sem diálogos do navegador). */
-export function ConfirmButton({ onConfirm, label, confirmLabel = 'Confirmar', icon = 'trash' }:
-  { onConfirm: () => void; label: string; confirmLabel?: string; icon?: string }) {
+export function ConfirmButton({ onConfirm, label, confirmLabel = 'Confirmar', icon = 'trash', text }:
+  { onConfirm: () => void; label: string; confirmLabel?: string; icon?: string; text?: string }) {
   const [armed, setArmed] = useState(false)
   useEffect(() => {
     if (!armed) return
@@ -36,6 +36,7 @@ export function ConfirmButton({ onConfirm, label, confirmLabel = 'Confirmar', ic
   if (armed) {
     return <button className="btn btn-danger btn-sm" onClick={() => { setArmed(false); onConfirm() }}>{confirmLabel}</button>
   }
+  if (text) return <Button type="button" variant="ghost" icon={icon} aria-label={label} onClick={() => setArmed(true)}>{text}</Button>
   return <IconButton icon={icon} label={label} onClick={() => setArmed(true)} />
 }
 

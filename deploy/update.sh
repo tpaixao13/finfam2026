@@ -11,4 +11,5 @@ git pull origin main
 backend/.venv/bin/pip install -q -r backend/requirements.txt
 if command -v npm >/dev/null; then (cd frontend && npm ci --silent && npm run build); fi
 sudo systemctl restart finfam2026
+if systemctl is-enabled --quiet finfam2026-bot 2>/dev/null; then sudo systemctl restart finfam2026-bot; fi
 echo "FinFam 2026 atualizado e reiniciado."

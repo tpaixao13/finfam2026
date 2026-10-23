@@ -140,6 +140,9 @@ input[type='file'].input { padding: .35rem; }
 .span-2 { grid-column: span 2; }
 .stack { display: flex; flex-direction: column; gap: .9rem; }
 .stack-lg { display: flex; flex-direction: column; gap: 1.25rem; }
+.plain-list { margin: 0 0 .9rem; padding-left: 1.1rem; display: grid; gap: .45rem; }
+.link-button { background: none; border: 0; padding: 0; font: inherit; color: var(--primary); text-decoration: underline; cursor: pointer; }
+.stack > .btn { align-self: flex-start; }
 .row { display: flex; align-items: center; }
 .row.gap { gap: .75rem; flex-wrap: wrap; }
 .row-between { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }

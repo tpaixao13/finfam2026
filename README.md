@@ -6,15 +6,16 @@ Controle financeiro familiar — nova versão do FinFam com **backend e frontend
 finfam2026/
 ├── backend/    API REST (FastAPI + SQLAlchemy) — /api/v1, docs em /api/docs
 ├── frontend/   SPA (React + Vite + TypeScript) — só fala com a API
+├── bot/        Bot central do Telegram (Python, só biblioteca padrão)
 ├── mcp/        Servidor MCP (Python) — ferramentas que chamam a API com um token
 └── deploy/     systemd + script de atualização (Raspberry Pi / Linux)
 ```
 
 ```
  Navegador ──► frontend (React) ──┐
-                                  ├──► API /api/v1 (FastAPI) ──► SQLite (gastos.db)
- Bot / Claude ──► MCP (finfam_mcp) ┘        ▲
-                                            └── lembrete diário do Telegram (a cada minuto)
+ Telegram ──► bot (finfam_bot) ───┼──► API /api/v1 (FastAPI) ──► SQLite (gastos.db)
+ Claude ──► MCP (finfam_mcp) ─────┘        │  └─► IA da família (Claude, Gemini, OpenAI) com a chave dela
+                                           └── lembrete diário pelo bot (a cada minuto)
 ```
 
 ## Rodando no Windows (desenvolvimento)
@@ -63,7 +64,32 @@ O schema é o mesmo, então basta copiar o arquivo:
 - **Integrações (MCP/bot):** em *Perfil e acesso → Tokens de API* gere um token `ffk_...`. Ele age em nome do usuário, só na família dele, e pode ser revogado. Só o hash fica no banco.
 - **Admin:** `/admin` no site, `POST /api/v1/admin/login` na API (token separado do de usuário).
 
-## MCP (bot do Telegram / Claude Desktop)
+## Bot do Telegram
+
+Um bot só, para todas as famílias. Cada pessoa conecta o próprio Telegram em
+**Telegram e IA → Conectar Telegram** (link `t.me/<bot>?start=<código>`, uso único, 15 min).
+O bot age pela pessoa com `Bearer ffbot_<BOT_API_KEY>` + `X-Telegram-Chat`, com o mesmo
+isolamento por família do site, e nunca altera conta, senha, tokens ou chave de IA.
+
+- `/contas` (com botão ✅ para pagar), `/resumo`, `/lancar` (passo a passo), `/desconectar`.
+- Com IA configurada pela família (Claude, Gemini ou OpenAI/compatível, **chave da própria família**,
+  guardada criptografada), basta escrever: *"gastei 87,50 no mercado no Inter em 3x"*. A IA só propõe;
+  nada é gravado sem o ✅.
+- O lembrete diário sai pelo bot para todos que conectaram. Famílias que ainda usam o bot próprio do
+  FinFam antigo continuam recebendo por ele até alguém conectar.
+- Só funciona em conversa privada (grupos são recusados).
+
+Instalação no Raspberry:
+1. No Telegram, fale com **@BotFather** → `/newbot` → anote o token e o nome do bot.
+2. Em `backend/.env`: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `BOT_API_KEY` (gere com
+   `python3 -c "import secrets; print(secrets.token_urlsafe(40))"`) e `FINFAM_SITE_URL`.
+3. `sudo systemctl restart finfam2026`, depois
+   `sudo cp deploy/finfam2026-bot.service /etc/systemd/system/ && sudo systemctl enable --now finfam2026-bot`.
+
+Usa long polling: não precisa abrir porta nem configurar o cloudflared.
+Testes: `cd bot && python -m pytest` (sobe a API num banco temporário).
+
+## MCP (Claude Desktop)
 
 Veja [`mcp/README.md`](mcp/README.md). Resumo para o Claude Desktop (`claude_desktop_config.json`):
 

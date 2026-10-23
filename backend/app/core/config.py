@@ -57,6 +57,9 @@ class Settings:
     scheduler_enabled: bool
     insecure_external_ssl: bool
     trial_days: int = 90
+    telegram_bot_token: str = ''
+    telegram_bot_username: str = ''
+    bot_api_key: str = ''
     api_prefix: str = '/api/v1'
     extra: dict = field(default_factory=dict)
 
@@ -93,6 +96,9 @@ def load_settings() -> Settings:
         scheduler_enabled=_bool('SCHEDULER_ENABLED', True),
         insecure_external_ssl=_bool('INSECURE_EXTERNAL_SSL', False),
         trial_days=int(_env('TRIAL_DAYS', 90)),
+        telegram_bot_token=_env('TELEGRAM_BOT_TOKEN', '') or '',
+        telegram_bot_username=(_env('TELEGRAM_BOT_USERNAME', '') or '').lstrip('@'),
+        bot_api_key=_env('BOT_API_KEY', '') or '',
     )
 
 

@@ -1,7 +1,8 @@
 """Models SQLAlchemy.
 
 O schema é o MESMO do FinFam original (tabelas e colunas), então um `gastos.db`
-existente pode ser usado diretamente. A única tabela nova é `api_tokens`.
+existente pode ser usado diretamente. Tabelas novas: `api_tokens`, `telegram_links`,
+`telegram_link_codes` e `ai_configs` (criadas sozinhas ao subir a API).
 """
 import calendar
 from datetime import datetime, date as _date, timedelta
@@ -73,6 +74,7 @@ class Tenant(Base):
 
     users = relationship('User', backref='tenant', lazy='dynamic', cascade='all, delete-orphan')
     category_rules = relationship('CategoryRule', lazy='dynamic', cascade='all, delete-orphan')
+    ai_config = relationship('AiConfig', uselist=False, cascade='all, delete-orphan')
 
     @property
     def trial_active(self) -> bool:
@@ -120,6 +122,8 @@ class User(Base):
     goals = relationship('Goal', lazy='dynamic', cascade='all, delete-orphan')
     credit_accounts = relationship('CreditAccount', lazy='dynamic', cascade='all, delete-orphan')
     salary_groups = relationship('SalaryGroup', lazy='dynamic', cascade='all, delete-orphan')
+    telegram_links = relationship('TelegramLink', lazy='dynamic', cascade='all, delete-orphan')
+    telegram_codes = relationship('TelegramLinkCode', lazy='dynamic', cascade='all, delete-orphan')
 
     def set_password(self, password: str) -> None:
         self.password_hash = hash_password(password)
@@ -141,6 +145,43 @@ class ApiToken(Base):
     created_at = Column(DateTime, default=utcnow)
     last_used_at = Column(DateTime, nullable=True)
     revoked = Column(Boolean, default=False, nullable=False)
+
+
+class TelegramLink(Base):
+    """Conversa do Telegram vinculada a uma pessoa (bot central do FinFam)."""
+    __tablename__ = 'telegram_links'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    chat_id = Column(String(32), nullable=False, unique=True)
+    username = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    user = relationship('User', overlaps='telegram_links')
+
+
+class TelegramLinkCode(Base):
+    """Código de uso único (15 min) do link t.me/<bot>?start=<código>. Guarda só o hash."""
+    __tablename__ = 'telegram_link_codes'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    code_hash = Column(String(64), nullable=False, unique=True)
+    expires_at = Column(DateTime, nullable=False)
+
+
+class AiConfig(Base):
+    """Provedor de IA da família, com a chave dela (criptografada)."""
+    __tablename__ = 'ai_configs'
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey('tenants.id'), nullable=False, unique=True)
+    provider = Column(String(20), nullable=False)          # anthropic | gemini | openai
+    model = Column(Text, nullable=True)
+    base_url = Column(Text, nullable=True)                 # só para compatíveis com OpenAI
+    api_key = Column(Text, nullable=False)                 # encrypt_field(...)
+    enabled = Column(Boolean, default=True, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class SalaryGroup(Base):

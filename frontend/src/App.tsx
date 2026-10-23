@@ -36,7 +36,7 @@ const ROUTES: [string, (p: Record<string, string>) => React.ReactNode][] = [
 const TITLES: Record<string, string> = {
   '/': 'Painel', '/expenses': 'Despesas', '/bills': 'Contas a pagar', '/incomes': 'Rendas', '/cards': 'Cartões',
   '/investments': 'Investimentos', '/goals': 'Metas', '/alerts': 'Alertas', '/import': 'Importar extrato',
-  '/rules': 'Regras de categoria', '/family': 'Família', '/settings': 'Perfil e acesso', '/telegram': 'Telegram',
+  '/rules': 'Regras de categoria', '/family': 'Família', '/settings': 'Perfil e acesso', '/telegram': 'Telegram e IA',
   '/upgrade': 'Planos', '/login': 'Entrar', '/register': 'Criar conta',
 }
 

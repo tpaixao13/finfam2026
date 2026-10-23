@@ -1,4 +1,9 @@
-"""Lembrete diário via Telegram (contas de hoje, em atraso e alertas críticos)."""
+"""Lembrete diário via Telegram (contas de hoje, em atraso e alertas críticos).
+
+Destino do lembrete de uma família:
+1. bot central (TELEGRAM_BOT_TOKEN) → todas as conversas vinculadas pelos membros;
+2. sem ninguém vinculado → bot próprio configurado no FinFam antigo (token + chat id).
+"""
 import html
 import json
 import logging
@@ -8,9 +13,10 @@ from datetime import datetime, date as date_type
 
 from sqlalchemy import and_, or_, text
 
+from app.core.config import settings
 from app.core.db import db
 from app.core.security import decrypt_field
-from app.models import CreditCard, Expense, Tenant, User
+from app.models import CreditCard, Expense, TelegramLink, Tenant, User
 from app.services.finance import CREDIT, brl
 from app.services.market import _ssl_context
 
@@ -38,6 +44,22 @@ def send_message(token: str, chat_id: str, text_html: str) -> tuple[bool, str]:
         return False, f'Telegram API {exc.code}: {detail}'
     except Exception as exc:
         return False, str(exc)
+
+
+def linked_chats(user_ids: list[int]) -> list[str]:
+    if not settings.telegram_bot_token or not user_ids:
+        return []
+    return [link.chat_id for link in TelegramLink.query.filter(TelegramLink.user_id.in_(user_ids)).all()]
+
+
+def reminder_targets(tenant: Tenant, user_ids: list[int]) -> list[tuple[str, str]]:
+    """[(token do bot, chat_id)] para onde vai o lembrete desta família."""
+    chats = linked_chats(user_ids)
+    if chats:
+        return [(settings.telegram_bot_token, c) for c in chats]
+    if tenant.telegram_token and tenant.telegram_chat_id:
+        return [(decrypt_field(tenant.telegram_token), decrypt_field(tenant.telegram_chat_id))]
+    return []
 
 
 def build_daily_reminder(users: list, today: date_type | None = None) -> str | None:
@@ -102,18 +124,20 @@ def _tenant_message(tenant: Tenant, now: datetime) -> str | None:
 
 
 def run_daily_reminders(now: datetime | None = None) -> int:
-    """Executado a cada minuto: envia o lembrete dos tenants cujo horário chegou.
+    """Executado a cada minuto: envia o lembrete das famílias cujo horário chegou.
     Retorna quantas mensagens foram enviadas."""
     now = now or datetime.now()
     today = now.date()
     sent = 0
     try:
         for tenant in Tenant.query.filter_by(telegram_enabled=True).all():
-            if not tenant.telegram_token or not tenant.telegram_chat_id:
-                continue
             if (now.hour, now.minute) != (tenant.telegram_hour or 0, tenant.telegram_minute or 0):
                 continue
             if tenant.telegram_last_sent == today:
+                continue
+            uids = [u.id for u in User.query.filter_by(tenant_id=tenant.id).all()]
+            targets = reminder_targets(tenant, uids)
+            if not targets:
                 continue
             # UPDATE atômico: com vários workers, só um envia.
             claimed = db.session.execute(text(
@@ -126,15 +150,18 @@ def run_daily_reminders(now: datetime | None = None) -> int:
             msg = _tenant_message(tenant, now)
             if not msg:
                 continue
-            ok, err = send_message(decrypt_field(tenant.telegram_token),
-                                   decrypt_field(tenant.telegram_chat_id), msg)
-            if ok:
-                sent += 1
-            else:
+            delivered = 0
+            for token, chat_id in targets:
+                ok, err = send_message(token, chat_id, msg)
+                if ok:
+                    delivered += 1
+                else:
+                    log.warning('Telegram tenant %s: %s', tenant.id, err)
+            sent += delivered
+            if not delivered:  # tenta de novo no próximo minuto/dia
                 db.session.execute(text('UPDATE tenants SET telegram_last_sent = NULL WHERE id = :id'),
                                    {'id': tenant.id})
                 db.session.commit()
-                log.warning('Telegram tenant %s: %s', tenant.id, err)
     finally:
         db.session.remove()
     return sent
