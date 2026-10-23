@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.core.types import Email
 from app.core.db import db, get_or_404
-from app.core.deps import Ctx, get_ctx
+from app.core.deps import Ctx, get_ctx, get_ctx_session, is_owner
 from app.models import User
 from app.services.finance import user_color_map
 from app.services.serializers import tenant_out, user_out
@@ -34,6 +34,7 @@ class MemberUpdate(BaseModel):
     email: Email
     new_password: str | None = Field(default=None, min_length=8)
     confirm_password: str | None = None
+    current_password: str | None = Field(None, description='Obrigatória ao trocar a própria senha ou e-mail')
 
     @model_validator(mode='after')
     def _match(self):
@@ -48,17 +49,23 @@ def _require_tenant(ctx: Ctx):
     return ctx.tenant
 
 
+def _require_owner(ctx: Ctx, action: str):
+    if not is_owner(ctx):
+        raise HTTPException(status_code=403, detail=f'Só quem criou a família pode {action}.')
+
+
 @router.get('', summary='Família, membros e limite do plano')
 def get_family(ctx: Ctx = Depends(get_ctx)):
     colors = user_color_map(ctx.members)
     return {'tenant': tenant_out(ctx.tenant),
             'members': [user_out(u, colors[u.id]) for u in ctx.members],
             'member_count': len(ctx.members),
+            'owner_id': min(u.id for u in ctx.members) if ctx.members else None,
             'member_limit': ctx.tenant.member_limit if ctx.tenant else 1}
 
 
 @router.patch('', summary='Renomeia a família')
-def rename(body: RenameIn, ctx: Ctx = Depends(get_ctx)):
+def rename(body: RenameIn, ctx: Ctx = Depends(get_ctx_session)):
     tenant = _require_tenant(ctx)
     tenant.name = body.name.strip()
     db.session.commit()
@@ -66,7 +73,7 @@ def rename(body: RenameIn, ctx: Ctx = Depends(get_ctx)):
 
 
 @router.post('/members', status_code=201, summary='Adiciona um membro')
-def add_member(body: MemberIn, ctx: Ctx = Depends(get_ctx)):
+def add_member(body: MemberIn, ctx: Ctx = Depends(get_ctx_session)):
     tenant = _require_tenant(ctx)
     if len(ctx.members) >= tenant.member_limit:
         raise HTTPException(status_code=403, detail=(
@@ -83,10 +90,16 @@ def add_member(body: MemberIn, ctx: Ctx = Depends(get_ctx)):
 
 
 @router.put('/members/{user_id}', summary='Edita nome, e-mail e (opcional) senha de um membro')
-def edit_member(user_id: int, body: MemberUpdate, ctx: Ctx = Depends(get_ctx)):
+def edit_member(user_id: int, body: MemberUpdate, ctx: Ctx = Depends(get_ctx_session)):
     tenant = _require_tenant(ctx)
     user = get_or_404(User.query.filter_by(id=user_id, tenant_id=tenant.id), 'Membro não encontrado.')
     email = body.email.strip().lower()
+    changes_credentials = bool(body.new_password) or email != (user.email or '')
+    if user.id == ctx.user.id:
+        if changes_credentials and not ctx.user.check_password(body.current_password or ''):
+            raise HTTPException(status_code=422, detail='Informe sua senha atual para trocar e-mail ou senha.')
+    elif changes_credentials:
+        _require_owner(ctx, 'alterar e-mail ou senha de outra pessoa')
     other = User.query.filter_by(email=email).first()
     if other and other.id != user.id:
         raise HTTPException(status_code=409, detail='E-mail já está em uso por outro membro.')
@@ -99,10 +112,11 @@ def edit_member(user_id: int, body: MemberUpdate, ctx: Ctx = Depends(get_ctx)):
 
 
 @router.delete('/members/{user_id}', summary='Remove um membro (e todos os dados dele)')
-def delete_member(user_id: int, ctx: Ctx = Depends(get_ctx)):
+def delete_member(user_id: int, ctx: Ctx = Depends(get_ctx_session)):
     tenant = _require_tenant(ctx)
     if user_id == ctx.user.id:
         raise HTTPException(status_code=422, detail='Você não pode remover a si mesmo.')
+    _require_owner(ctx, 'remover pessoas')
     user = get_or_404(User.query.filter_by(id=user_id, tenant_id=tenant.id), 'Membro não encontrado.')
     name = user.name
     db.session.delete(user)

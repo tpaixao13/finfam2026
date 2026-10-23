@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { Icon } from '../components/Icon'
 import { Badge, Button, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Money, MonthNav, PageHeader,
-  Panel, Select, Spinner } from '../components/ui'
+  Panel, Select, Spinner, Table } from '../components/ui'
 import { api } from '../lib/api'
 import { brl } from '../lib/format'
 import { useApi, usePeriod } from '../lib/hooks'
@@ -116,8 +116,7 @@ export function ImportPage() {
         <PageHeader title="Revisar importação" subtitle={<>{rows.filter((r) => r.include).length} de {rows.length} selecionadas · {brl(selectedTotal)}</>}
           actions={<><Button variant="ghost" onClick={() => setRows(null)}>Voltar</Button><Button icon="check2" busy={busy} onClick={confirm}>Importar selecionadas</Button></>} />
         <Panel flush>
-          <div className="table-wrap">
-            <table className="table table-edit">
+          <Table className="table-edit">
               <thead><tr><th /><th>Data</th><th>Descrição</th><th className="num">Valor</th><th>Categoria</th><th>Pagamento</th><th>Criar regra</th></tr></thead>
               <tbody>
                 {rows.map((r) => (
@@ -137,9 +136,8 @@ export function ImportPage() {
                     <td><input type="checkbox" aria-label="Criar regra" checked={r.create_rule} onChange={(e) => update(r.index, { create_rule: e.target.checked })} /></td>
                   </tr>))}
               </tbody>
-            </table>
-            <datalist id="import-cats">{(meta?.categories ?? []).map((c) => <option key={c} value={c} />)}</datalist>
-          </div>
+          </Table>
+          <datalist id="import-cats">{(meta?.categories ?? []).map((c) => <option key={c} value={c} />)}</datalist>
         </Panel>
       </div>
     )
@@ -211,18 +209,18 @@ export function RulesPage() {
         {rules.error ? <ErrorBox message={rules.error} /> : !rules.data ? <Spinner /> : rules.data.length === 0
           ? <Empty icon="tags" title="Nenhuma regra ainda." />
           : (
-            <table className="table">
+            <Table>
               <thead><tr><th>Palavra-chave</th><th>Categoria</th><th className="num">Usos</th><th /></tr></thead>
               <tbody>{rules.data.map((r) => (
                 <tr key={r.id}>
                   <td><code>{r.keyword}</code></td><td>{r.category}</td><td className="num">{r.match_count}</td>
-                  <td className="actions">
-                    <IconButton icon="pencil" label="Editar" onClick={() => { setEditing(r); setKeyword(r.keyword); setCategory(r.category) }} />
-                    <ConfirmButton label="Excluir" confirmLabel="Excluir" onConfirm={() => act(() => api.del<{ message: string }>(`/rules/${r.id}`), rules.reload)} />
-                  </td>
+                  <td className="actions"><span className="row-actions">
+                    <IconButton icon="pencil" label={`Editar regra ${r.keyword}`} onClick={() => { setEditing(r); setKeyword(r.keyword); setCategory(r.category) }} />
+                    <ConfirmButton label={`Excluir regra ${r.keyword}`} confirmLabel="Excluir" onConfirm={() => act(() => api.del<{ message: string }>(`/rules/${r.id}`), rules.reload)} />
+                  </span></td>
                 </tr>))}
               </tbody>
-            </table>
+            </Table>
           )}
       </Panel>
     </div>

@@ -35,12 +35,18 @@ export function Layout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
   useEffect(() => setOpen(false), [pathname])
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
   const alerts = me?.alert_count ?? 0
   const plan = me?.tenant?.plan
 
   return (
     <div className={`shell ${open ? 'nav-open' : ''}`}>
-      <aside className="sidebar" aria-label="Navegação principal">
+      <aside id="sidebar" className="sidebar" aria-label="Navegação principal">
         <div className="brand">
           <img src="/logo.svg" alt="" width={30} height={30} />
           <span>FinFam</span>
@@ -85,7 +91,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <div className="scrim" onClick={() => setOpen(false)} />
       <div className="main">
         <header className="topbar">
-          <IconButton className="menu-btn" icon="list" label="Abrir menu" onClick={() => setOpen(true)} />
+          <IconButton className="menu-btn" icon="list" label="Abrir menu" aria-expanded={open} aria-controls="sidebar" onClick={() => setOpen(true)} />
           <div className="topbar-spacer" />
           <Link to="/alerts" className="topbar-bell" aria-label={`${alerts} alertas`}>
             <Icon name={alerts ? 'bell-fill' : 'bell'} />

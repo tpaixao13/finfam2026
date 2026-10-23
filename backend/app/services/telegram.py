@@ -1,4 +1,5 @@
 """Lembrete diário via Telegram (contas de hoje, em atraso e alertas críticos)."""
+import html
 import json
 import logging
 import urllib.error
@@ -14,6 +15,10 @@ from app.services.finance import CREDIT, brl
 from app.services.market import _ssl_context
 
 log = logging.getLogger('finfam.telegram')
+
+
+def _h(text) -> str:
+    return html.escape(str(text or ''), quote=False)
 
 
 def send_message(token: str, chat_id: str, text_html: str) -> tuple[bool, str]:
@@ -66,7 +71,7 @@ def build_daily_reminder(users: list, today: date_type | None = None) -> str | N
     if due_today:
         lines.append('🔔 <b>Vencimentos de hoje:</b>')
         for e in due_today:
-            lines += [f'• {names.get(e.user_id, "?")} — {e.description} ({e.category}) — {brl(e.amount)}', '']
+            lines += [f'• {_h(names.get(e.user_id, "?"))} — {_h(e.description)} ({_h(e.category)}) — {brl(e.amount)}', '']
     if overdue:
         lines.append('⚠️ <b>Em atraso:</b>')
         for e in overdue:
@@ -74,7 +79,7 @@ def build_daily_reminder(users: list, today: date_type | None = None) -> str | N
                 days = (today - date_type(e.year, e.month, e.day)).days
             except ValueError:
                 days = 0
-            lines += [f'• {names.get(e.user_id, "?")} — {e.description} ({e.category})'
+            lines += [f'• {_h(names.get(e.user_id, "?"))} — {_h(e.description)} ({_h(e.category)})'
                       f' — {brl(e.amount)} — {days}d de atraso', '']
     return '\n'.join(lines)
 

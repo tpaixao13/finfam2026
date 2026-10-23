@@ -65,7 +65,7 @@ class ExpenseUpdate(_DateFields):
     category: str | None = Field(None, min_length=1, max_length=50)
     payment_method: PaymentMethod | None = None
     user_id: int | None = None
-    bank: str | None = None
+    bank: str | None = Field(None, max_length=60)
     card_id: int | None = None
     paid: bool | None = None
     apply_to_group: bool = Field(False, description='Propagar para todas as parcelas/recorrências')

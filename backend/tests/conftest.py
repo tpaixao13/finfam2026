@@ -13,6 +13,7 @@ os.environ.setdefault('ADMIN_EMAIL', 'admin@finfam.test')
 os.environ.setdefault('ADMIN_INITIAL_PASSWORD', 'admin-pass-123')
 os.environ.setdefault('UPLOAD_DIR', f'{_tmp}/uploads')
 os.environ.setdefault('FRONTEND_DIST', '')
+os.environ.setdefault('RATE_LIMIT_ENABLED', '0')
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

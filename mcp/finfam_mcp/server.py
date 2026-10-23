@@ -351,8 +351,10 @@ def editar_despesa(id: int, descricao: str | None = None, valor: float | None = 
 
 @mcp.tool()
 @_safe
-def excluir_despesa(id: int) -> str:
-    """Exclui UMA despesa pelo ID. Confirme com o usuário antes."""
+def excluir_despesa(id: int, confirmado: bool = False) -> str:
+    """Exclui UMA despesa pelo ID. Só execute com confirmado=true DEPOIS que o usuário confirmar."""
+    if not confirmado:
+        return 'Confirme com o usuário e chame de novo com confirmado=true.'
     return api.delete(f'/expenses/{id}')['message']
 
 
@@ -375,6 +377,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8765)
     args = parser.parse_args(argv)
+    import os
+    if args.http and args.host not in ('127.0.0.1', '::1', 'localhost') \
+            and os.environ.get('FINFAM_MCP_ALLOW_REMOTE') != '1':
+        parser.error('O modo --http não tem autenticação própria: use --host 127.0.0.1 '
+                     '(ou defina FINFAM_MCP_ALLOW_REMOTE=1 atrás de um proxy com autenticação).')
     if not args.http:
         mcp.run('stdio')
         return

@@ -19,17 +19,28 @@ def hash_password(password: str) -> str:
     return generate_password_hash(password)
 
 
+_DUMMY_HASH = generate_password_hash('finfam-dummy-password')
+
+
 def verify_password(password_hash: str | None, password: str) -> bool:
     if not password_hash:
+        check_password_hash(_DUMMY_HASH, password)  # tempo constante: não revela se o e-mail existe
         return False
     return check_password_hash(password_hash, password)
 
 
 # ── JWT de sessão (frontend) ─────────────────────────────────────────────────
 
-def create_access_token(user_id: int, kind: str = 'user') -> tuple[str, datetime]:
-    expires = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_minutes)
-    payload = {'sub': str(user_id), 'typ': kind, 'exp': expires}
+def session_fingerprint(password_hash: str | None) -> str:
+    """Muda quando a senha muda: invalida sessões antigas e impede que um JWT de
+    usuário excluído valha para outro usuário que reaproveite o mesmo id."""
+    return hashlib.sha256(f'{password_hash}|{settings.secret_key}'.encode()).hexdigest()[:24]
+
+
+def create_access_token(user_id: int, kind: str = 'user', fingerprint: str = '') -> tuple[str, datetime]:
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(minutes=settings.access_token_minutes)
+    payload = {'sub': str(user_id), 'typ': kind, 'exp': expires, 'iat': now, 'fp': fingerprint}
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM), expires
 
 

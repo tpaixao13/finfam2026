@@ -1,7 +1,9 @@
 """Teste rápido do MCP contra a API rodando (sem Inspector, sem Claude).
 
 Uso (na pasta mcp, com a .venv ativada e a API rodando em outro terminal):
-    python testar.py ffk_SEU_TOKEN
+    $env:FINFAM_API_TOKEN = "ffk_SEU_TOKEN"   # recomendado: não fica no histórico de processos
+    python testar.py
+ou  python testar.py ffk_SEU_TOKEN
 
 Só faz consultas — não lança nem altera nada.
 Para testar um lançamento de verdade:  python testar.py ffk_SEU_TOKEN --lancar
@@ -9,11 +11,12 @@ Para testar um lançamento de verdade:  python testar.py ffk_SEU_TOKEN --lancar
 import os
 import sys
 
-if len(sys.argv) < 2 or not sys.argv[1].startswith('ffk_'):
-    print('Informe o token: python testar.py ffk_SEU_TOKEN')
+token = next((a for a in sys.argv[1:] if a.startswith('ffk_')), os.environ.get('FINFAM_API_TOKEN', ''))
+if not token.startswith('ffk_'):
+    print('Defina $env:FINFAM_API_TOKEN = "ffk_..." ou passe o token: python testar.py ffk_...')
     sys.exit(1)
 
-os.environ['FINFAM_API_TOKEN'] = sys.argv[1]
+os.environ['FINFAM_API_TOKEN'] = token
 os.environ.setdefault('FINFAM_API_URL', 'http://127.0.0.1:8000/api/v1')
 
 from finfam_mcp import server  # noqa: E402  (lê o token ao importar)

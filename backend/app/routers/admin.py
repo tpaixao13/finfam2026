@@ -2,13 +2,14 @@
 from datetime import datetime, timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core.types import Email, utcnow
+from app.core import ratelimit
 from app.core.db import db, get_or_404
 from app.core.deps import get_admin
-from app.core.security import create_access_token
+from app.core.security import create_access_token, session_fingerprint
 from app.models import Tenant, User
 from app.services.serializers import iso, tenant_out
 
@@ -36,11 +37,12 @@ def _user_row(u: User, now: datetime) -> dict:
 
 
 @router.post('/login', summary='Login do administrador')
-def login(body: AdminLoginIn):
+def login(body: AdminLoginIn, request: Request):
+    ratelimit.check(request, 'admin-login', body.email, limit=5)
     user = User.query.filter_by(email=body.email.strip().lower(), is_admin=True).first()
     if not user or not user.check_password(body.password):
         raise HTTPException(status_code=401, detail='Credenciais inválidas.')
-    token, expires = create_access_token(user.id, kind='admin')
+    token, expires = create_access_token(user.id, kind='admin', fingerprint=session_fingerprint(user.password_hash))
     return {'access_token': token, 'token_type': 'bearer', 'expires_at': expires.isoformat(),
             'admin': {'id': user.id, 'name': user.name, 'email': user.email}}
 

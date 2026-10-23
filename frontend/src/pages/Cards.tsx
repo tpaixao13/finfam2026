@@ -5,7 +5,7 @@ import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton
   PageHeader, Panel, Progress, Segmented, Select, Spinner } from '../components/ui'
 import { api } from '../lib/api'
 import { brl, parseMoney } from '../lib/format'
-import { useApi, usePeriod } from '../lib/hooks'
+import { useApi, useFormState, usePeriod } from '../lib/hooks'
 import { Link, navigate } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
 import type { Card, CardUsage, Expense } from '../lib/types'
@@ -27,22 +27,13 @@ function CardForm({ open, editing, onClose, onSaved }: { open: boolean; editing:
   const { me, meta, toast } = useSession()
   const blank = { user_id: String(me?.user.id ?? ''), kind: 'credit' as Kind, nickname: '', last_digits: '', bank: '',
     due_day: '10', best_buy_day: '3', credit_limit: '', monthly_amount: '', renewal_day: '1', is_virtual: false, is_additional: false }
-  const [f, setF] = useState(blank)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [lastOpen, setLastOpen] = useState(false)
-  if (open !== lastOpen) {
-    setLastOpen(open)
-    if (open) {
-      setError(null)
-      setF(editing ? { user_id: String(editing.user_id), kind: kindOf(editing), nickname: editing.nickname ?? '',
-        last_digits: editing.last_digits, bank: editing.bank ?? '', due_day: String(editing.due_day),
-        best_buy_day: String(editing.best_buy_day), credit_limit: editing.credit_limit ? String(editing.credit_limit).replace('.', ',') : '',
-        monthly_amount: editing.monthly_amount ? String(editing.monthly_amount).replace('.', ',') : '',
-        renewal_day: String(editing.renewal_day ?? 1), is_virtual: editing.is_virtual, is_additional: editing.is_additional } : blank)
-    }
-  }
-  const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((s) => ({ ...s, [k]: v }))
+  const { f, set, busy, error, run } = useFormState(open, () => editing
+    ? { user_id: String(editing.user_id), kind: kindOf(editing), nickname: editing.nickname ?? '',
+      last_digits: editing.last_digits, bank: editing.bank ?? '', due_day: String(editing.due_day),
+      best_buy_day: String(editing.best_buy_day), credit_limit: editing.credit_limit ? String(editing.credit_limit).replace('.', ',') : '',
+      monthly_amount: editing.monthly_amount ? String(editing.monthly_amount).replace('.', ',') : '',
+      renewal_day: String(editing.renewal_day ?? 1), is_virtual: editing.is_virtual, is_additional: editing.is_additional }
+    : blank)
   const isVr = f.kind === 'vr' || f.kind === 'va'
   const hasCredit = f.kind === 'credit' || f.kind === 'both'
 
@@ -58,17 +49,12 @@ function CardForm({ open, editing, onClose, onSaved }: { open: boolean; editing:
       credit_limit: hasCredit ? money(f.credit_limit) : null,
       monthly_amount: isVr ? money(f.monthly_amount) : null, renewal_day: isVr ? Number(f.renewal_day) || null : null,
     }
-    setBusy(true)
-    try {
+    await run(async () => {
       const r = editing ? await api.put<{ message: string }>(`/cards/${editing.id}`, body) : await api.post<{ message: string }>('/cards', body)
       toast(r.message)
       onSaved()
       onClose()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   return (

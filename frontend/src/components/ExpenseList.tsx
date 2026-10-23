@@ -52,13 +52,14 @@ export function ExpenseList({ items, onChange, showPerson = true, dateField = 'p
           </span>
           <Money value={e.amount} className="tx-amount" />
           <button className="tx-status" onClick={() => act(() => api.post<{ message: string }>(`/expenses/${e.id}/toggle-paid`), refresh)}
-            title={e.paid ? 'Marcar como pendente' : 'Marcar como pago'}>
+            title={e.paid ? 'Marcar como pendente' : 'Marcar como pago'}
+            aria-label={`${STATUS[e.status].label} — ${e.paid ? 'marcar como pendente' : 'marcar como pago'}`}>
             <Badge tone={STATUS[e.status].tone}>{STATUS[e.status].label}</Badge>
           </button>
           {!compact && (
             <span className="tx-actions">
-              <IconButton icon="pencil" label="Editar" onClick={() => openExpense(e)} />
-              <ConfirmButton label="Excluir" confirmLabel="Excluir"
+              <IconButton icon="pencil" label={`Editar ${e.description}`} onClick={() => openExpense(e)} />
+              <ConfirmButton label={`Excluir ${e.description}`} confirmLabel="Excluir"
                 onConfirm={() => act(() => api.del<{ message: string }>(`/expenses/${e.id}`), refresh)} />
             </span>
           )}

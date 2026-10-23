@@ -3,7 +3,7 @@ import { Badge, Button, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input
   Progress, Select, Spinner } from '../components/ui'
 import { api } from '../lib/api'
 import { brl, dateBR, parseMoney } from '../lib/format'
-import { useApi, usePeriod } from '../lib/hooks'
+import { useApi, useFormState, usePeriod } from '../lib/hooks'
 import { useAction, useSession } from '../lib/session'
 import type { Goal } from '../lib/types'
 
@@ -16,37 +16,23 @@ const TYPE_HINT: Record<string, string> = {
 function GoalForm({ open, editing, onClose, onSaved }: { open: boolean; editing: Goal | null; onClose: () => void; onSaved: () => void }) {
   const { me, meta, toast } = useSession()
   const blank = { title: '', type: 'saving', target_amount: '', category: '', due_date: '', user_id: String(me?.user.id ?? '') }
-  const [f, setF] = useState(blank)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [lastOpen, setLastOpen] = useState(false)
-  if (open !== lastOpen) {
-    setLastOpen(open)
-    if (open) {
-      setError(null)
-      setF(editing ? { title: editing.title, type: editing.type, target_amount: String(editing.target_amount).replace('.', ','),
-        category: editing.category ?? '', due_date: editing.due_date ?? '', user_id: String(editing.user_id) } : blank)
-    }
-  }
-  const set = (k: keyof typeof blank, v: string) => setF((s) => ({ ...s, [k]: v }))
+  const { f, set, busy, error, setError, run } = useFormState(open, () => editing
+    ? { title: editing.title, type: editing.type, target_amount: String(editing.target_amount).replace('.', ','),
+      category: editing.category ?? '', due_date: editing.due_date ?? '', user_id: String(editing.user_id) }
+    : blank)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     const target = parseMoney(f.target_amount)
     if (!Number.isFinite(target) || target <= 0) { setError('Informe o valor da meta.'); return }
     const body = { title: f.title, type: f.type, target_amount: target.toFixed(2), category: f.category || null, due_date: f.due_date || null }
-    setBusy(true)
-    try {
+    await run(async () => {
       const r = editing ? await api.patch<{ message: string }>(`/goals/${editing.id}`, body)
         : await api.post<{ message: string }>('/goals', { ...body, user_id: Number(f.user_id) })
       toast(r.message)
       onSaved()
       onClose()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   return (

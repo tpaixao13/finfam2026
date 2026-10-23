@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Badge, Button, ConfirmButton, ErrorBox, Field, Input, Modal, PageHeader, Panel, Select, Spinner } from '../../components/ui'
+import { Badge, Button, ConfirmButton, ErrorBox, Field, Input, Modal, PageHeader, Panel, Select, Spinner, Table } from '../../components/ui'
 import { api, tokens } from '../../lib/api'
 import { dateBR } from '../../lib/format'
 import { useApi } from '../../lib/hooks'
@@ -75,8 +75,7 @@ export function AdminPage() {
               {COUNT_LABELS.map(([k, label]) => <div key={k}><dt>{label}</dt><dd>{d.counts[k]}</dd></div>)}
             </dl>
             <Panel flush>
-              <div className="table-wrap">
-                <table className="table">
+              <Table>
                   <thead><tr><th>Família</th><th>Pessoas</th><th>Plano</th><th>Validade</th><th>Ações</th></tr></thead>
                   <tbody>
                     {d.tenants.map((t) => (
@@ -106,8 +105,7 @@ export function AdminPage() {
                         </td>
                       </tr>))}
                   </tbody>
-                </table>
-              </div>
+                </Table>
             </Panel>
           </>
         )}

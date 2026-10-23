@@ -3,7 +3,7 @@ import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton
   PageHeader, Panel, Segmented, Select, Spinner } from '../components/ui'
 import { api } from '../lib/api'
 import { dateBR, parseMoney } from '../lib/format'
-import { useApi, usePeriod } from '../lib/hooks'
+import { useApi, useFormState, usePeriod } from '../lib/hooks'
 import { useAction, useSession } from '../lib/session'
 import type { Income } from '../lib/types'
 
@@ -25,28 +25,18 @@ function IncomeForm({ open, onClose, editing, month, year, onSaved }:
   const { me, meta, toast } = useSession()
   const blank: FormState = { user_id: String(me?.user.id ?? ''), amount: '', company: '', income_type: 'fixa', recurring: false,
     recurring_months: '12', payment_day_type: '', payment_day: '', received: false, update_forward: false }
-  const [f, setF] = useState<FormState>(blank)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [lastOpen, setLastOpen] = useState(false)
-  if (open !== lastOpen) {
-    setLastOpen(open)
-    if (open) {
-      setError(null)
-      setF(editing ? { ...blank, user_id: String(editing.user_id), amount: String(editing.amount).replace('.', ','),
-        company: editing.company ?? '', income_type: editing.income_type, payment_day_type: editing.payment_day_type ?? '',
-        payment_day: editing.payment_day ? String(editing.payment_day) : '', received: editing.received } : blank)
-    }
-  }
-  const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((s) => ({ ...s, [k]: v }))
+  const { f, set, busy, error, setError, run } = useFormState<FormState>(open, () => editing
+    ? { ...blank, user_id: String(editing.user_id), amount: String(editing.amount).replace('.', ','),
+      company: editing.company ?? '', income_type: editing.income_type, payment_day_type: editing.payment_day_type ?? '',
+      payment_day: editing.payment_day ? String(editing.payment_day) : '', received: editing.received }
+    : blank)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     const amount = parseMoney(f.amount)
     if (!Number.isFinite(amount) || amount <= 0) { setError('Informe um valor maior que zero.'); return }
     const payDay = f.payment_day_type ? { payment_day_type: f.payment_day_type, payment_day: Number(f.payment_day) || null } : { payment_day_type: null }
-    setBusy(true)
-    try {
+    await run(async () => {
       const r = editing
         ? await api.put<{ message: string }>(`/incomes/${editing.id}`, { amount: amount.toFixed(2), company: f.company || null, update_forward: f.update_forward, ...payDay })
         : await api.post<{ message: string }>('/incomes', {
@@ -55,11 +45,7 @@ function IncomeForm({ open, onClose, editing, month, year, onSaved }:
       toast(r.message)
       onSaved()
       onClose()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   return (
@@ -123,7 +109,9 @@ function IncomeRows({ items, onChange, onEdit }: { items: Income[]; onChange: ()
             <span className="tx-meta">{s.user_name}{s.expected_date ? ` · previsto para ${dateBR(s.expected_date)}` : ''}</span>
           </div>
           <Money value={s.amount} tone="income" className="tx-amount" />
-          <button className="tx-status" onClick={() => act(() => api.post<{ message: string }>(`/incomes/${s.id}/toggle-received`), refresh)}>
+          <button className="tx-status" onClick={() => act(() => api.post<{ message: string }>(`/incomes/${s.id}/toggle-received`), refresh)}
+            title={s.received ? 'Marcar como a receber' : 'Marcar como recebida'}
+            aria-label={`${s.received ? 'Recebida' : 'A receber'} — ${s.received ? 'marcar como a receber' : 'marcar como recebida'}`}>
             <Badge tone={s.received ? 'success' : 'warning'}>{s.received ? 'Recebida' : 'A receber'}</Badge>
           </button>
           <span className="tx-actions">

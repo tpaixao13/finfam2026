@@ -3,15 +3,17 @@ import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 
+from app.core import ratelimit
 from app.core.config import settings
 from app.core.types import Email, utcnow
 from app.core.db import db, get_or_404
-from app.core.deps import Ctx, get_ctx, get_ctx_allow_expired, get_period, Period
-from app.core.security import create_access_token, new_api_token
+from app.core.deps import (Ctx, Period, get_ctx, get_ctx_allow_expired, get_ctx_session,
+                           get_ctx_session_allow_expired, get_period)
+from app.core.security import create_access_token, new_api_token, session_fingerprint, verify_password
 from app.models import ApiToken, Tenant, User
 from app.services.alert_service import quick_alert_count
 from app.services.serializers import iso, tenant_out, user_out
@@ -57,16 +59,18 @@ class TokenIn(BaseModel):
 
 
 def _session_payload(user: User, tenant: Tenant | None) -> dict:
-    token, expires = create_access_token(user.id)
+    token, expires = create_access_token(user.id, fingerprint=session_fingerprint(user.password_hash))
     return {'access_token': token, 'token_type': 'bearer', 'expires_at': expires.isoformat(),
             'user': user_out(user), 'tenant': tenant_out(tenant)}
 
 
 @router.post('/auth/login', summary='Login (retorna JWT)')
-def login(body: LoginIn):
+def login(body: LoginIn, request: Request):
+    ratelimit.check(request, 'login', body.email)
     user = User.query.filter_by(email=body.email.strip().lower()).first()
-    if not user or not user.check_password(body.password):
+    if not (user.check_password(body.password) if user else verify_password(None, body.password)):
         raise HTTPException(status_code=401, detail='E-mail ou senha incorretos.')
+    ratelimit.reset(request, 'login', body.email)
     if user.is_admin:
         raise HTTPException(status_code=403, detail='Esta conta é de administrador. Acesse em /admin.')
     tenant = db.session.get(Tenant, user.tenant_id) if user.tenant_id else None
@@ -74,7 +78,8 @@ def login(body: LoginIn):
 
 
 @router.post('/auth/register', status_code=201, summary='Cria uma família (trial) e o primeiro usuário')
-def register(body: RegisterIn):
+def register(body: RegisterIn, request: Request):
+    ratelimit.check(request, 'register', limit=5, window=3600)
     email = body.email.strip().lower()
     if User.query.filter_by(email=email).first():
         raise HTTPException(status_code=409, detail='E-mail já cadastrado. Faça login ou use outro e-mail.')
@@ -103,12 +108,13 @@ def me(ctx: Ctx = Depends(get_ctx_allow_expired), period: Period = Depends(get_p
 
 
 @router.post('/auth/change-password', summary='Troca a senha do usuário logado')
-def change_password(body: ChangePasswordIn, ctx: Ctx = Depends(get_ctx_allow_expired)):
+def change_password(body: ChangePasswordIn, ctx: Ctx = Depends(get_ctx_session_allow_expired)):
     if not ctx.user.check_password(body.current_password):
         raise HTTPException(status_code=422, detail='Senha atual incorreta.')
     ctx.user.set_password(body.new_password)
     db.session.commit()
-    return {'message': 'Senha alterada com sucesso!'}
+    # as sessões antigas deixam de valer; devolve uma nova para quem trocou a senha
+    return {'message': 'Senha alterada com sucesso!', **_session_payload(ctx.user, ctx.tenant)}
 
 
 @router.post('/auth/avatar', summary='Envia foto de perfil (jpg, png, gif, webp — até 2 MB)')
@@ -121,9 +127,9 @@ async def upload_avatar(file: UploadFile = File(...), ctx: Ctx = Depends(get_ctx
         raise HTTPException(status_code=413, detail='Imagem maior que 2 MB.')
     folder = settings.upload_dir / 'avatars'
     folder.mkdir(parents=True, exist_ok=True)
-    for old in folder.glob(f'user_{ctx.user.id}.*'):
-        old.unlink(missing_ok=True)
-    filename = f'user_{ctx.user.id}{ext}'
+    if ctx.user.avatar:
+        (folder / Path(ctx.user.avatar).name).unlink(missing_ok=True)
+    filename = f'{secrets.token_hex(12)}{ext}'  # nome imprevisível (não dá para enumerar)
     (folder / filename).write_bytes(content)
     ctx.user.avatar = filename
     db.session.commit()
@@ -146,14 +152,14 @@ def _token_out(t: ApiToken) -> dict:
 
 
 @router.get('/auth/tokens', summary='Lista os tokens de API do usuário')
-def list_tokens(ctx: Ctx = Depends(get_ctx)):
+def list_tokens(ctx: Ctx = Depends(get_ctx_session)):
     tokens = ApiToken.query.filter_by(user_id=ctx.user.id).order_by(ApiToken.created_at.desc()).all()
     return [_token_out(t) for t in tokens]
 
 
 @router.post('/auth/tokens', status_code=201,
              summary='Cria um token de API (o valor só é exibido nesta resposta)')
-def create_token(body: TokenIn, ctx: Ctx = Depends(get_ctx)):
+def create_token(body: TokenIn, ctx: Ctx = Depends(get_ctx_session)):
     if ctx.via_api_token:
         raise HTTPException(status_code=403, detail='Tokens de API não podem criar outros tokens.')
     raw, digest, prefix = new_api_token()
@@ -164,7 +170,7 @@ def create_token(body: TokenIn, ctx: Ctx = Depends(get_ctx)):
 
 
 @router.delete('/auth/tokens/{token_id}', summary='Revoga um token de API')
-def revoke_token(token_id: int, ctx: Ctx = Depends(get_ctx)):
+def revoke_token(token_id: int, ctx: Ctx = Depends(get_ctx_session)):
     token = get_or_404(ApiToken.query.filter_by(id=token_id, user_id=ctx.user.id))
     token.revoked = True
     db.session.commit()

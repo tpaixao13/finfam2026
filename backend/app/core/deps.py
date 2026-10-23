@@ -7,7 +7,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.types import utcnow
 from app.core.db import db
-from app.core.security import API_TOKEN_PREFIX, decode_access_token, hash_api_token
+import hmac
+
+from app.core.security import API_TOKEN_PREFIX, decode_access_token, hash_api_token, session_fingerprint
 from app.models import ApiToken, Tenant, User
 
 bearer = HTTPBearer(auto_error=False, description='JWT do login ou token de API (ffk_...)')
@@ -63,8 +65,9 @@ def _resolve(creds: HTTPAuthorizationCredentials | None) -> tuple[User, str]:
     if not payload:
         raise _unauthorized('Sessão expirada. Faça login novamente.')
     user = db.session.get(User, int(payload.get('sub', 0)))
-    if user is None:
-        raise _unauthorized()
+    if user is None or not hmac.compare_digest(str(payload.get('fp', '')),
+                                               session_fingerprint(user.password_hash)):
+        raise _unauthorized('Sessão expirada. Faça login novamente.')
     return user, payload.get('typ', 'user')
 
 
@@ -99,6 +102,26 @@ def get_ctx(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> Ctx
 
 def get_ctx_allow_expired(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> Ctx:
     return _build_ctx(creds, allow_expired=True)
+
+
+def _interactive(ctx: Ctx) -> Ctx:
+    if ctx.via_api_token:
+        raise HTTPException(status_code=403, detail='Ação não permitida com token de API.')
+    return ctx
+
+
+def get_ctx_session(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> Ctx:
+    """Ações de conta e credenciais: só com o login do site, nunca com token de API."""
+    return _interactive(_build_ctx(creds, allow_expired=False))
+
+
+def get_ctx_session_allow_expired(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> Ctx:
+    return _interactive(_build_ctx(creds, allow_expired=True))
+
+
+def is_owner(ctx: Ctx) -> bool:
+    """Dono da família = primeiro membro cadastrado (menor id)."""
+    return bool(ctx.members) and ctx.user.id == min(u.id for u in ctx.members)
 
 
 def get_admin(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> User:

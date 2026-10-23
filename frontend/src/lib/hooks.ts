@@ -22,6 +22,28 @@ export function useApi<T>(loader: () => Promise<T>, deps: unknown[]) {
   return { data, error, loading, reload: load, setData }
 }
 
+/**
+ * Estado de formulário em modal: volta ao `initial()` a cada abertura (limpando o erro)
+ * e `run` controla envio — `busy` enquanto roda, mensagem da exceção em `error`.
+ */
+export function useFormState<S>(open: boolean, initial: () => S) {
+  const [f, setF] = useState<S>(initial)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [lastOpen, setLastOpen] = useState(false)
+  if (open !== lastOpen) {
+    setLastOpen(open)
+    if (open) { setF(initial()); setError(null) }
+  }
+  const set = useCallback(<K extends keyof S>(k: K, v: S[K]) => setF((s) => ({ ...s, [k]: v })), [])
+  const run = async (task: () => Promise<void>) => {
+    setBusy(true)
+    setError(null)
+    try { await task() } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+  return { f, setF, set, busy, error, setError, run }
+}
+
 /** Mês/ano selecionados, guardados na URL (?month=&year=). */
 export function usePeriod() {
   const [params, set] = useSearchParams()

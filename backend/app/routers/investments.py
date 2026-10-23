@@ -10,7 +10,7 @@ from app.core.db import db, get_or_404
 from app.core.deps import Ctx, get_ctx
 from app.models import Investment, User
 from app.services import market
-from app.services.finance import INVESTMENT_TYPES, month_label, month_offset
+from app.services.finance import CRYPTO_COINS, INVESTMENT_TYPES, month_label, month_offset
 from app.services.investment_tax import daily_yield, net_of_taxes
 from app.services.serializers import investment_out, money
 
@@ -36,6 +36,8 @@ class InvestmentIn(BaseModel):
             raise ValueError('Tipo de investimento inválido.')
         if self.investment_type == 'Criptomoedas' and not self.crypto_coin:
             raise ValueError('Selecione a criptomoeda.')
+        if self.crypto_coin and self.crypto_coin not in {c for c, _ in CRYPTO_COINS}:
+            raise ValueError('Criptomoeda não suportada.')
         return self
 
 
@@ -123,7 +125,8 @@ def selic(_: Ctx = Depends(get_ctx)):
 
 @router.get('/market/crypto-price', tags=['market'], summary='Cotação em BRL (CoinGecko)')
 def crypto_price(coins: str = Query('bitcoin', max_length=200), _: Ctx = Depends(get_ctx)):
-    if not _COINS_RE.match(coins):
+    allowed = {c for c, _ in CRYPTO_COINS}
+    if not _COINS_RE.match(coins) or not set(coins.split(',')) <= allowed:
         raise HTTPException(status_code=422, detail='Moeda inválida.')
     data = market.crypto_prices(coins)
     if not data:
@@ -134,6 +137,8 @@ def crypto_price(coins: str = Query('bitcoin', max_length=200), _: Ctx = Depends
 @router.get('/market/crypto-history', tags=['market'], summary='Histórico de preço em BRL')
 def crypto_history(coin: str = Query('bitcoin', pattern=r'^[a-z0-9-]+$'), days: int = Query(30, ge=1, le=365),
                    _: Ctx = Depends(get_ctx)):
+    if coin not in {c for c, _ in CRYPTO_COINS}:
+        raise HTTPException(status_code=422, detail='Moeda inválida.')
     data = market.crypto_history(coin, days)
     if not data or 'prices' not in data:
         raise HTTPException(status_code=503, detail='Histórico indisponível.')

@@ -17,6 +17,7 @@ Cada alerta tem:
 """
 
 import hashlib
+import html
 from datetime import datetime, date as _date, timedelta
 from sqlalchemy import func, or_, and_
 from urllib.parse import urlencode
@@ -323,6 +324,6 @@ def build_alert_telegram_text(alerts: list[dict]) -> str | None:
     icons = {'danger': '🔴', 'warning': '🟡', 'info': 'ℹ️'}
     for a in critical:
         ico = icons.get(a['type'], '•')
-        lines.append(f"{ico} <b>{a['title']}</b>")
-        lines.append(f"   {a['message']}\n")
+        lines.append(f"{ico} <b>{html.escape(a['title'], quote=False)}</b>")
+        lines.append(f"   {html.escape(a['message'], quote=False)}\n")
     return '\n'.join(lines)

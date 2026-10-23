@@ -69,11 +69,20 @@ def create_app() -> FastAPI:
         title='FinFam API', version=VERSION, lifespan=lifespan,
         description='API do FinFam 2026 — controle financeiro familiar. '
                     'Autentique com `Authorization: Bearer <JWT do login>` ou `Bearer ffk_<token de API>`.',
-        docs_url='/api/docs', redoc_url=None, openapi_url='/api/openapi.json',
+        docs_url=None if settings.is_production and not settings.extra.get('docs') else '/api/docs',
+        redoc_url=None, openapi_url=None if settings.is_production else '/api/openapi.json',
     )
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=False,
                        allow_methods=['*'], allow_headers=['*'], expose_headers=['Content-Disposition'])
     app.add_middleware(DBSessionMiddleware)
+
+    @app.middleware('http')
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        response.headers.setdefault('X-Frame-Options', 'DENY')
+        response.headers.setdefault('Referrer-Policy', 'same-origin')
+        return response
     app.add_exception_handler(RequestValidationError, _validation_handler)
 
     prefix = settings.api_prefix

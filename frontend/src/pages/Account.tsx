@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { Avatar, Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Modal, PageHeader,
-  Panel, Select, Spinner } from '../components/ui'
-import { api } from '../lib/api'
+  Panel, Select, Spinner, Table } from '../components/ui'
+import { api, tokens as authTokens } from '../lib/api'
 import { dateBR } from '../lib/format'
 import { useApi } from '../lib/hooks'
 import { useAction, useSession } from '../lib/session'
 import type { Tenant, User } from '../lib/types'
 
-interface FamilyData { tenant: Tenant; members: User[]; member_count: number; member_limit: number }
+interface FamilyData { tenant: Tenant; members: User[]; member_count: number; member_limit: number; owner_id: number | null }
 
 export function FamilyPage() {
   const { me, refreshMe, toast } = useSession()
@@ -15,14 +15,19 @@ export function FamilyPage() {
   const data = useApi(() => api.get<FamilyData>('/family'), [])
   const [name, setName] = useState<string | null>(null)
   const [modal, setModal] = useState<{ open: boolean; member: User | null }>({ open: false, member: null })
-  const [f, setF] = useState({ name: '', email: '', password: '', confirm_password: '' })
+  const [f, setF] = useState({ name: '', email: '', password: '', confirm_password: '', current_password: '' })
   const [error, setError] = useState<string | null>(null)
   const d = data.data
   const full = d ? d.member_count >= d.member_limit : false
+  const iAmOwner = Boolean(d && me && d.owner_id === me.user.id)
+  const editingSelf = Boolean(modal.member && modal.member.id === me?.user.id)
+  // regras da API: só o dono troca e-mail/senha de outra pessoa; a própria troca pede a senha atual
+  const canChangeCredentials = !modal.member || editingSelf || iAmOwner
+  const needsCurrent = editingSelf && (Boolean(f.password) || f.email.trim().toLowerCase() !== (modal.member?.email ?? ''))
 
   const openMember = (member: User | null) => {
     setError(null)
-    setF({ name: member?.name ?? '', email: member?.email ?? '', password: '', confirm_password: '' })
+    setF({ name: member?.name ?? '', email: member?.email ?? '', password: '', confirm_password: '', current_password: '' })
     setModal({ open: true, member })
   }
 
@@ -31,8 +36,10 @@ export function FamilyPage() {
     try {
       const r = modal.member
         ? await api.put<{ message: string }>(`/family/members/${modal.member.id}`, { name: f.name, email: f.email,
-          new_password: f.password || null, confirm_password: f.confirm_password || null })
-        : await api.post<{ message: string }>('/family/members', f)
+          new_password: f.password || null, confirm_password: f.confirm_password || null,
+          current_password: needsCurrent ? f.current_password : null })
+        : await api.post<{ message: string }>('/family/members', { name: f.name, email: f.email, password: f.password,
+          confirm_password: f.confirm_password })
       toast(r.message)
       setModal({ open: false, member: null })
       data.reload()
@@ -62,7 +69,7 @@ export function FamilyPage() {
                   <div><b>{m.name}</b>{m.id === me?.user.id && <Badge tone="info">você</Badge>}<small className="muted block">{m.email}</small></div>
                   <span className="actions">
                     <IconButton icon="pencil" label="Editar" onClick={() => openMember(m)} />
-                    {m.id !== me?.user.id && <ConfirmButton label="Remover" confirmLabel="Remover e apagar dados"
+                    {m.id !== me?.user.id && iAmOwner && <ConfirmButton label="Remover" confirmLabel="Remover e apagar dados"
                       onConfirm={() => act(() => api.del<{ message: string }>(`/family/members/${m.id}`), () => { data.reload(); refreshMe() })} />}
                   </span>
                 </li>
@@ -75,11 +82,20 @@ export function FamilyPage() {
         footer={<><Button variant="ghost" onClick={() => setModal({ open: false, member: null })}>Cancelar</Button><Button type="submit" form="member-form">Salvar</Button></>}>
         <form id="member-form" className="stack" onSubmit={saveMember}>
           <Field label="Nome"><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required minLength={2} maxLength={30} /></Field>
-          <Field label="E-mail (login)"><Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required /></Field>
-          <Field label={modal.member ? 'Nova senha (opcional)' : 'Senha'} hint="Mínimo de 8 caracteres">
-            <Input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required={!modal.member} minLength={8} />
+          <Field label="E-mail (login)" hint={canChangeCredentials ? undefined : 'Só quem criou a família altera o e-mail e a senha de outra pessoa.'}>
+            <Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required disabled={!canChangeCredentials} />
           </Field>
-          <Field label="Confirmar senha"><Input type="password" autoComplete="new-password" value={f.confirm_password} onChange={(e) => setF({ ...f, confirm_password: e.target.value })} required={!modal.member || Boolean(f.password)} /></Field>
+          {canChangeCredentials && <>
+            <Field label={modal.member ? 'Nova senha (opcional)' : 'Senha'} hint="Mínimo de 8 caracteres">
+              <Input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required={!modal.member} minLength={8} />
+            </Field>
+            <Field label="Confirmar senha"><Input type="password" autoComplete="new-password" value={f.confirm_password} onChange={(e) => setF({ ...f, confirm_password: e.target.value })} required={!modal.member || Boolean(f.password)} /></Field>
+          </>}
+          {needsCurrent && (
+            <Field label="Sua senha atual" hint="Necessária para trocar seu e-mail ou sua senha.">
+              <Input type="password" autoComplete="current-password" value={f.current_password} onChange={(e) => setF({ ...f, current_password: e.target.value })} required />
+            </Field>
+          )}
           {error && <p className="form-error" role="alert">{error}</p>}
         </form>
       </Modal>
@@ -128,7 +144,10 @@ export function SettingsPage() {
           </div>
         </Panel>
         <Panel title="Senha">
-          <form className="stack" onSubmit={(e) => { e.preventDefault(); act(() => api.post<{ message: string }>('/auth/change-password', pwd), () => setPwd({ current_password: '', new_password: '', confirm_password: '' })) }}>
+          <form className="stack" onSubmit={(e) => { e.preventDefault(); act(() => api.post<{ message: string; access_token: string }>('/auth/change-password', pwd), (r) => {
+              authTokens.setUser(r.access_token)  // a sessão antiga deixa de valer ao trocar a senha
+              setPwd({ current_password: '', new_password: '', confirm_password: '' })
+            }) }}>
             <Field label="Senha atual"><Input type="password" autoComplete="current-password" value={pwd.current_password} onChange={(e) => setPwd({ ...pwd, current_password: e.target.value })} required /></Field>
             <Field label="Nova senha" hint="Mínimo de 8 caracteres"><Input type="password" autoComplete="new-password" value={pwd.new_password} onChange={(e) => setPwd({ ...pwd, new_password: e.target.value })} required minLength={8} /></Field>
             <Field label="Confirmar nova senha"><Input type="password" autoComplete="new-password" value={pwd.confirm_password} onChange={(e) => setPwd({ ...pwd, confirm_password: e.target.value })} required /></Field>
@@ -150,7 +169,7 @@ export function SettingsPage() {
           </div>
         )}
         {tokens.data && tokens.data.length > 0 ? (
-          <table className="table">
+          <Table>
             <thead><tr><th>Nome</th><th>Início</th><th>Criado</th><th>Último uso</th><th /></tr></thead>
             <tbody>{tokens.data.map((t) => (
               <tr key={t.id} className={t.revoked ? 'row-off' : ''}>
@@ -158,7 +177,7 @@ export function SettingsPage() {
                 <td>{t.revoked ? <Badge>Revogado</Badge> : <ConfirmButton label="Revogar" confirmLabel="Revogar" onConfirm={() => act(() => api.del<{ message: string }>(`/auth/tokens/${t.id}`), tokens.reload)} />}</td>
               </tr>))}
             </tbody>
-          </table>
+          </Table>
         ) : tokens.data && <Empty icon="key" title="Nenhum token criado." />}
       </Panel>
     </div>

@@ -55,6 +55,15 @@ _ALTERS = [
     'ALTER TABLE credit_cards ADD COLUMN account_id INTEGER REFERENCES credit_accounts(id)',
     'ALTER TABLE expenses ADD COLUMN purchase_month INTEGER',
     'ALTER TABLE expenses ADD COLUMN purchase_year INTEGER',
+    # limpeza de dados órfãos (usuário/família já excluídos) — não podem ser herdados
+    'DELETE FROM goals WHERE user_id NOT IN (SELECT id FROM users)',
+    'DELETE FROM category_rules WHERE tenant_id NOT IN (SELECT id FROM tenants)',
+    'UPDATE credit_cards SET account_id = NULL WHERE account_id IN '
+    '(SELECT id FROM credit_accounts WHERE user_id NOT IN (SELECT id FROM users))',
+    'DELETE FROM credit_accounts WHERE user_id NOT IN (SELECT id FROM users)',
+    'UPDATE salaries SET salary_group_id = NULL WHERE salary_group_id IN '
+    '(SELECT id FROM salary_groups WHERE user_id NOT IN (SELECT id FROM users))',
+    'DELETE FROM salary_groups WHERE user_id NOT IN (SELECT id FROM users)',
 ]
 
 

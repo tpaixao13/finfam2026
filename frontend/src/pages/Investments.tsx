@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { LineChart } from '../components/charts'
-import { Button, ConfirmButton, Empty, ErrorBox, Field, Input, Modal, Money, PageHeader, Panel, Select, Spinner } from '../components/ui'
+import { Button, ConfirmButton, Empty, ErrorBox, Field, Input, Modal, Money, PageHeader, Panel, Select, Spinner, Table } from '../components/ui'
 import { api } from '../lib/api'
 import { brl, MONTHS, MONTHS_SHORT, parseMoney, pct } from '../lib/format'
-import { useApi } from '../lib/hooks'
+import { useApi, useFormState } from '../lib/hooks'
 import { useAction, useSession } from '../lib/session'
 import type { Investment } from '../lib/types'
 
@@ -19,31 +19,22 @@ function InvestmentForm({ open, onClose, onSaved, suggestions }:
   const now = new Date()
   const blank = { user_id: String(me?.user.id ?? ''), investment_type: '', description: '', amount: '', annual_rate: '',
     crypto_coin: '', month: String(now.getMonth() + 1), year: String(now.getFullYear()) }
-  const [f, setF] = useState(blank)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const set = (k: keyof typeof blank, v: string) => setF((s) => ({ ...s, [k]: v }))
+  const { f, setF, set, busy, error, setError, run } = useFormState(open, () => blank)
   const isCrypto = f.investment_type === 'Criptomoedas'
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     const amount = parseMoney(f.amount)
     if (!Number.isFinite(amount) || amount <= 0) { setError('Informe um valor maior que zero.'); return }
-    setBusy(true)
-    try {
+    await run(async () => {
       const r = await api.post<{ message: string }>('/investments', {
         user_id: Number(f.user_id), investment_type: f.investment_type, description: f.description || null,
         amount: amount.toFixed(2), annual_rate: isCrypto ? '0' : (parseMoney(f.annual_rate) || 0).toFixed(2),
         crypto_coin: isCrypto ? f.crypto_coin : null, month: Number(f.month), year: Number(f.year) })
       toast(r.message)
-      setF(blank)
       onSaved()
       onClose()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   return (
@@ -102,7 +93,7 @@ export function InvestmentsPage() {
           )}
           <Panel title="Renda fixa" flush>
             {d.fixed.length === 0 ? <Empty icon="piggy-bank" title="Nenhum investimento de renda fixa." /> : (
-              <table className="table">
+              <Table>
                 <thead><tr><th>Investimento</th><th>Pessoa</th><th>Aplicado em</th><th className="num">Taxa a.a.</th><th className="num">Valor</th><th className="num">Rende por dia (líq.)</th><th /></tr></thead>
                 <tbody>
                   {d.fixed.map((i) => (
@@ -116,12 +107,12 @@ export function InvestmentsPage() {
                       <td><ConfirmButton label="Remover" confirmLabel="Remover" onConfirm={() => remove(i.id)} /></td>
                     </tr>))}
                 </tbody>
-              </table>
+              </Table>
             )}
           </Panel>
           {d.crypto.length > 0 && (
             <Panel title="Criptomoedas" flush>
-              <table className="table">
+              <Table>
                 <thead><tr><th>Moeda</th><th>Pessoa</th><th className="num">Preço de compra</th><th className="num">Valor aplicado</th><th /></tr></thead>
                 <tbody>{d.crypto.map((i) => (
                   <tr key={i.id}>
@@ -132,7 +123,7 @@ export function InvestmentsPage() {
                     <td><ConfirmButton label="Remover" confirmLabel="Remover" onConfirm={() => remove(i.id)} /></td>
                   </tr>))}
                 </tbody>
-              </table>
+              </Table>
             </Panel>
           )}
         </>

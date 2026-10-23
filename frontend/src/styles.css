@@ -86,7 +86,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   border-bottom: 1px solid var(--line);
 }
 .topbar-spacer { flex: 1; }
-.menu-btn { display: none; }
+.icon-btn.menu-btn { display: none; }
 .topbar-bell { position: relative; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; color: var(--ink-2); font-size: 1.15rem; }
 .topbar-bell:hover { background: var(--surface); }
 .topbar-bell span { position: absolute; top: 2px; right: 0; background: var(--expense); color: #fff; font-size: .68rem; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px; display: grid; place-items: center; padding: 0 4px; }
@@ -260,7 +260,7 @@ a.insight:hover { background: #e8edf1; }
 .tx-date { font-size: .82rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tx-amount { text-align: right; min-width: 6.5rem; }
 .tx-status { background: none; border: 0; padding: 0; cursor: pointer; }
-.tx-actions { display: inline-flex; align-items: center; gap: .1rem; }
+.tx-actions, .row-actions { display: inline-flex; align-items: center; gap: .1rem; }
 .tx-vencida .tx-date { color: var(--expense); font-weight: 600; }
 .tx-pago .tx-desc, .tx-pago .tx-amount { color: var(--ink-3); }
 
@@ -274,6 +274,7 @@ a.insight:hover { background: #e8edf1; }
 .bulk-bar { position: sticky; top: 66px; z-index: 5; display: flex; align-items: center; gap: .75rem; background: var(--ink); color: #fff; padding: .55rem .9rem; border-radius: var(--radius); flex-wrap: wrap; }
 .bulk-bar span { font-weight: 600; margin-right: auto; }
 .filters .panel-body { padding-top: 1rem; }
+.filters-toggle { display: none; }
 .filter-row { display: grid; grid-template-columns: 2fr repeat(7, minmax(110px, 1fr)); gap: .75rem; }
 .pager { display: flex; align-items: center; justify-content: center; gap: .75rem; font-size: .9rem; color: var(--ink-2); }
 .bills-title { display: inline-flex; gap: .6rem; align-items: baseline; }
@@ -418,11 +419,12 @@ a.insight:hover { background: #e8edf1; }
   .grid-invoice { grid-template-columns: 1fr; }
 }
 @media (max-width: 860px) {
-  .sidebar { transform: translateX(-100%); }
-  .nav-open .sidebar { transform: none; }
+  /* Fechado, o menu também sai da ordem de foco do teclado (visibility), não só da tela. */
+  .sidebar { transform: translateX(-100%); visibility: hidden; transition: transform .2s ease, visibility .2s; }
+  .nav-open .sidebar { transform: none; visibility: visible; }
   .nav-open .scrim { display: block; position: fixed; inset: 0; background: rgba(19, 41, 61, .4); z-index: 35; }
   .main { margin-left: 0; }
-  .menu-btn { display: inline-grid; }
+  .icon-btn.menu-btn { display: inline-grid; }
   .topbar { padding: 0 1rem; }
   .content { padding: 1rem; }
   .grid-2, .grid-dash { grid-template-columns: 1fr; }
@@ -447,13 +449,19 @@ a.insight:hover { background: #e8edf1; }
   .tx-list:not(:has(.tx-check)) .tx { grid-template-columns: minmax(0, 1fr) auto; }
   .tx-status { grid-column: 1 / -1; justify-self: start; }
   .tx:not(:has(.tx-check)) .tx-status { grid-column: 1; }
+  /* Com seleção: situação e ações dividem a segunda linha (antes cada uma ocupava uma linha). */
+  .tx:has(.tx-check) .tx-status { grid-column: 2; }
+  .tx:has(.tx-check) .tx-actions { grid-column: 3; }
+  .filter-row:not(.show-all) .field:nth-child(n+4) { display: none; }
+  .filters-toggle { display: inline-block; margin-top: .85rem; }
   .hero { padding: 1.1rem; }
   .donut { grid-template-columns: 1fr; justify-items: center; }
   .donut svg { max-width: 200px; }
   .donut-legend { width: 100%; }
   .table th, .table td { padding: .5rem .7rem; }
   h1 { font-size: 1.35rem; }
-  .topbar .btn span { display: none; }
+  /* Só o ícone aparece, mas o texto continua sendo o nome acessível do botão. */
+  .topbar .btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

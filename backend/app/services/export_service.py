@@ -7,6 +7,14 @@ HEADERS = ['Pessoa', 'Dia', 'Mês', 'Ano', 'Descrição', 'Categoria',
            'Forma de Pagamento', 'Banco', 'Valor (R$)', 'Parcela', 'Recorrente']
 
 
+_FORMULA_START = ('=', '+', '-', '@', '\t', '\r')
+
+
+def _cell_safe(value):
+    """Evita que um texto vire fórmula no Excel (descrições vêm de extratos de terceiros)."""
+    return "'" + value if isinstance(value, str) and value.startswith(_FORMULA_START) else value
+
+
 def expense_rows(expenses) -> list[list]:
     rows = []
     for e in expenses:
@@ -36,7 +44,7 @@ def to_xlsx(rows: list[list]) -> bytes:
         cell.fill = PatternFill('solid', fgColor='0D6EFD')
         cell.alignment = Alignment(horizontal='center')
     for row in rows:
-        display = list(row)
+        display = [_cell_safe(v) for v in row]
         display[8] = brl(row[8])
         ws.append(display)
     for i, width in enumerate([14, 6, 6, 7, 42, 16, 20, 16, 16, 13, 11], 1):

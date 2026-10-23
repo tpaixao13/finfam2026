@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.db import db
-from app.core.deps import Ctx, get_ctx, get_ctx_allow_expired
+from app.core.deps import Ctx, get_ctx, get_ctx_allow_expired, get_ctx_session
 from app.core.security import decrypt_field, encrypt_field
 from app.services import finance as fin
 from app.services.serializers import tenant_out
@@ -53,7 +53,7 @@ def get_telegram(ctx: Ctx = Depends(get_ctx)):
 
 
 @router.put('/settings/telegram', summary='Salva a configuração do Telegram')
-def save_telegram(body: TelegramIn, ctx: Ctx = Depends(get_ctx)):
+def save_telegram(body: TelegramIn, ctx: Ctx = Depends(get_ctx_session)):
     tenant = _tenant(ctx)
     tenant.telegram_enabled = body.enabled
     if body.token and body.token.strip():

@@ -11,6 +11,8 @@ import type { Expense } from '../lib/types'
 interface ListResponse { items: Expense[]; page: number; pages: number; total: number; total_amount: number }
 interface Options { categories: string[]; banks: string[]; payment_methods: string[] }
 
+/** Filtros que o celular esconde atrás de "Mais filtros" (busca, mês e ano ficam sempre visíveis). */
+const EXTRA_FILTERS = ['user_id', 'category', 'payment_method', 'bank', 'paid'] as const
 const FILTER_KEYS = ['month', 'year', 'user_id', 'category', 'payment_method', 'bank', 'paid', 'search', 'page'] as const
 
 export function ExpensesPage() {
@@ -24,6 +26,8 @@ export function ExpensesPage() {
   const year = q.year ?? String(now.getFullYear())
   const [search, setSearch] = useState(q.search ?? '')
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [allFilters, setAllFilters] = useState(false)
+  const extraActive = EXTRA_FILTERS.filter((k) => q[k]).length
 
   const key = JSON.stringify(q)
   const list = useApi(() => api.get<ListResponse>('/expenses', { ...q, month, year, per_page: 30 }), [key, dataVersion])
@@ -51,7 +55,7 @@ export function ExpensesPage() {
         </>} />
 
       <Panel className="filters">
-        <div className="filter-row">
+        <div id="expense-filters" className={`filter-row ${allFilters ? 'show-all' : ''}`}>
           <Field label="Buscar"><Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Descrição" /></Field>
           <Field label="Mês">
             <Select value={month} onChange={(e) => setFilter('month', e.target.value)}
@@ -76,6 +80,10 @@ export function ExpensesPage() {
               options={[{ value: 'pendente', label: 'Pendentes' }, { value: 'pago', label: 'Pagas' }]} />
           </Field>
         </div>
+        <button type="button" className="link-btn filters-toggle" aria-expanded={allFilters} aria-controls="expense-filters"
+          onClick={() => setAllFilters((v) => !v)}>
+          {allFilters ? 'Menos filtros' : `Mais filtros${extraActive ? ` (${extraActive} ativo${extraActive > 1 ? 's' : ''})` : ''}`}
+        </button>
       </Panel>
 
       {selected.size > 0 && (

@@ -55,6 +55,7 @@ PLAN_LABELS = {'trial': 'Trial', 'mensal': 'Mensal', 'anual': 'Anual', 'vitalici
 
 class Tenant(Base):
     __tablename__ = 'tenants'
+    __table_args__ = {'sqlite_autoincrement': True}
 
     id = Column(Integer, primary_key=True)
     name = Column(Text, nullable=False)
@@ -71,6 +72,7 @@ class Tenant(Base):
     extra_members = Column(Integer, default=0, nullable=False)
 
     users = relationship('User', backref='tenant', lazy='dynamic', cascade='all, delete-orphan')
+    category_rules = relationship('CategoryRule', lazy='dynamic', cascade='all, delete-orphan')
 
     @property
     def trial_active(self) -> bool:
@@ -93,6 +95,7 @@ class Tenant(Base):
 
 class User(Base):
     __tablename__ = 'users'
+    __table_args__ = {'sqlite_autoincrement': True}
 
     id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey('tenants.id'), nullable=True)
@@ -113,6 +116,10 @@ class User(Base):
     credit_cards = relationship('CreditCard', backref='owner', lazy='dynamic',
                                 cascade='all, delete-orphan', foreign_keys='CreditCard.user_id')
     api_tokens = relationship('ApiToken', backref='user', lazy='dynamic', cascade='all, delete-orphan')
+    # sem backref: só garantem que nada do usuário fique órfão ao excluí-lo
+    goals = relationship('Goal', lazy='dynamic', cascade='all, delete-orphan')
+    credit_accounts = relationship('CreditAccount', lazy='dynamic', cascade='all, delete-orphan')
+    salary_groups = relationship('SalaryGroup', lazy='dynamic', cascade='all, delete-orphan')
 
     def set_password(self, password: str) -> None:
         self.password_hash = hash_password(password)

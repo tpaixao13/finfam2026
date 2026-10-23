@@ -43,6 +43,8 @@ def fetch_json(url: str, cache_key: str, ttl: int = 3600):
         return None
     for key in [k for k, v in _cache.items() if now - v['ts'] > 7200]:
         del _cache[key]
+    if len(_cache) >= 256:  # limite de memória
+        _cache.pop(next(iter(_cache)))
     _cache[cache_key] = {'data': data, 'ts': now}
     return data
 

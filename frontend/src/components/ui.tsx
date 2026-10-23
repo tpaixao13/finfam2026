@@ -208,6 +208,11 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
   )
 }
 
+/** Tabela com rolagem horizontal própria: nunca alarga a página no celular. */
+export function Table({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className="table-wrap"><table className={`table ${className}`}>{children}</table></div>
+}
+
 export function Panel({ title, actions, children, className = '', flush }:
   { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; flush?: boolean }) {
   return (
