@@ -84,15 +84,23 @@ def _post(url: str, headers: dict, body: dict) -> dict:
         with urllib.request.urlopen(req, timeout=TIMEOUT, context=_ssl_context()) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
-        raise AIError(_http_message(exc.code, exc.read().decode('utf-8', 'replace'))) from None
+        body_text = exc.read().decode('utf-8', 'replace')
+        log.warning('IA %s respondeu %s: %s', url.split('?')[0], exc.code, body_text[:300])
+        raise AIError(_http_message(exc.code, body_text)) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise AIError(f'Não consegui falar com o provedor de IA ({getattr(exc, "reason", exc)}).') from None
+        reason = getattr(exc, 'reason', exc)
+        log.warning('IA %s sem conexão: %s', url.split('?')[0], reason)
+        if 'CERTIFICATE' in str(reason).upper():
+            raise AIError('Certificado SSL não reconhecido pelo servidor. No Raspberry, defina '
+                          'INSECURE_EXTERNAL_SSL=1 no .env ou atualize os certificados (ca-certificates).') from None
+        raise AIError(f'Não consegui falar com o provedor de IA ({reason}).') from None
     except ValueError:
         raise AIError('O provedor de IA devolveu uma resposta inválida.') from None
 
 
 def _http_message(code: int, body: str) -> str:
-    if code in (401, 403):
+    invalid_key = any(t in body for t in ('API_KEY_INVALID', 'API key not valid', 'invalid_api_key', 'invalid x-api-key'))
+    if code in (401, 403) or invalid_key:
         return 'A chave de IA foi recusada pelo provedor. Confira a chave em Telegram e IA.'
     if code == 404:
         return 'Modelo de IA não encontrado. Confira o nome do modelo em Telegram e IA.'
