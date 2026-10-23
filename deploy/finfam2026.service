@@ -1,0 +1,17 @@
+# systemd — FinFam 2026 (API + site). Roda AO LADO do FinFam antigo:
+# nome de serviço, pasta e porta próprios.
+# Instalar: sudo cp deploy/finfam2026.service /etc/systemd/system/ && sudo systemctl enable --now finfam2026
+[Unit]
+Description=FinFam 2026 (API + frontend)
+After=network.target
+
+[Service]
+User=finfam
+WorkingDirectory=/home/finfam/finfam2026/backend
+EnvironmentFile=/home/finfam/finfam2026/backend/.env
+Environment=FINFAM_ENV=production
+ExecStart=/home/finfam/finfam2026/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8001 --proxy-headers
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

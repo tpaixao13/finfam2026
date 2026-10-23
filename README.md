@@ -55,7 +55,7 @@ O schema é o mesmo, então basta copiar o arquivo:
 
 ## Produção (um processo só)
 
-`npm run build` gera `frontend/dist`; a API serve esse build automaticamente (rotas que não começam com `/api`). Assim, em produção basta o `uvicorn` (veja `deploy/finfam.service` e `deploy/update.sh`). Defina `FINFAM_ENV=production` e uma `SECRET_KEY` forte.
+`npm run build` gera `frontend/dist`; a API serve esse build automaticamente (rotas que não começam com `/api`). Assim, em produção basta o `uvicorn` (veja `deploy/finfam2026.service` e `deploy/update.sh`). Defina `FINFAM_ENV=production` e uma `SECRET_KEY` forte.
 
 ## Autenticação
 

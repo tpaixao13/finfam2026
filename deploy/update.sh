@@ -1,5 +1,5 @@
 #!/bin/bash
-# Atualiza o FinFam no servidor (git pull + dependências + build do front + restart).
+# Atualiza o FinFam 2026 no Raspberry (não toca no FinFam antigo).
 set -e
 DIR="/home/finfam/finfam2026"
 cd "$DIR"
@@ -9,6 +9,6 @@ if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
 fi
 git pull origin main
 backend/.venv/bin/pip install -q -r backend/requirements.txt
-(cd frontend && npm ci --silent && npm run build)
-sudo systemctl restart finfam
-echo "FinFam atualizado e reiniciado."
+if command -v npm >/dev/null; then (cd frontend && npm ci --silent && npm run build); fi
+sudo systemctl restart finfam2026
+echo "FinFam 2026 atualizado e reiniciado."
