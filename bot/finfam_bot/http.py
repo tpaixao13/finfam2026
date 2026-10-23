@@ -79,7 +79,7 @@ class FinFam:
         if chat_id is not None:
             headers['X-Telegram-Chat'] = str(chat_id)
         try:
-            return _request(url, method, body, headers, timeout=45)
+            return _request(url, method, body, headers, timeout=90)
         except urllib.error.HTTPError as exc:
             try:
                 detail = json.loads(exc.read().decode('utf-8', 'replace')).get('detail')

@@ -27,7 +27,7 @@ PROVIDERS = {
                'key_url': 'https://platform.openai.com/api-keys'},
 }
 OPENAI_URL = 'https://api.openai.com/v1'
-TIMEOUT = 30
+TIMEOUT = 60  # Cloudflare corta em 100 s
 
 
 class AIError(Exception):
@@ -59,13 +59,21 @@ class AIClient:
         return ''.join(b.get('text', '') for b in r.get('content', []) if b.get('type') == 'text')
 
     def _gemini(self, system: str, user: str) -> str:
-        r = _post(f'https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent',
-                  {'x-goog-api-key': self.api_key},
-                  {'systemInstruction': {'parts': [{'text': system}]},
-                   'contents': [{'role': 'user', 'parts': [{'text': user}]}],
-                   'generationConfig': {'responseMimeType': 'application/json'}})
+        url = f'https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent'
+        body = {'systemInstruction': {'parts': [{'text': system}]},
+                'contents': [{'role': 'user', 'parts': [{'text': user}]}],
+                'generationConfig': {'responseMimeType': 'application/json',
+                                     # pensar pouco: tarefa simples, e o padrão leva >30 s no Gemini 3
+                                     'thinkingConfig': _gemini_thinking(self.model)}}
+        try:
+            r = _post(url, {'x-goog-api-key': self.api_key}, body)
+        except AIError as exc:
+            if 'thinking' not in str(exc).lower():
+                raise
+            del body['generationConfig']['thinkingConfig']  # modelo que não aceita o ajuste
+            r = _post(url, {'x-goog-api-key': self.api_key}, body)
         parts = (r.get('candidates') or [{}])[0].get('content', {}).get('parts', [])
-        return ''.join(p.get('text', '') for p in parts)
+        return ''.join(p.get('text', '') for p in parts if not p.get('thought'))
 
     def _openai(self, system: str, user: str) -> str:
         body = {'model': self.model, 'messages': [{'role': 'system', 'content': system},
@@ -75,6 +83,12 @@ class AIClient:
         r = _post(f'{(self.base_url or OPENAI_URL).rstrip("/")}/chat/completions',
                   {'Authorization': f'Bearer {self.api_key}'}, body)
         return ((r.get('choices') or [{}])[0].get('message') or {}).get('content') or ''
+
+
+def _gemini_thinking(model: str) -> dict:
+    if '2.5' in model:  # Gemini 2.5 usa orçamento de tokens; Flash aceita 0 (desliga)
+        return {'thinkingBudget': 0 if 'flash' in model else 128}
+    return {'thinkingLevel': 'low'}
 
 
 def _post(url: str, headers: dict, body: dict) -> dict:
