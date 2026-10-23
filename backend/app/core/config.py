@@ -1,5 +1,6 @@
 """Configuração lida de variáveis de ambiente (e do arquivo .env, se existir)."""
 import os
+import re
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,8 +15,17 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 INSTANCE_DIR = BACKEND_DIR / 'instance'
 
 
-def _bool(name: str, default: bool) -> bool:
+def _env(name: str, default: str | None = None) -> str | None:
+    """Lê a variável ignorando comentário no fim da linha ("VALOR   # comentário").
+    O systemd (EnvironmentFile) não remove esses comentários; o python-dotenv sim."""
     raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return re.split(r'(?:^|\s+)#', raw.strip(), maxsplit=1)[0].strip()
+
+
+def _bool(name: str, default: bool) -> bool:
+    raw = _env(name)
     if raw is None:
         return default
     return raw.strip().lower() in ('1', 'true', 'yes', 'sim', 'on')
@@ -56,9 +66,9 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    env = os.environ.get('FINFAM_ENV', 'development').strip().lower()
+    env = _env('FINFAM_ENV', 'development').strip().lower()
 
-    secret = os.environ.get('SECRET_KEY', '').strip()
+    secret = _env('SECRET_KEY', '').strip()
     if not secret:
         if env == 'production':
             raise RuntimeError('SECRET_KEY deve ser definida em produção.')
@@ -67,22 +77,22 @@ def load_settings() -> Settings:
     INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
     default_db = 'sqlite:///' + (INSTANCE_DIR / 'gastos.db').as_posix()
 
-    origins = os.environ.get('CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173')
-    dist = os.environ.get('FRONTEND_DIST', str(BACKEND_DIR.parent / 'frontend' / 'dist'))
+    origins = _env('CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173')
+    dist = _env('FRONTEND_DIST', str(BACKEND_DIR.parent / 'frontend' / 'dist'))
 
     return Settings(
         env=env,
         secret_key=secret,
-        database_url=os.environ.get('DATABASE_URL', default_db),
-        access_token_minutes=int(os.environ.get('ACCESS_TOKEN_MINUTES', 60 * 24 * 7)),
+        database_url=_env('DATABASE_URL', default_db),
+        access_token_minutes=int(_env('ACCESS_TOKEN_MINUTES', 60 * 24 * 7)),
         cors_origins=[o.strip() for o in origins.split(',') if o.strip()],
-        upload_dir=Path(os.environ.get('UPLOAD_DIR', str(INSTANCE_DIR / 'uploads'))),
+        upload_dir=Path(_env('UPLOAD_DIR', str(INSTANCE_DIR / 'uploads'))),
         frontend_dist=Path(dist) if dist else None,
-        admin_email=os.environ.get('ADMIN_EMAIL', 'admin@finfam.app').strip().lower(),
-        admin_initial_password=os.environ.get('ADMIN_INITIAL_PASSWORD') or None,
+        admin_email=_env('ADMIN_EMAIL', 'admin@finfam.app').strip().lower(),
+        admin_initial_password=_env('ADMIN_INITIAL_PASSWORD') or None,
         scheduler_enabled=_bool('SCHEDULER_ENABLED', True),
         insecure_external_ssl=_bool('INSECURE_EXTERNAL_SSL', False),
-        trial_days=int(os.environ.get('TRIAL_DAYS', 90)),
+        trial_days=int(_env('TRIAL_DAYS', 90)),
     )
 
 

@@ -16,7 +16,7 @@ def _client_ip(request: Request) -> str:
 
 def check(request: Request, scope: str, key: str = '', limit: int = 10, window: int = 900) -> None:
     """Permite `limit` tentativas por `window` segundos para (scope, IP, key)."""
-    if os.environ.get('RATE_LIMIT_ENABLED', '1') == '0':
+    if os.environ.get('RATE_LIMIT_ENABLED', '1').split('#')[0].strip() == '0':
         return
     bucket = f'{scope}|{_client_ip(request)}|{key.lower()}'
     now = time.monotonic()
