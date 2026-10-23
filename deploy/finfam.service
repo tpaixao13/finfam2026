@@ -1,0 +1,15 @@
+# systemd (Raspberry Pi / Linux). Copie para /etc/systemd/system/finfam.service
+[Unit]
+Description=FinFam 2026 (API + frontend)
+After=network.target
+
+[Service]
+User=finfam
+WorkingDirectory=/home/finfam/finfam2026/backend
+EnvironmentFile=/home/finfam/finfam2026/backend/.env
+Environment=FINFAM_ENV=production
+ExecStart=/home/finfam/finfam2026/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

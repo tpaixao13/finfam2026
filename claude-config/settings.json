@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); file_path=$(echo \"$input\" | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['tool_input'].get('file_path',''))\" 2>/dev/null || echo ''); tool_name=$(echo \"$input\" | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('tool_name','Edit'))\" 2>/dev/null || echo 'Edit'); PROJ=\"${CLAUDE_PROJECT_DIR:-.}\"; git -C \"$PROJ\" rev-parse --git-dir >/dev/null 2>&1 || exit 0; git -C \"$PROJ\" add -A 2>/dev/null; if ! git -C \"$PROJ\" diff --cached --quiet 2>/dev/null; then msg=\"auto($tool_name): $(basename \\\"$file_path\\\")\"; git -C \"$PROJ\" commit -m \"$msg\" 2>/dev/null && git -C \"$PROJ\" push origin main 2>/dev/null; fi || true",
+            "timeout": 30,
+            "statusMessage": "Sincronizando com GitHub..."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+[project]
+name = "finfam-mcp"
+version = "2026.1.0"
+description = "Servidor MCP do FinFam: contas a pagar, lançamentos, faturas e resumo do mês."
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.10"]
+
+[project.scripts]
+finfam-mcp = "finfam_mcp.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["finfam_mcp"]

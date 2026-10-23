@@ -1,0 +1,108 @@
+"""Aplicação FastAPI do FinFam 2026.
+
+Toda a API fica sob /api/v1. Se o build do frontend existir (frontend/dist),
+ele também é servido pela mesma aplicação, então em produção basta um processo.
+"""
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+
+from app.core.config import settings
+from app.core.db import DBSessionMiddleware
+from app.core.migrations import run_migrations
+from app.routers import (admin, auth, cards, dashboard, expenses, family, goals, imports, incomes,
+                         investments, rules, settings as settings_router)
+
+log = logging.getLogger('finfam')
+
+VERSION = '2026.1.0'
+
+_FIELD_LABELS = {
+    'description': 'Descrição', 'amount': 'Valor', 'category': 'Categoria', 'payment_method': 'Forma de pagamento',
+    'email': 'E-mail', 'password': 'Senha', 'name': 'Nome', 'day': 'Dia', 'month': 'Mês', 'year': 'Ano',
+    'last_digits': 'Últimos 4 dígitos', 'title': 'Título', 'target_amount': 'Valor da meta',
+    'keyword': 'Palavra-chave', 'new_password': 'Nova senha', 'installments': 'Parcelas',
+}
+
+
+async def _reminder_loop():
+    """Verifica a cada minuto se algum tenant deve receber o lembrete do Telegram."""
+    from app.services.telegram import run_daily_reminders
+    while True:
+        try:
+            await asyncio.to_thread(run_daily_reminders)
+        except Exception as exc:  # nunca derruba o loop
+            log.warning('Lembretes do Telegram falharam: %s', exc)
+        await asyncio.sleep(60)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    run_migrations()
+    task = asyncio.create_task(_reminder_loop()) if settings.scheduler_enabled else None
+    yield
+    if task:
+        task.cancel()
+
+
+def _validation_handler(_: Request, exc: RequestValidationError):
+    """Erros de validação em formato simples: {detail: 'mensagem', errors: [...]}."""
+    errors = []
+    for err in exc.errors():
+        loc = [str(p) for p in err.get('loc', []) if p not in ('body', 'query', 'path', 'form')]
+        field = loc[-1] if loc else ''
+        msg = str(err.get('msg', 'Valor inválido')).removeprefix('Value error, ')
+        errors.append({'field': field, 'message': msg})
+    first = errors[0] if errors else {'field': '', 'message': 'Dados inválidos.'}
+    label = _FIELD_LABELS.get(first['field'], first['field'])
+    detail = f"{label}: {first['message']}" if label else first['message']
+    return JSONResponse(status_code=422, content={'detail': detail, 'errors': errors})
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title='FinFam API', version=VERSION, lifespan=lifespan,
+        description='API do FinFam 2026 — controle financeiro familiar. '
+                    'Autentique com `Authorization: Bearer <JWT do login>` ou `Bearer ffk_<token de API>`.',
+        docs_url='/api/docs', redoc_url=None, openapi_url='/api/openapi.json',
+    )
+    app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=False,
+                       allow_methods=['*'], allow_headers=['*'], expose_headers=['Content-Disposition'])
+    app.add_middleware(DBSessionMiddleware)
+    app.add_exception_handler(RequestValidationError, _validation_handler)
+
+    prefix = settings.api_prefix
+    for module in (auth, family, dashboard, expenses, incomes, cards, goals, rules, investments,
+                   imports, settings_router, admin):
+        app.include_router(module.router, prefix=prefix)
+
+    @app.get(f'{prefix}/health', tags=['meta'], summary='Status da API')
+    def health():
+        return {'status': 'ok', 'version': VERSION}
+
+    _mount_frontend(app)
+    return app
+
+
+def _mount_frontend(app: FastAPI):
+    dist = settings.frontend_dist
+    if not dist or not (dist / 'index.html').is_file():
+        return
+    index = dist / 'index.html'
+
+    @app.get('/{full_path:path}', include_in_schema=False)
+    def spa(full_path: str):
+        if full_path.startswith('api/'):
+            return JSONResponse(status_code=404, content={'detail': 'Rota não encontrada.'})
+        candidate = (dist / full_path).resolve()
+        if full_path and candidate.is_file() and dist.resolve() in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(index)
+
+
+app = create_app()

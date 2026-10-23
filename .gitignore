@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Dados e segredos
+.env
+backend/instance/
+*.db
+*.db-journal
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Claude
+.claude/settings.local.json

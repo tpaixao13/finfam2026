@@ -1,0 +1,15 @@
+# Servidor MCP em HTTP (para um bot/assistente na rede). Copie para /etc/systemd/system/
+[Unit]
+Description=FinFam MCP
+After=finfam.service
+
+[Service]
+User=finfam
+WorkingDirectory=/home/finfam/finfam2026/mcp
+Environment=FINFAM_API_URL=http://127.0.0.1:8000/api/v1
+EnvironmentFile=/home/finfam/finfam2026/mcp/.env
+ExecStart=/home/finfam/finfam2026/mcp/.venv/bin/python -m finfam_mcp --http --host 127.0.0.1 --port 8765
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
