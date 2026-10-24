@@ -88,6 +88,7 @@ def meta():
         'bank_payment_methods': sorted(fin.BANK_PAYMENTS), 'months': fin.MONTH_NAMES_FULL,
         'months_short': fin.MONTH_NAMES_SHORT, 'investment_types': fin.INVESTMENT_TYPES,
         'crypto_coins': [{'id': c, 'label': label} for c, label in fin.CRYPTO_COINS],
+        'currencies': [{'code': c, 'name': n, 'symbol': sym} for c, n, sym in fin.CURRENCIES],
         'variable_income_sources': fin.VARIABLE_INCOME_SOURCES,
         'goal_types': [{'id': 'saving', 'label': 'Economizar', 'emoji': '💰'},
                        {'id': 'spending_limit', 'label': 'Limite de gastos', 'emoji': '📉'},

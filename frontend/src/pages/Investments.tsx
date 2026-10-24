@@ -2,13 +2,13 @@ import { useState } from 'react'
 import { LineChart } from '../components/charts'
 import { Button, ConfirmButton, Empty, ErrorBox, Field, Input, Modal, Money, PageHeader, Panel, Select, Spinner, Table } from '../components/ui'
 import { api } from '../lib/api'
-import { brl, MONTHS, MONTHS_SHORT, parseMoney, pct } from '../lib/format'
+import { brl, money, MONTHS, MONTHS_SHORT, parseMoney, pct, rate } from '../lib/format'
 import { useApi, useFormState } from '../lib/hooks'
 import { useAction, useSession } from '../lib/session'
 import type { Investment } from '../lib/types'
 
 interface InvestmentsData {
-  fixed: Investment[]; crypto: Investment[]; fixed_total: number; crypto_total: number
+  fixed: Investment[]; crypto: Investment[]; fixed_total: number; crypto_total: number; fx_gain_total: number
   selic: number; selic_date: string | null; selic_is_live: boolean; cdi: number; rate_suggestions: Record<string, number>
 }
 interface Projection { labels: string[]; invested: number[]; projected: number[]; projected_net: number[] }
@@ -18,9 +18,14 @@ function InvestmentForm({ open, onClose, onSaved, suggestions }:
   const { me, meta, toast } = useSession()
   const now = new Date()
   const blank = { user_id: String(me?.user.id ?? ''), investment_type: '', description: '', amount: '', annual_rate: '',
-    crypto_coin: '', month: String(now.getMonth() + 1), year: String(now.getFullYear()) }
+    crypto_coin: '', currency: 'BRL', fx_buy_rate: '', month: String(now.getMonth() + 1), year: String(now.getFullYear()) }
   const { f, setF, set, busy, error, setError, run } = useFormState(open, () => blank)
   const isCrypto = f.investment_type === 'Criptomoedas'
+  const currency = isCrypto ? 'BRL' : f.currency
+  const foreign = currency !== 'BRL'
+  const symbol = meta?.currencies.find((c) => c.code === currency)?.symbol ?? 'R$'
+  const fx = useApi(() => (open ? api.get<{ rates: Record<string, number> }>('/market/fx') : Promise.resolve(null)), [open])
+  const todayRate = fx.data?.rates[currency]
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -30,7 +35,9 @@ function InvestmentForm({ open, onClose, onSaved, suggestions }:
       const r = await api.post<{ message: string }>('/investments', {
         user_id: Number(f.user_id), investment_type: f.investment_type, description: f.description || null,
         amount: amount.toFixed(2), annual_rate: isCrypto ? '0' : (parseMoney(f.annual_rate) || 0).toFixed(2),
-        crypto_coin: isCrypto ? f.crypto_coin : null, month: Number(f.month), year: Number(f.year) })
+        crypto_coin: isCrypto ? f.crypto_coin : null, currency,
+        fx_buy_rate: foreign && f.fx_buy_rate ? parseMoney(f.fx_buy_rate).toFixed(6) : null,
+        month: Number(f.month), year: Number(f.year) })
       toast(r.message)
       onSaved()
       onClose()
@@ -43,7 +50,7 @@ function InvestmentForm({ open, onClose, onSaved, suggestions }:
       <form id="inv-form" className="form-grid" onSubmit={submit}>
         <Field label="Tipo" className="span-2">
           <Select value={f.investment_type} required placeholder="Escolha" options={meta?.investment_types ?? []}
-            onChange={(e) => { const t = e.target.value; setF((s) => ({ ...s, investment_type: t, annual_rate: suggestions[t] ? String(suggestions[t]).replace('.', ',') : s.annual_rate })) }} />
+            onChange={(e) => { const t = e.target.value; setF((s) => ({ ...s, investment_type: t, annual_rate: s.currency === 'BRL' && suggestions[t] ? String(suggestions[t]).replace('.', ',') : s.annual_rate })) }} />
         </Field>
         {isCrypto && (
           <Field label="Moeda" className="span-2">
@@ -51,8 +58,25 @@ function InvestmentForm({ open, onClose, onSaved, suggestions }:
               options={(meta?.crypto_coins ?? []).map((c) => ({ value: c.id, label: c.label }))} />
           </Field>
         )}
-        <Field label="Valor investido (R$)"><Input inputMode="decimal" value={f.amount} onChange={(e) => set('amount', e.target.value)} required /></Field>
-        {!isCrypto && <Field label="Taxa ao ano (%)" hint="Sugerida a partir da Selic atual"><Input inputMode="decimal" value={f.annual_rate} onChange={(e) => set('annual_rate', e.target.value)} /></Field>}
+        {!isCrypto && (
+          <Field label="Moeda" className={foreign ? '' : 'span-2'}>
+            <Select value={f.currency} onChange={(e) => { const c = e.target.value; setF((s) => ({ ...s, currency: c, fx_buy_rate: '',
+              annual_rate: c === 'BRL' && suggestions[s.investment_type] ? String(suggestions[s.investment_type]).replace('.', ',') : '' })) }}
+              options={(meta?.currencies ?? [{ code: 'BRL', name: 'Real', symbol: 'R$' }]).map((c) => ({ value: c.code, label: `${c.name} (${c.symbol})` }))} />
+          </Field>
+        )}
+        {foreign && (
+          <Field label={`Cotação na compra (R$ por ${symbol})`}
+            hint={todayRate ? `Em branco: cotação de hoje (${rate(todayRate)})` : 'Em branco: cotação de hoje'}>
+            <Input inputMode="decimal" value={f.fx_buy_rate} onChange={(e) => set('fx_buy_rate', e.target.value)}
+              placeholder={todayRate ? String(todayRate.toFixed(todayRate < 1 ? 4 : 2)).replace('.', ',') : ''} />
+          </Field>
+        )}
+        <Field label={`Valor investido (${symbol})`}
+          hint={foreign && todayRate && parseMoney(f.amount) > 0 ? `≈ ${brl(parseMoney(f.amount) * (parseMoney(f.fx_buy_rate) || todayRate))}` : undefined}>
+          <Input inputMode="decimal" value={f.amount} onChange={(e) => set('amount', e.target.value)} required />
+        </Field>
+        {!isCrypto && <Field label="Taxa ao ano (%)" hint={foreign ? `Rendimento em ${symbol} (ex.: 4). Em branco: só câmbio.` : 'Sugerida a partir da Selic atual'}><Input inputMode="decimal" value={f.annual_rate} onChange={(e) => set('annual_rate', e.target.value)} /></Field>}
         <Field label="Descrição (opcional)" className={isCrypto ? '' : 'span-2'}><Input value={f.description} onChange={(e) => set('description', e.target.value)} maxLength={200} /></Field>
         <Field label="Pessoa"><Select value={f.user_id} onChange={(e) => set('user_id', e.target.value)} options={(me?.members ?? []).map((u) => ({ value: String(u.id), label: u.name }))} /></Field>
         <Field label="Mês"><Select value={f.month} onChange={(e) => set('month', e.target.value)} options={MONTHS.map((m, i) => ({ value: String(i + 1), label: m }))} /></Field>
@@ -80,7 +104,10 @@ export function InvestmentsPage() {
       {data.error ? <ErrorBox message={data.error} onRetry={data.reload} /> : !d ? <Spinner /> : (
         <>
           <dl className="kpis kpis-inline">
-            <div><dt>Renda fixa</dt><dd><Money value={d.fixed_total} /></dd></div>
+            <div><dt>Carteira (em R$)</dt><dd><Money value={d.fixed_total} /></dd></div>
+            {d.fixed.some((i) => i.currency !== 'BRL') && (
+              <div><dt>Ganho com câmbio</dt><dd><Money value={d.fx_gain_total} tone="auto" /></dd></div>
+            )}
             <div><dt>Cripto (valor aplicado)</dt><dd><Money value={d.crypto_total} /></dd></div>
           </dl>
           {proj.data && proj.data.labels.length > 0 && (
@@ -91,8 +118,8 @@ export function InvestmentsPage() {
                 { label: 'Líquido de IR/IOF', data: proj.data.projected_net, color: 'var(--income)' }]} />
             </Panel>
           )}
-          <Panel title="Renda fixa" flush>
-            {d.fixed.length === 0 ? <Empty icon="piggy-bank" title="Nenhum investimento de renda fixa." /> : (
+          <Panel title="Carteira" flush>
+            {d.fixed.length === 0 ? <Empty icon="piggy-bank" title="Nenhum investimento na carteira." /> : (
               <Table>
                 <thead><tr><th>Investimento</th><th>Pessoa</th><th>Aplicado em</th><th className="num">Taxa a.a.</th><th className="num">Valor</th><th className="num">Rende por dia (líq.)</th><th /></tr></thead>
                 <tbody>
@@ -102,8 +129,11 @@ export function InvestmentsPage() {
                       <td>{i.user_name}</td>
                       <td>{MONTHS_SHORT[i.month - 1]}/{i.year}</td>
                       <td className="num">{pct(i.annual_rate, 2)}</td>
-                      <td className="num"><Money value={i.amount} /></td>
-                      <td className="num">{i.daily_yield ? brl(i.daily_yield.net) : '—'}{i.daily_yield?.exempt && <small className="muted block">isento</small>}</td>
+                      <td className="num"><Money value={i.value_brl ?? i.amount} />
+                        {i.currency !== 'BRL' && <small className="muted block" title={`Comprado a ${rate(i.fx_buy_rate)} · hoje ${rate(i.fx_rate)}${i.fx_is_live ? '' : ' (cotação indisponível)'}`}>
+                          {money(i.amount, i.currency)} · câmbio <span className={(i.fx_gain ?? 0) < 0 ? 'neg' : 'pos'}>{(i.fx_gain ?? 0) >= 0 ? '+' : ''}{brl(i.fx_gain)}</span>
+                        </small>}</td>
+                      <td className="num">{i.daily_yield ? brl(i.daily_yield.net) : '—'}{i.daily_yield?.exempt && <small className="muted block">isento</small>}{i.daily_yield?.foreign && <small className="muted block">bruto</small>}</td>
                       <td><ConfirmButton label="Remover" confirmLabel="Remover" onConfirm={() => remove(i.id)} /></td>
                     </tr>))}
                 </tbody>

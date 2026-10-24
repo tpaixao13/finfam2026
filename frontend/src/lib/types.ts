@@ -63,13 +63,17 @@ export interface Income {
 export interface Investment {
   id: number; user_id: number; user_name: string | null; description: string | null; amount: number
   investment_type: string; annual_rate: number; crypto_coin: string | null; crypto_buy_price: number | null
+  currency: string; fx_buy_rate: number | null
   year: number; month: number; created_at: string | null
-  daily_yield?: { gross: number; net: number; iof_rate: number; ir_rate: number; exempt: boolean }
+  daily_yield?: { gross: number; net: number; iof_rate: number; ir_rate: number; exempt: boolean; foreign?: boolean }
+  // só na carteira (GET /investments): valores em reais
+  invested_brl?: number; value_brl?: number; fx_gain?: number; fx_rate?: number | null; fx_is_live?: boolean
 }
 
 export interface Meta {
   categories: string[]; payment_methods: string[]; banks: string[]; bank_payment_methods: string[]
   months: string[]; investment_types: string[]; crypto_coins: { id: string; label: string }[]
+  currencies: { code: string; name: string; symbol: string }[]
   variable_income_sources: string[]; goal_types: { id: string; label: string; emoji: string }[]
   category_colors: Record<string, string>; payment_colors: Record<string, string>
 }

@@ -139,6 +139,7 @@ def investment_out(i: Investment, yield_info: dict | None = None) -> dict:
         'description': i.description, 'amount': money(i.amount), 'investment_type': i.investment_type,
         'annual_rate': float(i.annual_rate or 0), 'crypto_coin': i.crypto_coin,
         'crypto_buy_price': float(i.crypto_buy_price) if i.crypto_buy_price else None,
+        'currency': i.currency or 'BRL', 'fx_buy_rate': float(i.fx_buy_rate) if i.fx_buy_rate else None,
         'year': i.year, 'month': i.month, 'created_at': iso(i.created_at),
     }
     if yield_info:

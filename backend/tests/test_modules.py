@@ -147,6 +147,31 @@ def test_investments(family, monkeypatch):
     assert proj['projected'][-1] > 1000 >= proj['projected_net'][0] - 1000
 
 
+def test_investments_in_foreign_currency(family, monkeypatch):
+    from app.services import market
+    monkeypatch.setattr(market, 'fetch_json', lambda *a, **k: None)
+    monkeypatch.setattr(market, 'fx_rates', lambda codes: {'USD': 5.5, 'EUR': 6.0})
+    base = {'investment_type': 'Outros', 'month': 1, 'year': 2026}
+    # US$ 1.000 comprados a R$ 5,00 rendendo 4% a.a.; € 100 pela cotação de hoje
+    assert family.post('/investments', json={**base, 'amount': '1000', 'currency': 'USD', 'fx_buy_rate': '5',
+                                             'annual_rate': '4'}).status_code == 201
+    r = family.post('/investments', json={**base, 'amount': '100', 'currency': 'EUR'})
+    assert r.status_code == 201 and r.json()['investment']['fx_buy_rate'] == 6.0
+    assert family.post('/investments', json={**base, 'amount': '1', 'currency': 'XYZ'}).status_code == 422
+    assert family.post('/investments', json={**base, 'amount': '1', 'currency': 'USD', 'investment_type': 'Criptomoedas',
+                                             'crypto_coin': 'bitcoin'}).status_code == 422
+    data = family.get('/investments').json()
+    usd = next(i for i in data['fixed'] if i['currency'] == 'USD')
+    assert (usd['amount'], usd['invested_brl'], usd['value_brl'], usd['fx_gain']) == (1000, 5000, 5500, 500)
+    assert usd['daily_yield']['foreign'] and usd['daily_yield']['net'] == usd['daily_yield']['gross'] > 0
+    assert data['fixed_total'] == 6100 and data['fx_gain_total'] == 500
+    assert family.get('/charts/investments').json()['invested'][0] == 6100
+    # sem cotação disponível: pede a cotação da compra
+    monkeypatch.setattr(market, 'fx_rates', lambda codes: {})
+    r = family.post('/investments', json={**base, 'amount': '10', 'currency': 'GBP'})
+    assert r.status_code == 503 and 'cotação' in r.json()['detail']
+
+
 def test_imports_csv(family):
     csv = 'data,descricao,valor\n10/05/2026,PADARIA BOM PAO,-25.50\n11/05/2026,SALARIO,3000\n'
     r = family.post('/imports/preview', files={'file': ('extrato.csv', csv.encode(), 'text/csv')},

@@ -54,6 +54,8 @@ _ALTERS = [
     "UPDATE credit_cards SET supports_debit = 1 WHERE card_type = 'debit' AND supports_debit = 0",
     'ALTER TABLE credit_cards ADD COLUMN account_id INTEGER REFERENCES credit_accounts(id)',
     'ALTER TABLE expenses ADD COLUMN purchase_month INTEGER',
+    'ALTER TABLE investments ADD COLUMN currency TEXT',
+    'ALTER TABLE investments ADD COLUMN fx_buy_rate NUMERIC(14,6)',
     'ALTER TABLE expenses ADD COLUMN purchase_year INTEGER',
     # limpeza de dados órfãos (usuário/família já excluídos) — não podem ser herdados
     'DELETE FROM goals WHERE user_id NOT IN (SELECT id FROM users)',

@@ -25,6 +25,12 @@ INVESTMENT_TYPES = ['Tesouro Selic', 'Tesouro IPCA+', 'Tesouro Prefixado', 'CDB'
                     'CRI/CRA', 'Poupança', 'Fundo de Renda Fixa', 'Fundo Multimercado', 'Ações',
                     'FIIs', 'Debêntures', 'COE', 'Criptomoedas', 'Outros']
 
+# Moedas aceitas nos investimentos (código ISO, nome, símbolo). Cotação em R$ por unidade.
+CURRENCIES = [('BRL', 'Real', 'R$'), ('USD', 'Dólar americano', 'US$'), ('EUR', 'Euro', '€'),
+              ('GBP', 'Libra esterlina', '£'), ('CHF', 'Franco suíço', 'CHF'), ('JPY', 'Iene', '¥'),
+              ('CAD', 'Dólar canadense', 'C$'), ('ARS', 'Peso argentino', 'AR$')]
+FOREIGN_CURRENCIES = [c for c, _, _ in CURRENCIES if c != 'BRL']
+
 CRYPTO_COINS = [
     ('bitcoin', 'Bitcoin (BTC)'), ('ethereum', 'Ethereum (ETH)'), ('binancecoin', 'BNB (BNB)'),
     ('solana', 'Solana (SOL)'), ('ripple', 'XRP (XRP)'), ('cardano', 'Cardano (ADA)'),

@@ -417,6 +417,8 @@ class Investment(Base):
     annual_rate = Column(Numeric(6, 2), nullable=False)
     crypto_coin = Column(Text, nullable=True)
     crypto_buy_price = Column(Numeric(18, 8), nullable=True)
+    currency = Column(String(3), nullable=True)          # None/BRL = real; senão `amount` está nessa moeda
+    fx_buy_rate = Column(Numeric(14, 6), nullable=True)  # R$ por unidade da moeda na compra
     year = Column(Integer, nullable=False)
     month = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=utcnow)

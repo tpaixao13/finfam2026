@@ -9,6 +9,18 @@ export function brl(value: number | null | undefined): string {
   return brlFmt.format(value ?? 0)
 }
 
+/** Valor em outra moeda (US$ 1.000,00, € 50,00...). */
+export function money(value: number | null | undefined, currency = 'BRL'): string {
+  if (currency === 'BRL') return brl(value)
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency, currencyDisplay: 'symbol' }).format(value ?? 0)
+}
+
+/** Cotação em R$ com 2 a 4 casas (ARS/JPY valem centavos). */
+export function rate(value: number | null | undefined): string {
+  const v = value ?? 0
+  return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: v < 1 ? 4 : 2, maximumFractionDigits: v < 1 ? 4 : 2 })
+}
+
 export function compact(value: number): string {
   return compactFmt.format(value)
 }

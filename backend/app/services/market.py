@@ -1,9 +1,10 @@
-"""Dados de mercado: Selic (Banco Central) e cotações de cripto (CoinGecko), com cache."""
+"""Dados de mercado: Selic e câmbio (Banco Central / AwesomeAPI) e cripto (CoinGecko), com cache."""
 import json
 import logging
 import ssl
 import time
 import urllib.request
+from datetime import date, timedelta
 
 from app.core.config import settings
 
@@ -101,3 +102,42 @@ def crypto_history(coin: str, days: int) -> dict | None:
     return fetch_json(
         f'https://api.coingecko.com/api/v3/coins/{coin}/market_chart?vs_currency=brl&days={days}',
         f'history_{coin}_{days}', ttl=3600)
+
+
+# ── Câmbio (R$ por unidade da moeda) ─────────────────────────────────────────
+
+def _awesome_rates(codes: list[str]) -> dict[str, float]:
+    pairs = ','.join(f'{c}-BRL' for c in codes)
+    data = fetch_json(f'https://economia.awesomeapi.com.br/json/last/{pairs}', f'fx_{pairs}', ttl=900) or {}
+    out = {}
+    for code in codes:
+        try:
+            out[code] = float(data[f'{code}BRL']['bid'])
+        except (KeyError, TypeError, ValueError):
+            pass
+    return out
+
+
+def _ptax_rate(code: str) -> float | None:
+    """Reserva: PTAX de venda do Banco Central (último dia útil dos últimos 10 dias)."""
+    end = date.today()
+    start = end - timedelta(days=10)
+    url = ('https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/'
+           'CotacaoMoedaPeriodo(moeda=@moeda,dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)'
+           f"?@moeda='{code}'&@dataInicial='{start:%m-%d-%Y}'&@dataFinalCotacao='{end:%m-%d-%Y}'"
+           '&$format=json&$select=cotacaoVenda,dataHoraCotacao')
+    data = fetch_json(url, f'ptax_{code}_{end}', ttl=3600) or {}
+    values = [v for v in data.get('value', []) if v.get('cotacaoVenda')]
+    return float(values[-1]['cotacaoVenda']) if values else None
+
+
+def fx_rates(codes: list[str]) -> dict[str, float]:
+    """Cotação atual em R$ das moedas pedidas (as que não forem encontradas ficam de fora)."""
+    codes = [c for c in dict.fromkeys(codes) if c and c != 'BRL']
+    if not codes:
+        return {}
+    rates = _awesome_rates(codes)
+    for code in codes:
+        if code not in rates and (ptax := _ptax_rate(code)):
+            rates[code] = ptax
+    return rates
