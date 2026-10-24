@@ -142,7 +142,8 @@ export function Badge({ tone = 'neutral', children }: { tone?: 'neutral' | 'succ
 }
 
 export function Avatar({ name, url, color, size = 32 }: { name: string; url?: string | null; color?: string; size?: number }) {
-  if (url) return <img className="avatar" src={url} alt="" width={size} height={size} />
+  const [broken, setBroken] = useState<string | null>(null)  // foto que não carregou → iniciais
+  if (url && broken !== url) return <img className="avatar" src={url} alt="" width={size} height={size} onError={() => setBroken(url)} />
   return (
     <span className="avatar avatar-initials" style={{ width: size, height: size, background: color ?? 'var(--ink-2)' }}>
       {initials(name)}

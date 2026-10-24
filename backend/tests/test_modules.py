@@ -241,3 +241,25 @@ def test_openapi_and_meta(client, family):
     assert '/api/v1/expenses/bills' in spec['paths']
     meta = family.get('/meta').json()
     assert 'Cartão de Crédito' in meta['payment_methods'] and len(meta['banks']) > 10
+
+
+def test_legacy_avatars_are_copied_with_random_name(client, family, tmp_path, monkeypatch):
+    import dataclasses
+    from app.core import migrations
+    from app.core.db import get_engine, session
+    from app.models import User
+    legacy = tmp_path / 'old' / 'avatars'
+    legacy.mkdir(parents=True)
+    (legacy / 'user_1.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'0' * 20)
+    (legacy / 'user_2.exe').write_bytes(b'MZ')
+    user = session.get(User, family.user['id'])
+    user.avatar = 'user_1.png'
+    session.commit()
+    session.remove()
+    monkeypatch.setattr(migrations, 'settings', dataclasses.replace(migrations.settings, legacy_upload_dir=tmp_path / 'old'))
+    with get_engine().connect() as conn:
+        assert migrations._import_legacy_avatars(conn) == 1
+        assert migrations._import_legacy_avatars(conn) == 0  # idempotente
+    url = family.get('/auth/me').json()['user']['avatar_url']
+    assert 'user_1' not in url and client.get(url).content.startswith(b'\x89PNG')
+    assert (legacy / 'user_1.png').is_file()  # a pasta antiga não é alterada

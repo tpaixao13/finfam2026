@@ -5,6 +5,8 @@ seja atualizado automaticamente ao subir a API.
 """
 import logging
 import secrets
+import shutil
+from pathlib import Path
 
 from sqlalchemy import text
 
@@ -138,6 +140,39 @@ def _migrate_credit_accounts(conn):
     conn.commit()
 
 
+_AVATAR_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+
+
+def _import_legacy_avatars(conn) -> int:
+    """Fotos do FinFam antigo (LEGACY_UPLOAD_DIR/avatars/user_N.png): copia para a pasta
+    nova com nome aleatório e atualiza o usuário. Só LÊ a pasta antiga; roda a cada início
+    e ignora quem já tem a foto na pasta nova."""
+    legacy = settings.legacy_upload_dir
+    if not legacy:
+        return 0
+    src_dir, dst_dir = legacy / 'avatars', settings.upload_dir / 'avatars'
+    if not src_dir.is_dir():
+        log.warning('LEGACY_UPLOAD_DIR sem a pasta avatars: %s', src_dir)
+        return 0
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for uid, avatar in conn.execute(text('SELECT id, avatar FROM users WHERE avatar IS NOT NULL')).fetchall():
+        name = Path(avatar).name
+        if (dst_dir / name).is_file():
+            continue
+        src = src_dir / name
+        if not src.is_file() or src.suffix.lower() not in _AVATAR_EXT or src.stat().st_size > 5 * 1024 * 1024:
+            continue
+        new_name = f'{secrets.token_urlsafe(16)}{src.suffix.lower()}'
+        shutil.copyfile(src, dst_dir / new_name)
+        conn.execute(text('UPDATE users SET avatar = :a WHERE id = :id'), {'a': new_name, 'id': uid})
+        copied += 1
+    conn.commit()
+    if copied:
+        log.info('%s foto(s) de perfil copiada(s) do FinFam antigo.', copied)
+    return copied
+
+
 def run_migrations() -> None:
     from app import models  # noqa: F401  registra as tabelas no metadata
 
@@ -157,6 +192,11 @@ def run_migrations() -> None:
         except Exception as exc:
             conn.rollback()
             log.warning('Limpeza de admins duplicados falhou: %s', exc)
+        try:
+            _import_legacy_avatars(conn)
+        except Exception as exc:
+            conn.rollback()
+            log.warning('Cópia das fotos do FinFam antigo falhou: %s', exc)
         try:
             _seed_admin(conn)
         except Exception as exc:

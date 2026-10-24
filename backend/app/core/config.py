@@ -51,6 +51,7 @@ class Settings:
     access_token_minutes: int
     cors_origins: list[str]
     upload_dir: Path
+    legacy_upload_dir: Path | None
     frontend_dist: Path | None
     admin_email: str
     admin_initial_password: str | None
@@ -90,6 +91,7 @@ def load_settings() -> Settings:
         access_token_minutes=int(_env('ACCESS_TOKEN_MINUTES', 60 * 24 * 7)),
         cors_origins=[o.strip() for o in origins.split(',') if o.strip()],
         upload_dir=Path(_env('UPLOAD_DIR', str(INSTANCE_DIR / 'uploads'))),
+        legacy_upload_dir=Path(_env('LEGACY_UPLOAD_DIR')) if _env('LEGACY_UPLOAD_DIR') else None,
         frontend_dist=Path(dist) if dist else None,
         admin_email=_env('ADMIN_EMAIL', 'admin@finfam.app').strip().lower(),
         admin_initial_password=_env('ADMIN_INITIAL_PASSWORD') or None,

@@ -11,7 +11,7 @@ function AuthShell({ title, lead, children, footer }: { title: string; lead: str
     <div className="auth">
       <div className="auth-side">
         <div className="brand brand-lg"><img src="/logo.svg" alt="" width={40} height={40} /><span>FinFam</span></div>
-        <p className="auth-pitch">O dinheiro da casa, num lugar só: despesas, faturas, rendas e metas de toda a família.</p>
+        <p className="auth-pitch">Tenha controle completo das finanças da sua família, reunindo gastos, receitas, faturas e metas em uma única plataforma.</p>
       </div>
       <div className="auth-main">
         <div className="auth-card">
