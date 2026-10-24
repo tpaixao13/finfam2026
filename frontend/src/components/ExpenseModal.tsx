@@ -48,7 +48,7 @@ export function ExpenseModal() {
   const { open, expense, preset } = expenseModal
   const editing = Boolean(expense)
   const [f, setF] = useState<FormState>(() => initial(null, undefined, me?.user.id ?? 0))
-  const [cards, setCards] = useState<Card[]>([])
+  const [cards, setCards] = useState<Card[] | null>(null)  // null = ainda carregando
   const [categories, setCategories] = useState<string[]>([])
   const [preview, setPreview] = useState<Preview | null>(null)
   const [busy, setBusy] = useState(false)
@@ -61,12 +61,13 @@ export function ExpenseModal() {
     setError(null)
     setPreview(null)
     setSuggested(null)
+    setCards(null)
     api.get<{ cards: (Card & { usage: unknown })[] }>('/cards').then((r) => setCards(r.cards)).catch(() => setCards([]))
     api.get<{ categories: string[] }>('/expenses/options').then((r) => setCategories(r.categories)).catch(() => undefined)
   }, [open, expense, preset, me])
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((s) => ({ ...s, [k]: v }))
-  const usableCards = useMemo(() => cards.filter((c) => cardFits(c, f.payment_method)), [cards, f.payment_method])
+  const usableCards = useMemo(() => (cards ?? []).filter((c) => cardFits(c, f.payment_method)), [cards, f.payment_method])
   const showBank = (meta?.bank_payment_methods ?? []).includes(f.payment_method) && !f.card_id
   const amount = parseMoney(f.amount)
 
@@ -93,10 +94,11 @@ export function ExpenseModal() {
   }, [open, f.payment_method, f.card_id, f.date, amount])
 
   useEffect(() => {
-    if (f.card_id && !usableCards.some((c) => String(c.id) === f.card_id)) set('card_id', '')
+    // só limpa depois que a lista chegou: antes disso o cartão da despesa ainda "não existe"
+    if (cards && f.card_id && !usableCards.some((c) => String(c.id) === f.card_id)) set('card_id', '')
     if (f.payment_method !== CREDIT && f.mode === 'parcelado') set('mode', 'avista')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [f.payment_method, usableCards])
+  }, [f.payment_method, usableCards, cards])
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
