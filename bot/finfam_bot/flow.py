@@ -84,9 +84,11 @@ class Flow:
         field, _, value = arg.partition(':')
         if f['step'] != self.pick_step.get(field):
             return  # botão de um passo antigo
-        chosen = getattr(self, f'pick_{field}')(chat_id, f, value)
-        f.setdefault('trail', []).append(chosen)
         f['edit'] = message_id
+        chosen = getattr(self, f'pick_{field}')(chat_id, f, value)
+        if chosen is None:  # o botão só mudou a pergunta (ex.: "Outra data")
+            return
+        f.setdefault('trail', []).append(chosen)
         self.next(chat_id)
 
 

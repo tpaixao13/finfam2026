@@ -60,9 +60,12 @@ class ExpenseFlow(Flow):
         buttons += [btn(c, f'f:cat:{i}') for i, c in enumerate(cats) if c != suggestion][:20]
         self.ask(chat_id, 'Categoria?', rows(buttons, 2) + [self.cancel])
 
+    DATE_HINT = 'ex.: <b>05/10</b>, <b>5/10/2026</b>, <b>dia 5</b> ou <b>sexta</b>'
+
     def ask_date(self, chat_id: int, f: dict) -> None:
-        self.ask(chat_id, '📆 Quando foi? Toque ou digite a data (dd/mm).',
-                 [[btn('Hoje', 'f:date:0'), btn('Ontem', 'f:date:1')], self.cancel])
+        self.ask(chat_id, f'📆 Quando foi? Toque abaixo ou <b>digite a data</b> ({self.DATE_HINT}).',
+                 [[btn('Hoje', 'f:date:0'), btn('Ontem', 'f:date:1'), btn('Anteontem', 'f:date:2')],
+                  [btn('📅 Outra data', 'f:date:x')], self.cancel])
 
     def _cards_for(self, chat_id: int, method: str) -> list[dict]:
         if method not in (CREDIT, DEBIT, 'VR', 'VA'):  # PIX/dinheiro: nem busca cartões
@@ -92,7 +95,7 @@ class ExpenseFlow(Flow):
 
     def read_date(self, f: dict, text: str) -> str | None:
         d = parse_date(text, date.today())
-        return store_number(f, 'date', d and d.isoformat(), 'Data inválida. Use dd/mm, ex.: <b>05/10</b>')
+        return store_number(f, 'date', d and d.isoformat(), f'Não entendi a data. Digite, {self.DATE_HINT}.')
 
     # ── botões ──
     def pick_pm(self, chat_id: int, f: dict, value: str) -> str:
@@ -112,9 +115,12 @@ class ExpenseFlow(Flow):
         f['data']['category'] = f['cats'][int(value)]
         return f['data']['category']
 
-    def pick_date(self, chat_id: int, f: dict, value: str) -> str:
+    def pick_date(self, chat_id: int, f: dict, value: str) -> str | None:
+        if value == 'x':  # "Outra data": só pede para digitar (o passo continua sendo a data)
+            self.ask(chat_id, f'📅 Digite a data da compra ({self.DATE_HINT}).', [self.cancel])
+            return None
         f['data']['date'] = (date.today() - timedelta(days=int(value))).isoformat()
-        return 'Hoje' if value == '0' else 'Ontem'
+        return ['Hoje', 'Ontem', 'Anteontem'][int(value)]
 
     # ── fim ──
     def finish(self, chat_id: int) -> None:

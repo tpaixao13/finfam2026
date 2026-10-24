@@ -127,6 +127,11 @@ def test_parsers():
     today = date(2026, 10, 23)
     assert parse_date('05/10', today) == date(2026, 10, 5) and parse_date('ontem', today) == date(2026, 10, 22)
     assert parse_date('31/02', today) is None
+    # 23/10/2026 é sexta-feira
+    assert [parse_date(x, today) for x in ('anteontem', 'dia 5', '30', 'dia 31', 'sexta', 'Sábado', 'segunda-feira')] == [
+        date(2026, 10, 21), date(2026, 10, 5), date(2026, 9, 30), date(2026, 8, 31), date(2026, 10, 23),
+        date(2026, 10, 17), date(2026, 10, 19)]
+    assert parse_date('5', date(2026, 1, 3)) == date(2025, 12, 5)
     assert quick_parse('Gastei 25 no almoço no pix', today) == {'amount': 25.0, 'payment_method': 'PIX', 'description': 'Almoço'}
     assert quick_parse('mercado R$ 300,00 no crédito em 3x', today) == {
         'amount': 300.0, 'payment_method': 'Cartão de Crédito', 'installments': 3, 'description': 'Mercado'}
@@ -324,3 +329,19 @@ def test_ai_checked_before_calling_it():
     assert 'IA: <b>ligada</b> (Gemini · gemini-flash-lite-latest)' in tg.last['text']
     b2.handle(_msg(51, 'oi'))
     assert b2.api.interpreted == 1 and 'Posso lançar gastos.' in tg.last['text']
+
+
+def test_other_date_button_asks_to_type():
+    tg = FakeTelegram()
+    b = Bot(tg, StubApi({}, ai=(False, False)))
+    b.handle(_msg(60, 'almoço 25 no pix'))
+    b.handle(_click(60, 'f:cat:0'))
+    assert tg.button('Anteontem') and tg.button('📅 Outra data')
+    b.handle(_click(60, 'f:date:x'))
+    assert 'Digite a data' in tg.last['text'] and b.flows[60]['step'] == 'date'
+    b.handle(_msg(60, 'dia 5'))
+    assert 'Confere o lançamento' in tg.last['text'] and 'Data: 05/' in tg.last['text']
+    b.handle(_msg(61, 'uber 10 no pix'))
+    b.handle(_click(61, 'f:cat:0'))
+    b.handle(_msg(61, 'amanhã de manhã'))
+    assert 'Não entendi a data' in tg.last['text']

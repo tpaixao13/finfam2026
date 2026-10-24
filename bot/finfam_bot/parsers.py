@@ -1,5 +1,6 @@
 """Interpretação local de valores, datas e frases curtas (sem IA)."""
 import re
+import unicodedata
 from datetime import date, timedelta
 
 from finfam_bot.consts import CREDIT, DEBIT
@@ -18,12 +19,32 @@ def parse_amount(text: str) -> float | None:
     return value if 0 < value < 10_000_000 else None
 
 
+_WEEKDAYS = {'segunda': 0, 'terca': 1, 'quarta': 2, 'quinta': 3, 'sexta': 4, 'sabado': 5, 'domingo': 6}
+
+
 def parse_date(text: str, today: date) -> date | None:
-    t = (text or '').strip().lower()
-    if t in ('hoje', 'h'):
-        return today
-    if t in ('ontem', 'o'):
-        return today - timedelta(days=1)
+    """Datas digitadas: hoje, ontem, anteontem, 05/10, 5/10/2026, 05-10-26, "dia 5" ou só "5"
+    (último dia 5 que já passou), dia da semana ("sexta", "sábado": o último que passou)."""
+    t = unicodedata.normalize('NFKD', (text or '').strip().lower()).encode('ascii', 'ignore').decode()
+    t = re.sub(r'\s+', ' ', t).removeprefix('dia ').removesuffix('-feira').removesuffix(' feira').strip()
+    relative = {'hoje': 0, 'h': 0, 'ontem': 1, 'o': 1, 'anteontem': 2}
+    if t in relative:
+        return today - timedelta(days=relative[t])
+    if t in _WEEKDAYS:
+        return today - timedelta(days=(today.weekday() - _WEEKDAYS[t]) % 7)
+    if re.fullmatch(r'\d{1,2}', t):  # só o dia: este mês, ou o mês passado se ainda não chegou
+        day = int(t)
+        for back in (0, 1, 2):  # dia 31 em outubro (dia 23) → 31 de agosto
+            month, year = today.month - back, today.year
+            if month <= 0:
+                month, year = month + 12, year - 1
+            try:
+                d = date(year, month, day)
+            except ValueError:
+                continue
+            if d <= today:
+                return d
+        return None
     m = re.fullmatch(r'(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?', t)
     if not m:
         return None
