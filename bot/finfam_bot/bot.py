@@ -74,6 +74,48 @@ def parse_date(text: str, today: date) -> date | None:
         return None
 
 
+_STOP = {'gastei', 'paguei', 'comprei', 'gasto', 'compra', 'paguei', 'lancar', 'lança', 'lanca', 'no', 'na', 'nos',
+         'nas', 'de', 'do', 'da', 'em', 'com', 'um', 'uma', 'o', 'a', 'e', 'pelo', 'pela', 'reais', 'real', 'r$',
+         'hoje', 'ontem', 'cartao', 'cartão', 'via', 'pago', 'paga'}
+_METHOD_WORDS = [(('credito', 'crédito'), CREDIT), (('debito', 'débito'), DEBIT), (('pix',), 'PIX'),
+                 (('dinheiro', 'especie', 'espécie'), 'Dinheiro'), (('vr',), 'VR'), (('va',), 'VA')]
+
+
+def quick_parse(text: str, today: date) -> dict:
+    """Entende frases simples sem IA: "gastei 25 no almoço no pix", "uber 18,90 ontem".
+    Devolve só o que encontrou (description, amount, payment_method, installments, date)."""
+    out: dict = {}
+    words = (text or '').split()
+    rest = []
+    for w in words:
+        low = w.lower().strip('.,;!?')
+        if 'amount' not in out and re.fullmatch(r'(r\$)?\d[\d.]*(,\d{1,2})?', low.replace('r$', 'r$')):
+            value = parse_amount(low)
+            if value:
+                out['amount'] = value
+                continue
+        if m := re.fullmatch(r'(\d{1,2})x', low):
+            out['installments'] = int(m[1])
+            continue
+        method = next((mth for keys, mth in _METHOD_WORDS if low in keys), None)
+        if method and 'payment_method' not in out:
+            out['payment_method'] = method
+            continue
+        if low in ('hoje', 'ontem'):
+            out['date'] = parse_date(low, today).isoformat()
+        if low in _STOP or low == 'r$':
+            continue
+        rest.append(w.strip('.,;!?'))
+    if out.get('installments') and out.get('payment_method', CREDIT) != CREDIT:
+        out.pop('installments')
+    elif out.get('installments'):
+        out['payment_method'] = CREDIT
+    if rest:
+        desc = ' '.join(rest)[:200]
+        out['description'] = desc[0].upper() + desc[1:]
+    return out
+
+
 def rows(buttons: list[dict], per_row: int = 2) -> list[list[dict]]:
     return [buttons[i:i + per_row] for i in range(0, len(buttons), per_row)]
 
@@ -117,6 +159,10 @@ class Bot:
                 self.tg.send(chat['id'], self._api_error_text(exc))
         except Exception:  # um update ruim nunca derruba o bot
             log.exception('Falha ao processar update %s', update.get('update_id'))
+            chat = (update.get('message') or update.get('callback_query', {}).get('message') or {}).get('chat', {})
+            if chat.get('id'):
+                self.flows.pop(chat['id'], None)
+                self.tg.send(chat['id'], '⚠️ Algo deu errado aqui. Nada foi lançado — tente de novo com /lancar.')
 
     def _api_error_text(self, exc: ApiError) -> str:
         if exc.code == 'telegram_not_linked':
@@ -235,10 +281,14 @@ class Bot:
         try:
             r = self.api.post(chat_id, '/ai/interpret', {'text': text[:500]})
         except ApiError as exc:
+            if exc.code != 'ai_not_configured' and exc.status not in (502, 0):
+                raise
+            # sem IA (ou IA fora do ar): tenta entender sozinho frases simples
+            if self.quick_flow(chat_id, text):
+                return
             if exc.code == 'ai_not_configured':
                 self.tg.send(chat_id, 'Não entendi. 🙂 Use /lancar para lançar um gasto, ou /ajuda.\n\n'
-                             '<i>Dica: com uma chave de IA cadastrada no site (Telegram e IA), '
-                             'você pode só escrever o gasto.</i>')
+                             '<i>Dica: escreva o gasto com o valor, ex.: <b>almoço 25 no pix</b>.</i>')
                 return
             raise
         intent = r['intent']
@@ -258,6 +308,15 @@ class Bot:
                 self.confirm(chat_id, d)
         else:
             self.tg.send(chat_id, h(r.get('reply') or 'Não entendi.') + '\n\nVeja o que eu faço em /ajuda.')
+
+    def quick_flow(self, chat_id: int, text: str) -> bool:
+        """Frase com valor ("almoço 25 no pix") → lançamento guiado só com o que falta."""
+        data = quick_parse(text, date.today())
+        if not data.get('amount') or not data.get('description'):
+            return False
+        self.flows[chat_id] = {'step': 'method', 'data': data, 'ts': time.time()}
+        self.flow_next(chat_id)
+        return True
 
     def confirm(self, chat_id: int, d: dict) -> None:
         draft_id = secrets.token_hex(4)
@@ -292,7 +351,8 @@ class Bot:
                          rows([btn(METHOD_LABEL[m], f'f:pm:{i}') for i, m in enumerate(METHODS)], 3) + [cancel])
         elif step == 'card':
             cards = self._cards_for(chat_id, data['payment_method'])
-            if not cards:
+            if not cards:  # PIX/dinheiro ou nenhum cartão do tipo: pula a pergunta
+                data['card_id'] = None
                 return self.flow_next(chat_id)
             f['cards'] = {c['id']: c['label'] for c in cards}
             self.tg.send(chat_id, 'Qual cartão?', rows([btn(c['label'][:30], f'f:card:{c["id"]}') for c in cards[:12]], 1)
@@ -343,6 +403,9 @@ class Bot:
         f['ts'] = time.time()
         step, data = f['step'], f['data']
         if step == 'description':
+            if re.search(r'\d', text) and len(text.split()) > 1:  # frase inteira: "almoço 25 no pix"
+                self.flows.pop(chat_id, None)
+                return self.free_text(chat_id, text)
             data['description'] = text[:200]
         elif step == 'amount':
             value = parse_amount(text)

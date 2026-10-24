@@ -15,7 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'bot'))
 
-from finfam_bot.bot import Bot, parse_amount, parse_date  # noqa: E402
+from finfam_bot.bot import Bot, parse_amount, parse_date, quick_parse  # noqa: E402
 from finfam_bot.http import FinFam  # noqa: E402
 
 KEY = 'k' * 40
@@ -122,6 +122,10 @@ def test_parsers():
     today = date(2026, 10, 23)
     assert parse_date('05/10', today) == date(2026, 10, 5) and parse_date('ontem', today) == date(2026, 10, 22)
     assert parse_date('31/02', today) is None
+    assert quick_parse('Gastei 25 no almoço no pix', today) == {'amount': 25.0, 'payment_method': 'PIX', 'description': 'Almoço'}
+    assert quick_parse('mercado R$ 300,00 no crédito em 3x', today) == {
+        'amount': 300.0, 'payment_method': 'Cartão de Crédito', 'installments': 3, 'description': 'Mercado'}
+    assert quick_parse('uber 18,90 ontem', today)['date'] == '2026-10-22'
 
 
 def test_unlinked_chat_gets_instructions(bot):
@@ -165,9 +169,29 @@ def test_full_flow(bot, api_url, family):
                 for yr in (y, y + 1))
     assert found == 3  # 3 parcelas (podem virar o ano)
 
-    # texto livre sem IA → orienta /lancar ; resumo ; desconectar
-    b.handle(_msg(20, 'gastei 10 no pão'))
+    # frase inteira depois do /lancar, sem IA: entende valor, forma e descrição
+    b.handle(_msg(20, '/lancar'))
+    b.handle(_msg(20, 'Gastei 25 no almoço no pix'))
+    assert tg.last['text'].startswith('Categoria')
+    b.handle(_click(20, tg.button('Alimentação')))
+    b.handle(_click(20, tg.button('Hoje')))
+    assert '<b>Almoço</b> — R$ 25,00' in tg.last['text'] and 'PIX' in tg.last['text']
+    b.handle(_click(20, tg.button('ok:')))
+    assert '✅' in tg.edits[-1]['text']
+
+    # texto livre sem IA: frase com valor pergunta só o que falta; sem valor orienta
+    b.handle(_msg(20, 'uber 18,90'))
+    assert tg.last['text'] == 'Como foi pago?'
+    b.handle(_msg(20, '/cancelar'))
+    b.handle(_msg(20, 'bom dia'))
     assert '/lancar' in tg.last['text']
+
+    # passo a passo escolhendo PIX nos botões (não pergunta cartão)
+    b.handle(_msg(20, '/lancar'))
+    b.handle(_msg(20, 'Padaria'))
+    b.handle(_msg(20, '12'))
+    b.handle(_click(20, tg.button('PIX')))
+    assert tg.last['text'].startswith('Categoria')
     b.handle(_msg(20, '/resumo'))
     assert 'Resumo de' in tg.last['text']
     b.handle(_msg(20, '/desconectar'))
