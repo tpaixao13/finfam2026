@@ -89,3 +89,52 @@ def test_only_the_site_session_manages_2fa(client, family):
     api = {'Authorization': f'Bearer {raw}'}
     assert client.post(f'{API}/auth/2fa/setup', headers=api).status_code == 403
     assert client.post(f'{API}/auth/2fa/disable', headers=api, json={'password': PW, 'code': '123456'}).status_code == 403
+
+
+# ── 2FA do administrador ─────────────────────────────────────────────────────
+
+def _admin_login(client, password='admin-pass-123'):
+    return client.post(f'{API}/admin/login', json={'email': 'admin@finfam.test', 'password': password})
+
+
+def test_admin_2fa_login_lock_and_server_reset(client, family, capsys):
+    from scripts import reset_2fa
+    adm = _admin(client)
+    setup = client.post(f'{API}/admin/2fa/setup', headers=adm).json()
+    assert client.post(f'{API}/admin/2fa/enable', headers=adm, json={'code': _code(setup['secret'])}).status_code == 200
+    r = _admin_login(client).json()
+    assert r['two_factor_required'] and 'access_token' not in r
+    # o desafio não vale como sessão de admin
+    assert client.get(f'{API}/admin/dashboard', headers={'Authorization': f"Bearer {r['challenge']}"}).status_code in (401, 403)
+    for _ in range(3):
+        last = client.post(f'{API}/admin/login/2fa', json={'challenge': r['challenge'], 'code': '000000'
+                                                           if _code(setup['secret']) != '000000' else '111111'})
+    assert last.status_code == 423 and 'scripts.reset_2fa' in last.json()['detail']['message']
+    assert _admin_login(client).status_code == 423  # bloqueado até no primeiro passo
+    # recuperação pelo servidor
+    assert reset_2fa.main(['admin@finfam.test']) == 0 and 'desbloqueada' in capsys.readouterr().out
+    r = _admin_login(client).json()
+    ok = client.post(f'{API}/admin/login/2fa', json={'challenge': r['challenge'], 'code': _code(setup['secret'], 1)})
+    assert ok.status_code == 200 and client.get(f'{API}/admin/dashboard', headers={
+        'Authorization': f"Bearer {ok.json()['access_token']}"}).status_code == 200
+    assert reset_2fa.main(['admin@finfam.test', '--remover']) == 0
+    assert 'access_token' in _admin_login(client).json()
+
+
+def test_panel_buttons_do_not_touch_admin_2fa(client, family):
+    from app.core.db import session
+    from app.models import User
+    adm = _admin(client)
+    admin_id = session.query(User).filter_by(email='admin@finfam.test').first().id
+    session.remove()
+    assert client.post(f'{API}/admin/users/{admin_id}/2fa/unlock', headers=adm).status_code == 403
+    assert client.delete(f'{API}/admin/users/{admin_id}/2fa', headers=adm).status_code == 403
+
+
+def test_admin_disable_needs_password_and_code(client, family):
+    adm = _admin(client)
+    secret = client.post(f'{API}/admin/2fa/setup', headers=adm).json()['secret']
+    client.post(f'{API}/admin/2fa/enable', headers=adm, json={'code': _code(secret)})
+    assert client.post(f'{API}/admin/2fa/disable', headers=adm, json={'password': 'errada', 'code': _code(secret, 1)}).status_code == 422
+    assert client.post(f'{API}/admin/2fa/disable', headers=adm, json={'password': 'admin-pass-123', 'code': _code(secret, 1)}).status_code == 200
+    assert client.get(f'{API}/admin/2fa', headers=adm).json()['enabled'] is False

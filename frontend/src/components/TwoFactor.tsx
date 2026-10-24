@@ -8,6 +8,10 @@ import { Badge, Button, Field, Input, Modal, Panel } from './ui'
 interface Setup { secret: string; otpauth_uri: string; qr_svg: string | null }
 type Done = { message: string }
 
+/** De onde vêm as rotas: usuário (/auth/2fa) ou administrador (/admin/2fa, com o token de admin). */
+export interface TwoFactorClient { base: string; post: <T>(path: string, body?: unknown) => Promise<T> }
+const USER_CLIENT: TwoFactorClient = { base: '/auth/2fa', post: (path, body) => api.post(path, body) }
+
 const SNOOZE_DAYS = 7
 const snoozeKey = (uid: number) => `finfam.2fa.snooze.${uid}`
 
@@ -18,14 +22,15 @@ function snoozedUntil(uid: number): number {
 /** Chave em grupos de 4 para digitar no app, se não der para ler o QR code. */
 const grouped = (secret: string) => secret.match(/.{1,4}/g)?.join(' ') ?? secret
 
-function CodeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function CodeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <Input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" maxLength={7} required
       className="input-code" value={value} onChange={(e) => onChange(e.target.value)} />
   )
 }
 
-function EnableModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
+export function EnableModal({ open, onClose, onDone, client = USER_CLIENT }:
+  { open: boolean; onClose: () => void; onDone: () => void; client?: TwoFactorClient }) {
   const [setup, setSetup] = useState<Setup | null>(null)
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -34,14 +39,15 @@ function EnableModal({ open, onClose, onDone }: { open: boolean; onClose: () => 
   useEffect(() => {
     if (!open) return
     setSetup(null); setCode(''); setError(null)
-    api.post<Setup>('/auth/2fa/setup').then(setSetup).catch((e) => setError((e as Error).message))
+    client.post<Setup>(`${client.base}/setup`).then(setSetup).catch((e) => setError((e as Error).message))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   async function confirm(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true); setError(null)
     try {
-      await api.post<Done>('/auth/2fa/enable', { code })
+      await client.post<Done>(`${client.base}/enable`, { code })
       onDone()
     } catch (err) {
       setError((err as Error).message); setCode('')
@@ -71,7 +77,8 @@ function EnableModal({ open, onClose, onDone }: { open: boolean; onClose: () => 
   )
 }
 
-function DisableModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
+export function DisableModal({ open, onClose, onDone, client = USER_CLIENT }:
+  { open: boolean; onClose: () => void; onDone: () => void; client?: TwoFactorClient }) {
   const [f, setF] = useState({ password: '', code: '' })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -80,7 +87,7 @@ function DisableModal({ open, onClose, onDone }: { open: boolean; onClose: () =>
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true); setError(null)
-    try { await api.post<Done>('/auth/2fa/disable', f); onDone() } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
+    try { await client.post<Done>(`${client.base}/disable`, f); onDone() } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
   }
 
   return (

@@ -1,4 +1,5 @@
-"""Painel do administrador: famílias, planos, membros extras, usuários online."""
+"""Painel do administrador: famílias, planos, membros extras, usuários online e 2FA."""
+import hmac
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -9,7 +10,7 @@ from app.core.types import Email, utcnow
 from app.core import ratelimit
 from app.core.db import db, get_or_404
 from app.core.deps import get_admin
-from app.core.security import create_access_token, session_fingerprint
+from app.core.security import create_access_token, decode_access_token, session_fingerprint
 from app.models import Tenant, User
 from app.services import two_factor as tfa
 from app.services.serializers import iso, tenant_out
@@ -45,9 +46,92 @@ def login(body: AdminLoginIn, request: Request):
     user = User.query.filter_by(email=body.email.strip().lower(), is_admin=True).first()
     if not user or not user.check_password(body.password):
         raise HTTPException(status_code=401, detail='Credenciais inválidas.')
+    ratelimit.reset(request, 'admin-login', body.email)
+    if user.totp_locked:
+        raise HTTPException(status_code=423, detail={'code': '2fa_locked', 'message': ADMIN_LOCKED})
+    if user.totp_enabled:  # senha certa: falta o código do app (o desafio não é uma sessão)
+        challenge, _ = create_access_token(user.id, kind='2fa-admin',
+                                           fingerprint=session_fingerprint(user.password_hash), minutes=5)
+        return {'two_factor_required': True, 'challenge': challenge}
+    return _admin_session(user)
+
+
+ADMIN_LOCKED = ('Conta de administrador bloqueada por códigos errados na verificação em duas etapas. '
+                'No servidor, rode: cd backend && .venv/bin/python -m scripts.reset_2fa <e-mail>')
+
+
+def _admin_session(user: User) -> dict:
     token, expires = create_access_token(user.id, kind='admin', fingerprint=session_fingerprint(user.password_hash))
     return {'access_token': token, 'token_type': 'bearer', 'expires_at': expires.isoformat(),
-            'admin': {'id': user.id, 'name': user.name, 'email': user.email}}
+            'admin': {'id': user.id, 'name': user.name, 'email': user.email,
+                      'two_factor_enabled': bool(user.totp_enabled)}}
+
+
+class AdminTwoFactorLoginIn(BaseModel):
+    challenge: str = Field(min_length=10, max_length=2000)
+    code: str = Field(min_length=6, max_length=10)
+
+
+@router.post('/login/2fa', summary='Segundo passo do login do administrador')
+def login_2fa(body: AdminTwoFactorLoginIn, request: Request):
+    payload = decode_access_token(body.challenge)
+    user = db.session.get(User, int(payload.get('sub', 0))) if payload and payload.get('typ') == '2fa-admin' else None
+    if user is None or not user.is_admin or not hmac.compare_digest(
+            str(payload.get('fp', '')), session_fingerprint(user.password_hash)):
+        raise HTTPException(status_code=401, detail='O login expirou. Digite e-mail e senha de novo.')
+    ratelimit.check(request, 'admin-login2fa', str(user.id), limit=10, window=900)
+    try:
+        tfa.verify_login(user, body.code)
+    except tfa.TwoFactorError as exc:
+        db.session.commit()
+        if exc.locked:
+            raise HTTPException(status_code=423, detail={'code': '2fa_locked', 'message': ADMIN_LOCKED})
+        raise HTTPException(status_code=401, detail=str(exc))
+    db.session.commit()
+    return _admin_session(user)
+
+
+# ── 2FA do próprio administrador ─────────────────────────────────────────────
+
+class CodeIn(BaseModel):
+    code: str = Field(min_length=6, max_length=10)
+
+
+class DisableIn(CodeIn):
+    password: str = Field(min_length=1)
+
+
+def _tfa(fn, *args):
+    try:
+        result = fn(*args)
+    except tfa.TwoFactorError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.session.commit()
+    return result
+
+
+@router.get('/2fa', summary='Situação do 2FA do administrador')
+def my_2fa(admin: User = Depends(get_admin)):
+    return tfa.status(admin)
+
+
+@router.post('/2fa/setup', summary='Começa a ativar o 2FA do administrador (QR code / chave)')
+def my_2fa_setup(admin: User = Depends(get_admin)):
+    return _tfa(tfa.start_setup, admin)
+
+
+@router.post('/2fa/enable', summary='Confirma a ativação com um código do app')
+def my_2fa_enable(body: CodeIn, admin: User = Depends(get_admin)):
+    _tfa(tfa.confirm_setup, admin, body.code)
+    return {'message': 'Verificação em duas etapas ativada no login do administrador.'}
+
+
+@router.post('/2fa/disable', summary='Desativa (exige senha e um código do app)')
+def my_2fa_disable(body: DisableIn, admin: User = Depends(get_admin)):
+    if not admin.check_password(body.password):
+        raise HTTPException(status_code=422, detail='Senha incorreta.')
+    _tfa(tfa.disable, admin, body.code)
+    return {'message': 'Verificação em duas etapas desativada no login do administrador.'}
 
 
 @router.get('/dashboard', summary='Visão geral das famílias e usuários')
@@ -92,9 +176,18 @@ def reset_password(user_id: int, body: PasswordIn, admin: User = Depends(get_adm
     return {'message': f'Senha de {user.name} redefinida com sucesso.' + (' Telegram e tokens de API foram desconectados: conecte de novo.' if revoked else '')}
 
 
+def _family_user(user_id: int) -> User:
+    """Os botões do painel valem só para usuários das famílias. 2FA de administrador
+    só se tira com senha + código, ou pelo comando no servidor (scripts.reset_2fa)."""
+    user = get_or_404(User.query.filter_by(id=user_id), 'Usuário não encontrado.')
+    if user.is_admin:
+        raise HTTPException(status_code=403, detail='2FA de administrador: use o comando no servidor (scripts.reset_2fa).')
+    return user
+
+
 @router.post('/users/{user_id}/2fa/unlock', summary='Zera os erros do 2FA e desbloqueia o usuário')
 def unlock_2fa(user_id: int, _: User = Depends(get_admin)):
-    user = get_or_404(User.query.filter_by(id=user_id), 'Usuário não encontrado.')
+    user = _family_user(user_id)
     tfa.unlock(user)
     db.session.commit()
     return {'message': f'Erros do 2FA de {user.name} zerados e conta desbloqueada.'}
@@ -102,7 +195,7 @@ def unlock_2fa(user_id: int, _: User = Depends(get_admin)):
 
 @router.delete('/users/{user_id}/2fa', summary='Remove o 2FA do usuário (ex.: perdeu o celular)')
 def remove_2fa(user_id: int, _: User = Depends(get_admin)):
-    user = get_or_404(User.query.filter_by(id=user_id), 'Usuário não encontrado.')
+    user = _family_user(user_id)
     tfa.reset(user)
     db.session.commit()
     return {'message': f'Verificação em duas etapas de {user.name} removida. Ele entra só com a senha.'}
