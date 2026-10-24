@@ -189,7 +189,9 @@ def test_full_flow(bot, api_url, family):
     # frase inteira depois do /lancar, sem IA: entende valor, forma e descrição
     b.handle(_msg(20, '/lancar'))
     b.handle(_msg(20, 'Gastei 25 no almoço no pix'))
-    assert tg.last['text'].startswith('🏦 Qual banco?')
+    assert tg.last['text'].startswith('🔁 Essa conta se repete todo mês?')
+    b.handle(_click(20, tg.button('Não, só esta')))
+    assert '🏦 Qual banco?' in tg.last['text']
     b.handle(_click(20, tg.button('Nubank')))
     b.handle(_click(20, tg.button('Alimentação')))
     b.handle(_click(20, tg.button('Hoje')))
@@ -201,6 +203,27 @@ def test_full_flow(bot, api_url, family):
     assert '✅' in tg.edits[-1]['text']
     almoco = _call(api_url, 'GET', '/expenses?search=Almo&month=0', token=family)['items'][0]
     assert (almoco['bank'], almoco['paid']) == ('Nubank', True)
+
+    # conta recorrente no débito: digita 6 meses → 6 lançamentos, só o 1º pago
+    b.handle(_msg(20, '/lancar'))
+    b.handle(_msg(20, 'Academia'))
+    b.handle(_msg(20, '99,90'))
+    b.handle(_click(20, tg.button('Débito')))
+    if 'Qual cartão?' in tg.last['text']:
+        b.handle(_click(20, 'f:card:0'))
+    b.handle(_msg(20, '1'))  # inválido: pede de novo
+    assert 'de <b>2</b> a <b>120</b>' in tg.last['text']
+    b.handle(_msg(20, '6'))
+    b.handle(_click(20, 'f:bank:-'))
+    b.handle(_click(20, 'f:cat:0'))
+    b.handle(_click(20, tg.button('Hoje')))
+    b.handle(_click(20, tg.button('✅ Sim')))
+    assert 'Repete: todo mês, por 6 meses' in tg.last['text']
+    b.handle(_click(20, tg.button('ok:')))
+    y = date.today().year
+    gym = [e for yr in (y, y + 1) for e in _call(api_url, 'GET', f'/expenses?search=Academia&month=0&year={yr}&per_page=50',
+                                                   token=family)['items']]
+    assert len(gym) == 6 and sum(e['paid'] for e in gym) == 1
 
     # texto livre sem IA: frase com valor pergunta só o que falta; sem valor orienta
     b.handle(_msg(20, 'uber 18,90'))
@@ -216,7 +239,7 @@ def test_full_flow(bot, api_url, family):
     b.handle(_msg(20, 'Padaria'))
     b.handle(_msg(20, '12'))
     b.handle(_click(20, tg.button('PIX')))
-    assert tg.last['text'] == '✔️ PIX\n\n🏦 Qual banco?'
+    assert tg.last['text'].startswith('✔️ PIX\n\n🔁 Essa conta se repete todo mês?')
     b.handle(_msg(20, '/resumo'))
     assert 'Resumo de' in tg.last['text']
     # investimento em dólar pelo passo a passo + carteira
@@ -286,6 +309,7 @@ def test_ai_draft_confirm_and_missing_amount():
          'body': {'description': 'Uber', 'amount': '23.90'}}
     b = Bot(tg, StubApi({'intent': 'expense', 'draft': d, 'reply': ''}))
     b.handle(_msg(30, 'uber 23,90'))
+    b.handle(_click(30, 'f:rec:0'))
     assert 'Qual banco?' in tg.last['text']
     assert tg.last['buttons'][0][0]['text'] == 'Inter'  # bancos já usados pela família primeiro
     b.handle(_click(30, 'f:bank:-'))
@@ -344,7 +368,7 @@ def test_ai_checked_before_calling_it():
     b.handle(_msg(50, 'quanto gastei com mercado?'))
     assert 'desligada' in tg.last['text'] and b.api.interpreted == 0
     b.handle(_msg(50, 'almoço 25 no pix'))  # formato simples segue funcionando sem IA
-    assert 'Qual banco?' in tg.last['text'] and b.api.interpreted == 0
+    assert 'se repete' in tg.last['text'] and b.api.interpreted == 0
     b2 = Bot(tg, StubApi({'intent': 'chat', 'reply': 'Posso lançar gastos.'}))
     b2.handle(_msg(51, '/ajuda'))
     assert 'IA: <b>ligada</b> (Gemini · gemini-flash-lite-latest)' in tg.last['text']
@@ -356,6 +380,7 @@ def test_other_date_button_asks_to_type():
     tg = FakeTelegram()
     b = Bot(tg, StubApi({}, ai=(False, False)))
     b.handle(_msg(60, 'almoço 25 no pix'))
+    b.handle(_click(60, 'f:rec:0'))
     b.handle(_click(60, 'f:bank:-'))
     b.handle(_click(60, 'f:cat:0'))
     assert tg.button('Anteontem') and tg.button('📅 Outra data')
@@ -365,6 +390,7 @@ def test_other_date_button_asks_to_type():
     b.handle(_click(60, 'f:paid:1'))
     assert 'Confere o lançamento' in tg.last['text'] and 'Data: 05/' in tg.last['text']
     b.handle(_msg(61, 'uber 10 no pix'))
+    b.handle(_click(61, 'f:rec:0'))
     b.handle(_click(61, 'f:bank:0'))
     b.handle(_click(61, 'f:cat:0'))
     b.handle(_msg(61, 'amanhã de manhã'))

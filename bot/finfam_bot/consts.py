@@ -7,3 +7,5 @@ METHOD_LABEL = {'PIX': 'PIX', DEBIT: 'Débito', CREDIT: 'Crédito', 'Dinheiro': 
 INSTALLMENTS = [1, 2, 3, 4, 5, 6, 10, 12]
 
 BANK_METHODS = {'PIX', DEBIT, CREDIT}  # formas em que o site pede o banco (se não houver cartão)
+RECURRING_METHODS = {'PIX', DEBIT}  # no /lancar, pergunta se a conta se repete todo mês
+RECURRING_OPTIONS = [3, 6, 12, 24]

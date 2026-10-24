@@ -2,7 +2,8 @@
 import re
 from datetime import date, timedelta
 
-from finfam_bot.consts import BANK_METHODS, CREDIT, DEBIT, INSTALLMENTS, METHOD_LABEL, METHODS
+from finfam_bot.consts import (BANK_METHODS, CREDIT, DEBIT, INSTALLMENTS, METHOD_LABEL, METHODS,
+                               RECURRING_METHODS, RECURRING_OPTIONS)
 from finfam_bot.flow import Flow, store_number
 from finfam_bot.fmt import btn, h, rows
 from finfam_bot.parsers import parse_amount, parse_date
@@ -12,8 +13,8 @@ class ExpenseFlow(Flow):
     kind, prefix, cancel_arg = 'expense', 'f', 'cancel'
     cancelled = 'Lançamento cancelado.'
     expired = '⌛ Esse lançamento expirou. Use /lancar.'
-    pick_step = {'pm': 'method', 'card': 'card', 'inst': 'installments', 'bank': 'bank', 'cat': 'category',
-                 'date': 'date', 'paid': 'paid'}
+    pick_step = {'pm': 'method', 'card': 'card', 'inst': 'installments', 'rec': 'recurring', 'bank': 'bank',
+                 'cat': 'category', 'date': 'date', 'paid': 'paid'}
 
     def pending(self, chat_id: int, f: dict) -> str | None:
         data, ai = f['data'], f.get('from_ai')
@@ -21,6 +22,7 @@ class ExpenseFlow(Flow):
                   ('method', data.get('payment_method')),
                   ('card', 'card_id' in data or ai),
                   ('installments', 'installments' in data or data.get('payment_method') != CREDIT or ai),
+                  ('recurring', 'recurring' in data or data.get('payment_method') not in RECURRING_METHODS),
                   ('bank', 'bank' in data or data.get('card_id') or data.get('payment_method') not in BANK_METHODS),
                   ('category', data.get('category')), ('date', data.get('date')),
                   ('paid', 'paid' in data)]
@@ -51,6 +53,12 @@ class ExpenseFlow(Flow):
     def ask_installments(self, chat_id: int, f: dict) -> None:
         self.ask(chat_id, 'Em quantas vezes?',
                  rows([btn('À vista' if n == 1 else f'{n}x', f'f:inst:{n}') for n in INSTALLMENTS], 4) + [self.cancel])
+
+    def ask_recurring(self, chat_id: int, f: dict) -> None:
+        self.ask(chat_id, '🔁 Essa conta se repete todo mês? (ex.: aluguel, internet, escola)\n'
+                          'Toque ou digite por quantos meses (2 a 120).',
+                 [[btn('Não, só esta', 'f:rec:0')],
+                  [btn(f'{n} meses', f'f:rec:{n}') for n in RECURRING_OPTIONS], self.cancel])
 
     def _options(self, chat_id: int) -> dict:
         return self.bot.cached(chat_id, 'options', lambda: self.api.get(chat_id, '/expenses/options'))
@@ -114,6 +122,13 @@ class ExpenseFlow(Flow):
     def read_amount(self, f: dict, text: str) -> str | None:
         return store_number(f, 'amount', parse_amount(text), 'Não entendi o valor. Digite só o número, ex.: <b>87,50</b>')
 
+    def read_recurring(self, f: dict, text: str) -> str | None:
+        n = int(text.strip()) if text.strip().isdigit() else 0
+        if not 2 <= n <= 120:
+            return 'Digite quantos meses a conta se repete, de <b>2</b> a <b>120</b> (ou toque em "Não, só esta").'
+        f['data']['recurring'] = n
+        return None
+
     def read_date(self, f: dict, text: str) -> str | None:
         d = parse_date(text, date.today())
         return store_number(f, 'date', d and d.isoformat(), f'Não entendi a data. Digite, {self.DATE_HINT}.')
@@ -131,6 +146,11 @@ class ExpenseFlow(Flow):
         n = int(value)
         f['data']['installments'] = n if n > 1 else None
         return 'À vista' if n == 1 else f'{n}x'
+
+    def pick_rec(self, chat_id: int, f: dict, value: str) -> str:
+        n = int(value)
+        f['data']['recurring'] = n if n > 1 else None
+        return f'Repete {n} meses' if n > 1 else 'Não repete'
 
     def pick_bank(self, chat_id: int, f: dict, value: str) -> str:
         f['data']['bank'] = None if value == '-' else f['banks'][int(value)]
@@ -161,6 +181,7 @@ class ExpenseFlow(Flow):
         body = {'description': data['description'], 'amount': f'{data["amount"]:.2f}', 'category': data['category'],
                 'payment_method': data['payment_method'], 'date': data['date'],
                 'card_id': data.get('card_id') or None, 'installments': installments, 'user_id': data.get('user_id'),
-                'bank': None if data.get('card_id') else data.get('bank'), 'paid': bool(data.get('paid'))}
+                'bank': None if data.get('card_id') else data.get('bank'), 'paid': bool(data.get('paid')),
+                'recurring_months': data.get('recurring') or None}
         body = {k: v for k, v in body.items() if v is not None}
         self.bot.confirm(chat_id, {**view, 'body': body}, f.get('edit'))
