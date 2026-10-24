@@ -22,7 +22,7 @@ log = logging.getLogger('finfam.ai')
 PROVIDERS = {
     'anthropic': {'label': 'Claude (Anthropic)', 'default_model': 'claude-haiku-5-5',
                   'key_url': 'https://console.anthropic.com/settings/keys'},
-    'gemini': {'label': 'Gemini (Google)', 'default_model': 'gemini-flash-latest',
+    'gemini': {'label': 'Gemini (Google)', 'default_model': 'gemini-flash-lite-latest',
                'key_url': 'https://aistudio.google.com/apikey'},
     'openai': {'label': 'ChatGPT (OpenAI) ou compatível', 'default_model': 'gpt-5.4-mini',
                'key_url': 'https://platform.openai.com/api-keys'},
