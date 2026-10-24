@@ -2,7 +2,7 @@
 import re
 from datetime import date, timedelta
 
-from finfam_bot.consts import CREDIT, DEBIT, INSTALLMENTS, METHOD_LABEL, METHODS
+from finfam_bot.consts import BANK_METHODS, CREDIT, DEBIT, INSTALLMENTS, METHOD_LABEL, METHODS
 from finfam_bot.flow import Flow, store_number
 from finfam_bot.fmt import btn, h, rows
 from finfam_bot.parsers import parse_amount, parse_date
@@ -12,7 +12,8 @@ class ExpenseFlow(Flow):
     kind, prefix, cancel_arg = 'expense', 'f', 'cancel'
     cancelled = 'Lançamento cancelado.'
     expired = '⌛ Esse lançamento expirou. Use /lancar.'
-    pick_step = {'pm': 'method', 'card': 'card', 'inst': 'installments', 'cat': 'category', 'date': 'date'}
+    pick_step = {'pm': 'method', 'card': 'card', 'inst': 'installments', 'bank': 'bank', 'cat': 'category',
+                 'date': 'date', 'paid': 'paid'}
 
     def pending(self, chat_id: int, f: dict) -> str | None:
         data, ai = f['data'], f.get('from_ai')
@@ -20,7 +21,9 @@ class ExpenseFlow(Flow):
                   ('method', data.get('payment_method')),
                   ('card', 'card_id' in data or ai),
                   ('installments', 'installments' in data or data.get('payment_method') != CREDIT or ai),
-                  ('category', data.get('category')), ('date', data.get('date'))]
+                  ('bank', 'bank' in data or data.get('card_id') or data.get('payment_method') not in BANK_METHODS),
+                  ('category', data.get('category')), ('date', data.get('date')),
+                  ('paid', 'paid' in data)]
         return next((step for step, done in checks if not done), None)
 
     # ── perguntas ──
@@ -49,9 +52,27 @@ class ExpenseFlow(Flow):
         self.ask(chat_id, 'Em quantas vezes?',
                  rows([btn('À vista' if n == 1 else f'{n}x', f'f:inst:{n}') for n in INSTALLMENTS], 4) + [self.cancel])
 
+    def _options(self, chat_id: int) -> dict:
+        return self.bot.cached(chat_id, 'options', lambda: self.api.get(chat_id, '/expenses/options'))
+
+    def ask_bank(self, chat_id: int, f: dict) -> None:
+        """Bancos já usados pela família primeiro, depois a lista geral (como no site)."""
+        used = self._options(chat_id).get('banks', [])
+        everything = self.bot.cached(None, 'meta', lambda: self.api.get(chat_id, '/meta'), ttl=3600).get('banks', [])
+        banks = list(dict.fromkeys(used + everything))[:20]
+        f['banks'] = banks
+        self.ask(chat_id, '🏦 Qual banco?', rows([btn(b, f'f:bank:{i}') for i, b in enumerate(banks)], 2)
+                 + [[btn('Pular', 'f:bank:-')], self.cancel])
+
+    def ask_paid(self, chat_id: int, f: dict) -> None:
+        hint = '\n<i>No crédito, normalmente fica pendente até pagar a fatura.</i>' \
+            if f['data'].get('payment_method') == CREDIT else ''
+        self.ask(chat_id, f'Essa despesa já está paga?{hint}',
+                 [[btn('✅ Sim, já paguei', 'f:paid:1'), btn('⏳ Não, pendente', 'f:paid:0')], self.cancel])
+
     def ask_category(self, chat_id: int, f: dict) -> None:
         description = f['data']['description']
-        cats = self.bot.cached(chat_id, 'categories', lambda: self.api.get(chat_id, '/expenses/options')['categories'])
+        cats = self._options(chat_id)['categories']
         f['cats'] = cats
         suggestion = None
         if len(description) >= 3:
@@ -111,6 +132,14 @@ class ExpenseFlow(Flow):
         f['data']['installments'] = n if n > 1 else None
         return 'À vista' if n == 1 else f'{n}x'
 
+    def pick_bank(self, chat_id: int, f: dict, value: str) -> str:
+        f['data']['bank'] = None if value == '-' else f['banks'][int(value)]
+        return f['data']['bank'] or 'Sem banco'
+
+    def pick_paid(self, chat_id: int, f: dict, value: str) -> str:
+        f['data']['paid'] = value == '1'
+        return 'Pago' if f['data']['paid'] else 'Pendente'
+
     def pick_cat(self, chat_id: int, f: dict, value: str) -> str:
         f['data']['category'] = f['cats'][int(value)]
         return f['data']['category']
@@ -127,9 +156,11 @@ class ExpenseFlow(Flow):
         f = self.flows.pop(chat_id)
         data = f['data']
         installments = data.get('installments') if (data.get('installments') or 1) > 1 else None
-        view = {**data, 'card_label': f.get('cards', {}).get(data.get('card_id')), 'installments': installments}
+        view = {**data, 'card_label': data.get('card_label') or f.get('cards', {}).get(data.get('card_id')),
+                'installments': installments}
         body = {'description': data['description'], 'amount': f'{data["amount"]:.2f}', 'category': data['category'],
                 'payment_method': data['payment_method'], 'date': data['date'],
-                'card_id': data.get('card_id') or None, 'installments': installments, 'user_id': data.get('user_id')}
+                'card_id': data.get('card_id') or None, 'installments': installments, 'user_id': data.get('user_id'),
+                'bank': None if data.get('card_id') else data.get('bank'), 'paid': bool(data.get('paid'))}
         body = {k: v for k, v in body.items() if v is not None}
         self.bot.confirm(chat_id, {**view, 'body': body}, f.get('edit'))

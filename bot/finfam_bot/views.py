@@ -24,6 +24,10 @@ def draft_text(d: dict, title: str = 'Confere o lançamento?') -> str:
              + (f' · {d["installments"]}x de {brl(d["amount"] / d["installments"])}' if d.get('installments') else ''),
              f'Categoria: {h(d["category"])}',
              f'Data: {dm(d["date"])}']
+    if d.get('bank') and not d.get('card_label'):
+        lines.append(f'Banco: {h(d["bank"])}')
+    if 'paid' in d:
+        lines.append('Situação: ✅ pago' if d['paid'] else 'Situação: ⏳ pendente')
     if d.get('user_name'):
         lines.append(f'Pessoa: {h(d["user_name"])}')
     return '\n'.join(lines)

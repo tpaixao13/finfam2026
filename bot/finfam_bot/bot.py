@@ -22,7 +22,8 @@ from finfam_bot.views import HELP, bills_view, draft_text, portfolio_text, summa
 
 log = logging.getLogger('finfam.bot')
 
-AI_DRAFT_FIELDS = ('description', 'payment_method', 'card_id', 'installments', 'category', 'date', 'user_id')
+AI_DRAFT_FIELDS = ('description', 'amount', 'payment_method', 'card_id', 'card_label', 'installments', 'category',
+                   'date', 'user_id', 'user_name')
 
 
 def _chat_id(update: dict) -> int | None:
@@ -228,12 +229,11 @@ class Bot:
             self.tg.send(chat_id, h(r.get('reply') or 'Não entendi.') + '\n\nVeja o que eu faço em /ajuda.')
 
     def ai_expense(self, chat_id: int, d: dict) -> None:
-        if not d['missing']:
-            return self.confirm(chat_id, d)
-        # faltou valor/descrição: segue no passo a passo com o que a IA entendeu
+        """O que a IA entendeu entra no passo a passo: pergunta só o que falta
+        (valor, banco, se já está pago) e depois mostra a confirmação."""
         data = {k: d[k] for k in AI_DRAFT_FIELDS if d.get(k)}
-        self.expense.begin(chat_id, data, 'amount' if d['description'] else 'description', from_ai=True)
-        self.expense.ask_step(chat_id)
+        self.expense.begin(chat_id, data, '', from_ai=True)
+        self.expense.next(chat_id)
 
     def quick_flow(self, chat_id: int, text: str) -> bool:
         """Frase com valor ("almoço 25 no pix") → lançamento guiado só com o que falta."""

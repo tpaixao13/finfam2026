@@ -175,7 +175,10 @@ def test_full_flow(bot, api_url, family):
     b.handle(_click(20, tg.button('3x')))
     b.handle(_click(20, tg.button('Alimentação')))
     b.handle(_click(20, tg.button('Hoje')))
+    assert 'Essa despesa já está paga?' in tg.last['text'] and 'fatura' in tg.last['text']
+    b.handle(_click(20, tg.button('⏳ Não')))
     assert 'Confere' in tg.last['text'] and '3x de R$ 100,00' in tg.last['text'] and 'Inter' in tg.last['text']
+    assert 'Banco:' not in tg.last['text'] and 'pendente' in tg.last['text']  # banco vem do cartão
     b.handle(_click(20, tg.button('ok:')))
     assert '✅' in tg.edits[-1]['text']
     y = date.today().year
@@ -186,13 +189,18 @@ def test_full_flow(bot, api_url, family):
     # frase inteira depois do /lancar, sem IA: entende valor, forma e descrição
     b.handle(_msg(20, '/lancar'))
     b.handle(_msg(20, 'Gastei 25 no almoço no pix'))
-    assert tg.last['text'].startswith('Categoria')
+    assert tg.last['text'].startswith('🏦 Qual banco?')
+    b.handle(_click(20, tg.button('Nubank')))
     b.handle(_click(20, tg.button('Alimentação')))
     b.handle(_click(20, tg.button('Hoje')))
+    b.handle(_click(20, tg.button('✅ Sim')))
     assert '<b>Almoço</b> — R$ 25,00' in tg.last['text'] and 'PIX' in tg.last['text']
+    assert 'Banco: Nubank' in tg.last['text'] and 'Situação: ✅ pago' in tg.last['text']
     assert tg.last in tg.edits  # a confirmação reaproveita a mensagem dos botões
     b.handle(_click(20, tg.button('ok:')))
     assert '✅' in tg.edits[-1]['text']
+    almoco = _call(api_url, 'GET', '/expenses?search=Almo&month=0', token=family)['items'][0]
+    assert (almoco['bank'], almoco['paid']) == ('Nubank', True)
 
     # texto livre sem IA: frase com valor pergunta só o que falta; sem valor orienta
     b.handle(_msg(20, 'uber 18,90'))
@@ -208,7 +216,7 @@ def test_full_flow(bot, api_url, family):
     b.handle(_msg(20, 'Padaria'))
     b.handle(_msg(20, '12'))
     b.handle(_click(20, tg.button('PIX')))
-    assert tg.last['text'] == '✔️ PIX\n\nCategoria?'
+    assert tg.last['text'] == '✔️ PIX\n\n🏦 Qual banco?'
     b.handle(_msg(20, '/resumo'))
     assert 'Resumo de' in tg.last['text']
     # investimento em dólar pelo passo a passo + carteira
@@ -248,7 +256,9 @@ class StubApi:
 
     def get(self, chat_id, path, **query):
         if path == '/expenses/options':
-            return {'categories': ['Alimentação', 'Outros']}
+            return {'categories': ['Alimentação', 'Outros'], 'banks': ['Inter']}
+        if path == '/meta':
+            return {'banks': ['Nubank', 'Inter', 'Outros']}
         if path == '/expenses/suggest-category':
             return {'category': 'Alimentação'}
         assert path == '/settings/ai', path
@@ -270,9 +280,14 @@ def test_ai_draft_confirm_and_missing_amount():
          'body': {'description': 'Uber', 'amount': '23.90'}}
     b = Bot(tg, StubApi({'intent': 'expense', 'draft': d, 'reply': ''}))
     b.handle(_msg(30, 'uber 23,90'))
-    assert 'Uber' in tg.last['text'] and 'R$ 23,90' in tg.last['text']
+    assert 'Qual banco?' in tg.last['text']
+    assert tg.last['buttons'][0][0]['text'] == 'Inter'  # bancos já usados pela família primeiro
+    b.handle(_click(30, 'f:bank:-'))
+    b.handle(_click(30, 'f:paid:0'))
+    assert 'Uber' in tg.last['text'] and 'R$ 23,90' in tg.last['text'] and 'pendente' in tg.last['text']
     b.handle(_click(30, tg.button('ok:')))
-    assert b.api.posted == [('/expenses', {'description': 'Uber', 'amount': '23.90'})]
+    assert b.api.posted == [('/expenses', {'description': 'Uber', 'amount': '23.90', 'category': 'Transporte',
+                                           'payment_method': 'PIX', 'date': '2026-10-23', 'paid': False})]
 
     b2 = Bot(tg, StubApi({'intent': 'expense', 'reply': '', 'draft': {**d, 'amount': None, 'missing': ['amount']}}))
     b2.handle(_msg(31, 'comprei uber'))
@@ -323,7 +338,7 @@ def test_ai_checked_before_calling_it():
     b.handle(_msg(50, 'quanto gastei com mercado?'))
     assert 'desligada' in tg.last['text'] and b.api.interpreted == 0
     b.handle(_msg(50, 'almoço 25 no pix'))  # formato simples segue funcionando sem IA
-    assert 'Categoria?' in tg.last['text'] and b.api.interpreted == 0
+    assert 'Qual banco?' in tg.last['text'] and b.api.interpreted == 0
     b2 = Bot(tg, StubApi({'intent': 'chat', 'reply': 'Posso lançar gastos.'}))
     b2.handle(_msg(51, '/ajuda'))
     assert 'IA: <b>ligada</b> (Gemini · gemini-flash-lite-latest)' in tg.last['text']
@@ -335,13 +350,16 @@ def test_other_date_button_asks_to_type():
     tg = FakeTelegram()
     b = Bot(tg, StubApi({}, ai=(False, False)))
     b.handle(_msg(60, 'almoço 25 no pix'))
+    b.handle(_click(60, 'f:bank:-'))
     b.handle(_click(60, 'f:cat:0'))
     assert tg.button('Anteontem') and tg.button('📅 Outra data')
     b.handle(_click(60, 'f:date:x'))
     assert 'Digite a data' in tg.last['text'] and b.flows[60]['step'] == 'date'
     b.handle(_msg(60, 'dia 5'))
+    b.handle(_click(60, 'f:paid:1'))
     assert 'Confere o lançamento' in tg.last['text'] and 'Data: 05/' in tg.last['text']
     b.handle(_msg(61, 'uber 10 no pix'))
+    b.handle(_click(61, 'f:bank:0'))
     b.handle(_click(61, 'f:cat:0'))
     b.handle(_msg(61, 'amanhã de manhã'))
     assert 'Não entendi a data' in tg.last['text']
