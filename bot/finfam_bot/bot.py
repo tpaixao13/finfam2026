@@ -90,7 +90,7 @@ class Bot:
         command, _, arg = text.partition(' ')
         command = command.split('@')[0].lower()
         handlers = {'/start': lambda: self.start(chat_id, arg.strip(), msg.get('from', {})),
-                    '/ajuda': lambda: self.tg.send(chat_id, HELP), '/help': lambda: self.tg.send(chat_id, HELP),
+                    '/ajuda': lambda: self.help(chat_id), '/help': lambda: self.help(chat_id),
                     '/contas': lambda: self.bills(chat_id), '/resumo': lambda: self.summary(chat_id),
                     '/lancar': lambda: self.linked(chat_id) and self.expense.start(chat_id),
                     '/cancelar': lambda: self.cancel(chat_id),
@@ -117,6 +117,17 @@ class Bot:
         self.guided[f.get('kind', 'expense')].text(chat_id, text)
 
     # comandos ────────────────────────────────────────────────────────────────
+    def help(self, chat_id: int) -> None:
+        """Ajuda + situação da IA da família (quem não está conectado vê só a ajuda)."""
+        try:
+            status = self.ai_status(chat_id)
+        except ApiError:
+            return self.tg.send(chat_id, HELP)
+        line = (f'🤖 IA: <b>ligada</b> ({h(status["label"])})' if status['on'] else
+                '🤖 IA: <b>desligada</b> — ligue em Telegram e IA no site.' if status['reason'] == 'off' else
+                '🤖 IA: <b>não configurada</b> — o dono da família cadastra a chave em Telegram e IA no site.')
+        self.tg.send(chat_id, f'{HELP}\n\n{line}')
+
     def start(self, chat_id: int, code: str, sender: dict) -> None:
         if code:  # link do site: confirma de quem é a conta antes de conectar
             who = self.api.post(None, '/telegram/bot/peek', {'code': code[:64]})
@@ -167,7 +178,31 @@ class Bot:
         self.tg.send(chat_id, portfolio_text(self.api.get(chat_id, '/investments')))
 
     # texto livre com IA ──────────────────────────────────────────────────────
+    def ai_status(self, chat_id: int) -> dict:
+        """IA da família: {'on': bool, 'reason': 'missing'|'off'|None, 'label': 'Gemini · modelo'}."""
+        def fetch():
+            cfg = self.api.get(chat_id, '/settings/ai')
+            label = next((p['label'] for p in cfg.get('providers', []) if p['id'] == cfg.get('provider')), '')
+            model = cfg.get('model') or next((p['default_model'] for p in cfg.get('providers', [])
+                                              if p['id'] == cfg.get('provider')), '')
+            reason = None if cfg['configured'] and cfg['enabled'] else ('off' if cfg['configured'] else 'missing')
+            return {'on': reason is None, 'reason': reason, 'label': f'{label.split(" (")[0]} · {model}'}
+        return self.cached(chat_id, 'ai', fetch, ttl=120)
+
+    def ai_off_text(self, reason: str | None) -> str:
+        why = ('🤖 A IA está <b>desligada</b> para a sua família (opção "Usar IA no bot").' if reason == 'off'
+               else '🤖 A IA <b>não está configurada</b> para a sua família.')
+        return (f'{why} Por isso não consigo entender frases livres.\n\n'
+                '• <b>Para ativar:</b> no site, abra <b>Telegram e IA</b> e cadastre a chave '
+                '(só o dono da família pode).\n'
+                '• <b>Sem IA:</b> use /lancar, ou escreva no formato simples: <b>almoço 25 no pix</b>.')
+
     def free_text(self, chat_id: int, text: str) -> None:
+        status = self.ai_status(chat_id)
+        if not status['on']:  # verifica antes: sem IA, só o formato simples
+            if not self.quick_flow(chat_id, text):
+                self.tg.send(chat_id, self.ai_off_text(status['reason']))
+            return
         self.tg.typing(chat_id)
         try:
             r = self.api.post(chat_id, '/ai/interpret', {'text': text[:500]})
@@ -177,9 +212,9 @@ class Bot:
             # sem IA (ou IA fora do ar): tenta entender sozinho frases simples
             if self.quick_flow(chat_id, text):
                 return
-            if exc.code == 'ai_not_configured':
-                self.tg.send(chat_id, 'Não entendi. 🙂 Use /lancar para lançar um gasto, ou /ajuda.\n\n'
-                             '<i>Dica: escreva o gasto com o valor, ex.: <b>almoço 25 no pix</b>.</i>')
+            if exc.code == 'ai_not_configured':  # desligaram a IA há pouco (o status fica 2 min em cache)
+                self.cache.pop((chat_id, 'ai'), None)
+                self.tg.send(chat_id, self.ai_off_text('missing'))
                 return
             raise
         intent = r['intent']

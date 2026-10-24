@@ -194,7 +194,9 @@ def test_full_flow(bot, api_url, family):
     assert tg.last['text'] == 'Como foi pago?'
     b.handle(_msg(20, '/cancelar'))
     b.handle(_msg(20, 'bom dia'))
-    assert '/lancar' in tg.last['text']
+    assert 'não está configurada' in tg.last['text'] and '/lancar' in tg.last['text']
+    b.handle(_msg(20, '/ajuda'))
+    assert 'IA: <b>não configurada</b>' in tg.last['text']
 
     # passo a passo escolhendo PIX nos botões (não pergunta cartão)
     b.handle(_msg(20, '/lancar'))
@@ -236,11 +238,21 @@ def test_expired_or_foreign_draft_is_rejected(bot):
 
 class StubApi:
     """Simula a API para o caminho da IA (o provedor de verdade fica fora do teste)."""
-    def __init__(self, answer):
-        self.answer, self.posted = answer, []
+    def __init__(self, answer, ai=(True, True)):
+        self.answer, self.posted, self.ai, self.interpreted = answer, [], ai, 0
+
+    def get(self, chat_id, path, **query):
+        if path == '/expenses/options':
+            return {'categories': ['Alimentação', 'Outros']}
+        if path == '/expenses/suggest-category':
+            return {'category': 'Alimentação'}
+        assert path == '/settings/ai', path
+        return {'configured': self.ai[0], 'enabled': self.ai[1], 'provider': 'gemini', 'model': None,
+                'providers': [{'id': 'gemini', 'label': 'Gemini (Google)', 'default_model': 'gemini-flash-lite-latest'}]}
 
     def post(self, chat_id, path, body=None):
         if path == '/ai/interpret':
+            self.interpreted += 1
             return self.answer
         self.posted.append((path, body))
         return {'message': 'Despesa lançada!', 'expenses': [{}]}
@@ -298,3 +310,17 @@ def test_dispatcher_keeps_order_per_chat_and_runs_chats_in_parallel():
     d.submit({'n': 0, 'message': {'chat': {'id': 2}}})
     d.pool.shutdown(wait=True)
     assert [x for x in seen if x[0] == 1] == [(1, 0), (1, 1), (1, 2)] and seen[0] == (2, 0)
+
+
+def test_ai_checked_before_calling_it():
+    tg = FakeTelegram()
+    b = Bot(tg, StubApi({'intent': 'chat', 'reply': 'oi'}, ai=(True, False)))  # cadastrada, mas desligada
+    b.handle(_msg(50, 'quanto gastei com mercado?'))
+    assert 'desligada' in tg.last['text'] and b.api.interpreted == 0
+    b.handle(_msg(50, 'almoço 25 no pix'))  # formato simples segue funcionando sem IA
+    assert 'Categoria?' in tg.last['text'] and b.api.interpreted == 0
+    b2 = Bot(tg, StubApi({'intent': 'chat', 'reply': 'Posso lançar gastos.'}))
+    b2.handle(_msg(51, '/ajuda'))
+    assert 'IA: <b>ligada</b> (Gemini · gemini-flash-lite-latest)' in tg.last['text']
+    b2.handle(_msg(51, 'oi'))
+    assert b2.api.interpreted == 1 and 'Posso lançar gastos.' in tg.last['text']
