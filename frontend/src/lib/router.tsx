@@ -21,6 +21,9 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const onPop = () => setLoc(current())
     window.addEventListener('popstate', onPop)
+    // uma página filha pode ter chamado navigate() antes deste efeito (os efeitos dos filhos
+    // rodam primeiro), ex.: /admin sem login → /admin/login. Sincroniza com a URL de agora.
+    onPop()
     return () => window.removeEventListener('popstate', onPop)
   }, [])
   return <RouterCtx.Provider value={loc}>{children}</RouterCtx.Provider>
