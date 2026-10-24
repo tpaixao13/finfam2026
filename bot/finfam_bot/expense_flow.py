@@ -65,6 +65,8 @@ class ExpenseFlow(Flow):
                  [[btn('Hoje', 'f:date:0'), btn('Ontem', 'f:date:1')], self.cancel])
 
     def _cards_for(self, chat_id: int, method: str) -> list[dict]:
+        if method not in (CREDIT, DEBIT, 'VR', 'VA'):  # PIX/dinheiro: nem busca cartões
+            return []
         cards = self.bot.cached(chat_id, 'cards', lambda: self.api.get(chat_id, '/cards', light='true')['cards'])
         if method == CREDIT:
             return [c for c in cards if c['supports_credit']]
