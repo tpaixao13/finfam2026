@@ -51,9 +51,12 @@ def _apply(card: CreditCard, body: CardIn):
 
 
 @router.get('', summary='Cartões com uso do mês, limite, saldo VR/VA e histórico')
-def list_cards(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx)):
+def list_cards(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx),
+               light: bool = Query(False, description='Só os dados do cartão, sem uso/fatura (rápido)')):
     cards = (CreditCard.query.filter(CreditCard.user_id.in_(ctx.uids))
              .order_by(CreditCard.bank, CreditCard.last_digits).all())
+    if light:
+        return {'cards': [card_out(c) for c in cards]}
     return {
         'month': period.month, 'year': period.year, 'month_name': MONTH_NAMES_FULL[period.month - 1],
         'cards': [{**card_out(c), 'usage': cs.card_usage(c, period.month, period.year)} for c in cards],

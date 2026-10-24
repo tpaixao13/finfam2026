@@ -1,6 +1,9 @@
 """Clientes HTTP (só biblioteca padrão): Bot API do Telegram e API do FinFam."""
+import http.client
 import json
 import logging
+import ssl
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,23 +27,56 @@ def _request(url: str, method: str = 'GET', body: dict | None = None, headers: d
         return json.loads(raw) if raw else None
 
 
+class _KeepAlive:
+    """Conexão HTTPS reaproveitada: evita um aperto de mão TLS (0,2–0,5 s no Raspberry) a cada chamada."""
+
+    def __init__(self, host: str):
+        self.host, self.conn, self.lock = host, None, threading.Lock()
+        self.ctx = ssl.create_default_context()
+
+    def post(self, path: str, body: dict, timeout: float):
+        data = json.dumps(body).encode()
+        with self.lock:
+            for attempt in (1, 2):  # a conexão pode ter sido fechada pelo servidor: reconecta uma vez
+                if self.conn is None:
+                    self.conn = http.client.HTTPSConnection(self.host, timeout=timeout, context=self.ctx)
+                self.conn.timeout = timeout
+                if self.conn.sock is not None:
+                    self.conn.sock.settimeout(timeout)
+                try:
+                    self.conn.request('POST', path, data, {'Content-Type': 'application/json'})
+                    resp = self.conn.getresponse()
+                    return resp.status, resp.read()
+                except (http.client.HTTPException, OSError):
+                    self.conn.close()
+                    self.conn = None
+                    if attempt == 2:
+                        raise
+
+
 class Telegram:
     def __init__(self, token: str):
-        self.base = f'https://api.telegram.org/bot{token}/'
+        self.path = f'/bot{token}/'
+        self.send_conn = _KeepAlive('api.telegram.org')   # mensagens, botões
+        self.poll_conn = _KeepAlive('api.telegram.org')   # getUpdates (fica parado esperando)
 
     def call(self, method: str, http_timeout: float = 30, **params):
+        conn = self.poll_conn if method == 'getUpdates' else self.send_conn
         try:
-            r = _request(self.base + method, 'POST', {k: v for k, v in params.items() if v is not None},
-                         timeout=http_timeout)
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode('utf-8', 'replace')
-            if 'message is not modified' not in detail:
-                log.warning('Telegram %s falhou: %s %s', method, exc.code, detail[:200])
-            return None
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            status, raw = conn.post(self.path + method, {k: v for k, v in params.items() if v is not None},
+                                    http_timeout)
+        except (http.client.HTTPException, OSError) as exc:
             log.warning('Telegram %s sem conexão: %s', method, exc)
             return None
-        return r.get('result') if r else None
+        if status != 200:
+            detail = raw.decode('utf-8', 'replace')
+            if 'message is not modified' not in detail:
+                log.warning('Telegram %s falhou: %s %s', method, status, detail[:200])
+            return None
+        try:
+            return json.loads(raw).get('result')
+        except ValueError:
+            return None
 
     def updates(self, offset: int | None, timeout: int = 50) -> list[dict] | None:
         """None = falha de rede/Telegram (quem chama espera antes de tentar de novo)."""

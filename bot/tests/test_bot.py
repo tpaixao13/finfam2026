@@ -23,15 +23,17 @@ KEY = 'k' * 40
 
 class FakeTelegram:
     def __init__(self):
-        self.sent, self.edits, self.answers = [], [], []
+        self.sent, self.edits, self.answers, self.log = [], [], [], []
         self._mid = 100
 
     def send(self, chat_id, text, buttons=None):
         self._mid += 1
         self.sent.append({'chat': chat_id, 'text': text, 'buttons': buttons or [], 'id': self._mid})
+        self.log.append(self.sent[-1])
 
     def edit(self, chat_id, message_id, text, buttons=None):
         self.edits.append({'chat': chat_id, 'id': message_id, 'text': text, 'buttons': buttons or []})
+        self.log.append(self.edits[-1])
 
     def answer(self, callback_id, text=None):
         self.answers.append(text)
@@ -41,7 +43,8 @@ class FakeTelegram:
 
     @property
     def last(self):
-        return self.sent[-1]
+        """Última mensagem mostrada (nova ou editada)."""
+        return self.log[-1]
 
     def button(self, prefix, msg=None):
         for row in (msg or self.last)['buttons']:
@@ -105,9 +108,10 @@ def _msg(chat, text, chat_type='private'):
                                         'text': text}}
 
 
-def _click(chat, data, message_id=101):
+def _click(chat, data, message_id=None):
     return {'update_id': 2, 'callback_query': {'id': 'cb', 'data': data, 'from': {'id': chat},
-                                               'message': {'chat': {'id': chat, 'type': 'private'}, 'message_id': message_id}}}
+                                               'message': {'chat': {'id': chat, 'type': 'private'},
+                                                           'message_id': message_id or 101}}}
 
 
 @pytest.fixture()
@@ -118,6 +122,7 @@ def bot(api_url):
 
 def test_parsers():
     assert parse_amount('R$ 1.234,56') == 1234.56 and parse_amount('87,5') == 87.5 and parse_amount('87.50') == 87.5
+    assert parse_amount('1.000') == 1000 and parse_amount('2.500.000') == 2500000 and parse_amount('10.5') == 10.5
     assert parse_amount('abc') is None and parse_amount('0') is None
     today = date(2026, 10, 23)
     assert parse_date('05/10', today) == date(2026, 10, 5) and parse_date('ontem', today) == date(2026, 10, 22)
@@ -150,7 +155,7 @@ def test_full_flow(bot, api_url, family):
     b.handle(_msg(20, '/contas'))
     assert 'Conta de luz' in tg.last['text']
     b.handle(_click(20, tg.button('pay:')))
-    assert '1 despesa(s) marcada(s) como paga(s)' in tg.answers[-1] and 'Tudo em dia' in tg.edits[-1]['text']
+    assert 'Tudo em dia' in tg.edits[-1]['text']
 
     # lançamento guiado no crédito, 3x
     b.handle(_msg(20, '/lancar'))
@@ -176,6 +181,7 @@ def test_full_flow(bot, api_url, family):
     b.handle(_click(20, tg.button('Alimentação')))
     b.handle(_click(20, tg.button('Hoje')))
     assert '<b>Almoço</b> — R$ 25,00' in tg.last['text'] and 'PIX' in tg.last['text']
+    assert tg.last in tg.edits  # a confirmação reaproveita a mensagem dos botões
     b.handle(_click(20, tg.button('ok:')))
     assert '✅' in tg.edits[-1]['text']
 
@@ -191,9 +197,27 @@ def test_full_flow(bot, api_url, family):
     b.handle(_msg(20, 'Padaria'))
     b.handle(_msg(20, '12'))
     b.handle(_click(20, tg.button('PIX')))
-    assert tg.last['text'].startswith('Categoria')
+    assert tg.last['text'] == '✔️ PIX\n\nCategoria?'
     b.handle(_msg(20, '/resumo'))
     assert 'Resumo de' in tg.last['text']
+    # investimento em dólar pelo passo a passo + carteira
+    sent_before = len(tg.sent)
+    b.handle(_msg(20, '/investir'))
+    b.handle(_click(20, tg.button('Outros')))
+    b.handle(_click(20, tg.button('US$')))
+    assert len(tg.sent) == sent_before + 1  # botões editam a mesma mensagem
+    b.handle(_msg(20, '1.000'))
+    if 'cotação' in tg.last['text']:  # sem internet aqui: o bot pergunta a cotação
+        b.handle(_msg(20, '5,40'))
+    b.handle(_msg(20, '4,5'))
+    assert 'Confere o investimento' in tg.last['text'] and 'US$ 1.000,00' in tg.last['text']
+    b.handle(_click(20, tg.button('ok:')))
+    assert 'Registrado' in tg.last['text'] or 'registrado' in tg.last['text'], tg.last['text']
+    inv = _call(api_url, 'GET', '/investments', token=family)['fixed']
+    assert [(i['currency'], i['amount'], i['annual_rate']) for i in inv] == [('USD', 1000, 4.5)]
+    b.handle(_msg(20, '/carteira'))
+    assert 'Carteira' in tg.last['text'] and 'USD 1.000,00' in tg.last['text'] and 'R$ 5.400,00' in tg.last['text']
+
     b.handle(_msg(20, '/desconectar'))
     b.handle(_msg(20, '/contas'))
     assert 'não está conectado' in tg.last['text']

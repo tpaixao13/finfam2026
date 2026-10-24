@@ -24,6 +24,8 @@ HELP = ('<b>O que eu faço</b>\n'
         '/contas — contas a pagar (com botão para pagar)\n'
         '/resumo — resumo do mês\n'
         '/lancar — lançar um gasto passo a passo\n'
+        '/investir — registrar um investimento (real, dólar, euro…)\n'
+        '/carteira — seus investimentos em reais\n'
         '/cancelar — cancela o lançamento em andamento\n'
         '/desconectar — desliga este Telegram da sua conta\n\n'
         'Com a IA configurada no site, é só escrever, por exemplo:\n'
@@ -48,7 +50,7 @@ def parse_amount(text: str) -> float | None:
     s = re.sub(r'[^\d,.]', '', text or '')
     if ',' in s:
         s = s.replace('.', '').replace(',', '.')
-    elif s.count('.') > 1:
+    elif s.count('.') > 1 or re.fullmatch(r'\d{1,3}\.\d{3}', s):  # "1.000" é mil, não 1,000
         s = s.replace('.', '')
     try:
         value = round(float(s), 2)
@@ -144,6 +146,7 @@ class Bot:
         self.tg, self.api, self.site_url = tg, api, site_url
         self.flows: dict[int, dict] = {}     # chat → lançamento guiado em andamento
         self.drafts: dict[str, dict] = {}    # id → rascunho aguardando ✅
+        self.cache: dict[tuple, tuple[float, object]] = {}  # (chat, recurso) → (quando, dados)
 
     # entrada ─────────────────────────────────────────────────────────────────
     def handle(self, update: dict) -> None:
@@ -200,6 +203,7 @@ class Bot:
                     '/ajuda': lambda: self.tg.send(chat_id, HELP), '/help': lambda: self.tg.send(chat_id, HELP),
                     '/contas': lambda: self.bills(chat_id), '/resumo': lambda: self.summary(chat_id),
                     '/lancar': lambda: self.flow_start(chat_id), '/cancelar': lambda: self.cancel(chat_id),
+                    '/investir': lambda: self.inv_start(chat_id), '/carteira': lambda: self.portfolio(chat_id),
                     '/desconectar': lambda: self.unlink(chat_id)}
         if command in handlers:
             handlers[command]()
@@ -318,18 +322,48 @@ class Bot:
         self.flow_next(chat_id)
         return True
 
-    def confirm(self, chat_id: int, d: dict) -> None:
+    def confirm(self, chat_id: int, d: dict, message_id: int | None = None, path: str = '/expenses',
+                text: str | None = None) -> None:
         draft_id = secrets.token_hex(4)
-        self.drafts[draft_id] = {'chat': chat_id, 'body': d['body'], 'view': d, 'ts': time.time()}
-        self.tg.send(chat_id, draft_text(d), [[btn('✅ Lançar', f'ok:{draft_id}'), btn('❌ Cancelar', f'no:{draft_id}')]])
+        self.drafts[draft_id] = {'chat': chat_id, 'body': d['body'], 'view': d, 'path': path, 'ts': time.time()}
+        buttons = [[btn('✅ Lançar' if path == '/expenses' else '✅ Registrar', f'ok:{draft_id}'),
+                    btn('❌ Cancelar', f'no:{draft_id}')]]
+        if message_id:
+            self.tg.edit(chat_id, message_id, text or draft_text(d), buttons)
+        else:
+            self.tg.send(chat_id, text or draft_text(d), buttons)
+
+    # utilidades ──────────────────────────────────────────────────────────────
+    def cached(self, chat_id, key: str, fetch, ttl: float = 300):
+        """Guarda por alguns minutos o que muda pouco (cartões, categorias, listas)."""
+        hit = self.cache.get((chat_id, key))
+        if hit and time.time() - hit[0] < ttl:
+            return hit[1]
+        value = fetch()
+        if len(self.cache) > 500:
+            self.cache.clear()
+        self.cache[(chat_id, key)] = (time.time(), value)
+        return value
+
+    def ask(self, chat_id: int, text: str, buttons: list | None = None) -> None:
+        """Pergunta do passo a passo. Depois de um toque em botão, reaproveita a mesma
+        mensagem (1 chamada em vez de 2) e mostra acima o que já foi escolhido."""
+        f = self.flows.get(chat_id, {})
+        trail = ' · '.join(f.get('trail', []))
+        body = f'✔️ {h(trail)}\n\n{text}' if trail else text
+        message_id = f.pop('edit', None)
+        if message_id:
+            self.tg.edit(chat_id, message_id, body, buttons)
+        else:
+            self.tg.send(chat_id, body, buttons)
 
     # lançamento guiado ───────────────────────────────────────────────────────
     def flow_start(self, chat_id: int) -> None:
-        self.flows[chat_id] = {'step': 'description', 'data': {}, 'ts': time.time()}
+        self.flows[chat_id] = {'kind': 'expense', 'step': 'description', 'data': {}, 'ts': time.time()}
         self.flow_ask(chat_id)
 
     def _cards_for(self, chat_id: int, method: str) -> list[dict]:
-        cards = self.api.get(chat_id, '/cards')['cards']
+        cards = self.cached(chat_id, 'cards', lambda: self.api.get(chat_id, '/cards', light='true')['cards'])
         if method == CREDIT:
             return [c for c in cards if c['supports_credit']]
         if method == DEBIT:
@@ -343,11 +377,11 @@ class Bot:
         step, data = f['step'], f['data']
         cancel = [btn('❌ Cancelar', 'f:cancel')]
         if step == 'description':
-            self.tg.send(chat_id, '📝 O que foi? (ex.: <i>Mercado</i>, <i>Conta de luz</i>)', [cancel])
+            self.ask(chat_id, '📝 O que foi? (ex.: <i>Mercado</i>, <i>Conta de luz</i>)', [cancel])
         elif step == 'amount':
-            self.tg.send(chat_id, f'💰 Quanto custou <b>{h(data["description"])}</b>? (valor total, ex.: 87,50)', [cancel])
+            self.ask(chat_id, f'💰 Quanto custou <b>{h(data["description"])}</b>? (valor total, ex.: 87,50)', [cancel])
         elif step == 'method':
-            self.tg.send(chat_id, 'Como foi pago?',
+            self.ask(chat_id, 'Como foi pago?',
                          rows([btn(METHOD_LABEL[m], f'f:pm:{i}') for i, m in enumerate(METHODS)], 3) + [cancel])
         elif step == 'card':
             cards = self._cards_for(chat_id, data['payment_method'])
@@ -355,14 +389,14 @@ class Bot:
                 data['card_id'] = None
                 return self.flow_next(chat_id)
             f['cards'] = {c['id']: c['label'] for c in cards}
-            self.tg.send(chat_id, 'Qual cartão?', rows([btn(c['label'][:30], f'f:card:{c["id"]}') for c in cards[:12]], 1)
+            self.ask(chat_id, 'Qual cartão?', rows([btn(c['label'][:30], f'f:card:{c["id"]}') for c in cards[:12]], 1)
                          + [[btn('Sem cartão', 'f:card:0')], cancel])
         elif step == 'installments':
-            self.tg.send(chat_id, 'Em quantas vezes?',
+            self.ask(chat_id, 'Em quantas vezes?',
                          rows([btn('À vista' if n == 1 else f'{n}x', f'f:inst:{n}') for n in INSTALLMENTS], 4)
                          + [cancel])
         elif step == 'category':
-            cats = self.api.get(chat_id, '/expenses/options')['categories']
+            cats = self.cached(chat_id, 'categories', lambda: self.api.get(chat_id, '/expenses/options')['categories'])
             f['cats'] = cats
             suggestion = None
             if len(data['description']) >= 3:
@@ -370,9 +404,9 @@ class Bot:
                                           description=data['description']).get('category')
             buttons = ([btn(f'⭐ {suggestion}', f'f:cat:{cats.index(suggestion)}')] if suggestion in cats else [])
             buttons += [btn(c, f'f:cat:{i}') for i, c in enumerate(cats) if c != suggestion][:20]
-            self.tg.send(chat_id, 'Categoria?', rows(buttons, 2) + [cancel])
+            self.ask(chat_id, 'Categoria?', rows(buttons, 2) + [cancel])
         elif step == 'date':
-            self.tg.send(chat_id, '📆 Quando foi? Toque ou digite a data (dd/mm).',
+            self.ask(chat_id, '📆 Quando foi? Toque ou digite a data (dd/mm).',
                          [[btn('Hoje', 'f:date:0'), btn('Ontem', 'f:date:1')], cancel])
 
     def flow_next(self, chat_id: int) -> None:
@@ -388,7 +422,7 @@ class Bot:
         if pending:
             f['step'] = pending[0]
             return self.flow_ask(chat_id)
-        self.flows.pop(chat_id, None)
+        message_id = self.flows.pop(chat_id, {}).get('edit')
         view = {**data, 'card_label': f.get('cards', {}).get(data.get('card_id')),
                 'installments': data.get('installments') if (data.get('installments') or 1) > 1 else None}
         body = {k: v for k, v in {'description': data['description'], 'amount': f'{data["amount"]:.2f}',
@@ -396,11 +430,13 @@ class Bot:
                                   'date': data['date'], 'card_id': data.get('card_id') or None,
                                   'installments': view['installments'], 'user_id': data.get('user_id')}.items()
                 if v is not None}
-        self.confirm(chat_id, {**view, 'body': body})
+        self.confirm(chat_id, {**view, 'body': body}, message_id)
 
     def flow_text(self, chat_id: int, text: str) -> None:
         f = self.flows[chat_id]
         f['ts'] = time.time()
+        if f.get('kind') == 'inv':
+            return self.inv_text(chat_id, text)
         step, data = f['step'], f['data']
         if step == 'description':
             if re.search(r'\d', text) and len(text.split()) > 1:  # frase inteira: "almoço 25 no pix"
@@ -429,8 +465,8 @@ class Bot:
             return self.tg.answer(cq['id'])
         kind, _, arg = data.partition(':')
         if kind == 'pay':
-            r = self.api.post(chat_id, '/expenses/pay', {'ids': [int(arg)], 'paid': True})
-            self.tg.answer(cq['id'], r.get('message', 'Pago!'))
+            self.tg.answer(cq['id'], 'Marcando como paga…')  # tira o "carregando" do botão na hora
+            self.api.post(chat_id, '/expenses/pay', {'ids': [int(arg)], 'paid': True})
             return self.bills(chat_id, message_id)
         if kind == 'bills':
             self.tg.answer(cq['id'])
@@ -439,6 +475,8 @@ class Bot:
             return self._draft_answer(cq, kind, arg, chat_id, message_id)
         if kind == 'f':
             return self._flow_button(cq, arg, chat_id, message_id)
+        if kind == 'i':
+            return self._inv_button(cq, arg, chat_id, message_id)
         self.tg.answer(cq['id'])
 
     def _draft_answer(self, cq, kind, draft_id, chat_id, message_id) -> None:
@@ -449,8 +487,11 @@ class Bot:
         if kind == 'no':
             self.tg.answer(cq['id'], 'Cancelado')
             return self.tg.edit(chat_id, message_id, '❌ Lançamento cancelado.')
-        r = self.api.post(chat_id, '/expenses', draft['body'])
-        self.tg.answer(cq['id'], 'Lançado!')
+        self.tg.answer(cq['id'], 'Registrando…')
+        r = self.api.post(chat_id, draft.get('path', '/expenses'), draft['body'])
+        if draft.get('path') == '/investments':
+            return self.tg.edit(chat_id, message_id, f'✅ <b>{h(r.get("message", "Registrado!"))}</b>\n\n'
+                                + draft['view']['text'] + '\n\nVeja a carteira em /carteira.')
         first = (r.get('expenses') or [{}])[0]
         extra = ''
         if first.get('month') and (first.get('month'), first.get('year')) != (first.get('purchase_month'), first.get('purchase_year')):
@@ -484,5 +525,153 @@ class Bot:
             chosen = 'Hoje' if value == '0' else 'Ontem'
         else:
             return  # botão de um passo antigo
-        self.tg.edit(chat_id, message_id, f'✔️ {h(chosen)}')
+        f.setdefault('trail', []).append(chosen)
+        f['edit'] = message_id
         self.flow_next(chat_id)
+
+    # investimentos ───────────────────────────────────────────────────────────
+    def _meta(self, chat_id) -> dict:
+        return self.cached(None, 'meta', lambda: self.api.get(chat_id, '/meta'), ttl=3600)
+
+    def inv_start(self, chat_id: int) -> None:
+        self.flows[chat_id] = {'kind': 'inv', 'step': 'type', 'data': {}, 'ts': time.time()}
+        self.inv_next(chat_id)
+
+    def inv_next(self, chat_id: int) -> None:
+        f = self.flows[chat_id]
+        data = f['data']
+        crypto = data.get('investment_type') == 'Criptomoedas'
+        cancel = [btn('❌ Cancelar', 'i:x')]
+        meta = self._meta(chat_id)
+        if 'investment_type' not in data:
+            f['step'] = 'type'
+            return self.ask(chat_id, '📈 Qual o tipo de investimento?',
+                            rows([btn(t, f'i:t:{i}') for i, t in enumerate(meta['investment_types'])], 2) + [cancel])
+        if crypto and 'crypto_coin' not in data:
+            f['step'] = 'coin'
+            return self.ask(chat_id, 'Qual criptomoeda?',
+                            rows([btn(c['label'], f'i:c:{i}') for i, c in enumerate(meta['crypto_coins'])], 2) + [cancel])
+        if not crypto and 'currency' not in data:
+            f['step'] = 'currency'
+            return self.ask(chat_id, 'Em qual moeda?',
+                            rows([btn(f"{c['symbol']} {c['name']}", f'i:m:{i}') for i, c in enumerate(meta['currencies'])], 2)
+                            + [cancel])
+        symbol = next((c['symbol'] for c in meta['currencies'] if c['code'] == data.get('currency', 'BRL')), 'R$')
+        if 'amount' not in data:
+            f['step'] = 'amount'
+            return self.ask(chat_id, f'💰 Quanto foi investido (em {h(symbol)})? Ex.: 1.000,00', [cancel])
+        currency = data.get('currency', 'BRL')
+        if currency != 'BRL' and 'fx_buy_rate' not in data:
+            fx = self.cached(None, 'fx', lambda: self.api.get(chat_id, '/market/fx')['rates'], ttl=900)
+            if not fx.get(currency):  # cotação fora do ar: pergunta (senão a API usa a de hoje)
+                f['step'] = 'fx'
+                return self.ask(chat_id, f'💱 Não consegui a cotação de hoje. Quanto valia 1 {h(symbol)} em reais na compra? '
+                                         'Ex.: 5,40', [cancel])
+        if not crypto and 'annual_rate' not in data:
+            f['step'] = 'rate'
+            buttons = []
+            if data['currency'] == 'BRL':
+                sug = self.cached(None, 'selic', lambda: self.api.get(chat_id, '/market/selic'), ttl=3600)
+                rate = sug['suggestions'].get(data['investment_type']) or 0
+                if rate:
+                    data['_suggested'] = rate
+                    buttons.append(btn(f'⭐ {str(rate).replace(".", ",")}% (sugerida)', 'i:r:s'))
+            buttons.append(btn('Sem rendimento', 'i:r:0'))
+            return self.ask(chat_id, 'Rende quanto ao ano (%)? Toque ou digite, ex.: 12,5', [buttons, cancel])
+        self.inv_confirm(chat_id, symbol)
+
+    def inv_confirm(self, chat_id: int, symbol: str) -> None:
+        f = self.flows.pop(chat_id)
+        d = f['data']
+        today = date.today()
+        currency = d.get('currency', 'BRL')
+        amount_txt = f'{symbol} {d["amount"]:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
+        lines = ['📈 <b>Confere o investimento?</b>', '',
+                 f'<b>{h(d["investment_type"])}</b>' + (f' — {h(d["coin_label"])}' if d.get('coin_label') else ''),
+                 f'Valor: {h(amount_txt)}']
+        if currency != 'BRL':
+            fx = self.cached(None, 'fx', lambda: self.api.get(chat_id, '/market/fx')['rates'], ttl=900)
+            rate = d.get('fx_buy_rate') or fx.get(currency)
+            if rate:
+                label = 'cotação informada' if d.get('fx_buy_rate') else 'cotação de hoje'
+                lines.append(f'≈ {brl(d["amount"] * rate)} ({label}: R$ {str(round(rate, 4)).replace(".", ",")})')
+        if d.get('annual_rate'):
+            lines.append(f'Rende: {str(d["annual_rate"]).replace(".", ",")}% ao ano')
+        lines.append(f'Data: {today:%m/%Y}')
+        body = {'investment_type': d['investment_type'], 'amount': f'{d["amount"]:.2f}',
+                'annual_rate': f'{d.get("annual_rate") or 0:.2f}', 'crypto_coin': d.get('crypto_coin'),
+                'currency': currency, 'month': today.month, 'year': today.year,
+                'fx_buy_rate': f'{d["fx_buy_rate"]:.6f}' if d.get('fx_buy_rate') else None}
+        text = '\n'.join(lines)
+        self.confirm(chat_id, {'body': {k: v for k, v in body.items() if v is not None}, 'text': text},
+                     f.get('edit'), path='/investments', text=text)
+
+    def inv_text(self, chat_id: int, text: str) -> None:
+        f = self.flows[chat_id]
+        if f['step'] == 'amount':
+            value = parse_amount(text)
+            if value is None:
+                return self.tg.send(chat_id, 'Não entendi o valor. Digite só o número, ex.: <b>1.000,00</b>')
+            f['data']['amount'] = value
+        elif f['step'] == 'fx':
+            value = parse_amount(text)
+            if value is None:
+                return self.tg.send(chat_id, 'Digite a cotação em reais, ex.: <b>5,40</b>')
+            f['data']['fx_buy_rate'] = value
+        elif f['step'] == 'rate':
+            value = parse_amount(text.replace('%', ''))
+            if value is None or value > 999:
+                return self.tg.send(chat_id, 'Digite a taxa ao ano, ex.: <b>12,5</b> (ou toque em "Sem rendimento").')
+            f['data']['annual_rate'] = value
+        else:
+            return self.tg.send(chat_id, 'Toque numa das opções acima (ou /cancelar).')
+        self.inv_next(chat_id)
+
+    def _inv_button(self, cq, arg, chat_id, message_id) -> None:
+        self.tg.answer(cq['id'])
+        f = self.flows.get(chat_id)
+        if arg == 'x' or f is None or f.get('kind') != 'inv':
+            if f and f.get('kind') == 'inv':
+                self.flows.pop(chat_id, None)
+            return self.tg.edit(chat_id, message_id, 'Investimento cancelado.' if arg == 'x'
+                                else '⌛ Expirou. Use /investir.')
+        f['ts'] = time.time()
+        field, _, value = arg.partition(':')
+        meta, data = self._meta(chat_id), f['data']
+        if field == 't' and f['step'] == 'type':
+            data['investment_type'] = chosen = meta['investment_types'][int(value)]
+        elif field == 'c' and f['step'] == 'coin':
+            coin = meta['crypto_coins'][int(value)]
+            data['crypto_coin'], data['coin_label'], data['currency'] = coin['id'], coin['label'], 'BRL'
+            chosen = coin['label']
+        elif field == 'm' and f['step'] == 'currency':
+            cur = meta['currencies'][int(value)]
+            data['currency'], chosen = cur['code'], cur['name']
+        elif field == 'r' and f['step'] == 'rate':
+            data['annual_rate'] = data.get('_suggested', 0) if value == 's' else 0
+            chosen = 'sem rendimento' if not data['annual_rate'] else f'{data["annual_rate"]}% a.a.'.replace('.', ',')
+        else:
+            return
+        f.setdefault('trail', []).append(chosen)
+        f['edit'] = message_id
+        self.inv_next(chat_id)
+
+    def portfolio(self, chat_id: int) -> None:
+        d = self.api.get(chat_id, '/investments')
+        lines = [f'💼 <b>Carteira</b>: {brl(d["fixed_total"])}']
+        if d.get('fx_gain_total'):
+            lines.append(f'Câmbio: {"+" if d["fx_gain_total"] >= 0 else ""}{brl(d["fx_gain_total"])}')
+        if d.get('crypto'):
+            lines.append(f'Cripto (aplicado): {brl(d["crypto_total"])}')
+        lines.append('')
+        for i in d['fixed'][:15]:
+            extra = ''
+            if i.get('currency', 'BRL') != 'BRL':
+                extra = f' ({h(i["currency"])} {i["amount"]:,.2f})'.replace(',', 'X').replace('.', ',').replace('X', '.')
+            label = h(i['description'] or i['investment_type'])
+            lines.append(f'• {label}: {brl(i.get("value_brl", i["amount"]))}{extra}')
+        for i in d.get('crypto', [])[:10]:
+            lines.append(f'• {h(i["crypto_coin"])}: {brl(i["amount"])} aplicado')
+        if not d['fixed'] and not d.get('crypto'):
+            lines.append('Nenhum investimento ainda. Use /investir.')
+        self.tg.send(chat_id, '\n'.join(lines))
