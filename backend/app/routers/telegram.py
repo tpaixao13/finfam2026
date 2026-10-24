@@ -75,7 +75,7 @@ def unlink(ctx: Ctx = Depends(get_ctx), chat_id: str | None = Header(None, alias
 
 class BotLinkIn(BaseModel):
     code: str = Field(min_length=8, max_length=64)
-    chat_id: str = Field(min_length=1, max_length=32, pattern=r'^-?\d+$')
+    chat_id: str = Field(min_length=1, max_length=32, pattern=r'^\d+$', description='Só conversa privada (id positivo)')
     username: str | None = Field(None, max_length=64)
 
 

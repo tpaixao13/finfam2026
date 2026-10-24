@@ -7,7 +7,7 @@
   --ink-soft: #1d3a54;
   --text: #1b2733;
   --ink-2: #44566a;
-  --ink-3: #7a8a99;
+  --ink-3: #5d6e7e;  /* texto secundário: contraste AA (>= 4.5) sobre branco e sobre o fundo */
   --bg: #f1f4f6;
   --surface: #ffffff;
   --line: #e1e7ec;
@@ -49,6 +49,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .muted { color: var(--ink-3); }
 .small { font-size: .85rem; }
 .block { display: block; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.only-sm { display: none; }
 .lead { font-size: 1.05rem; color: var(--ink-2); margin-bottom: 1rem; }
 
 /* ── Shell ─────────────────────────────────────────────────────── */
@@ -432,7 +434,7 @@ a.insight:hover { background: #e8edf1; }
   .content { padding: 1rem; }
   .grid-2, .grid-dash { grid-template-columns: 1fr; }
   .grid-dash { grid-template-areas: 'pending' 'insights' 'monthly' 'cats' 'people' 'goals' 'recent'; }
-  .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem 1rem; }
+  .kpis:not(.kpis-inline) { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem 1rem; }
   .kpis dd { font-size: 1.05rem; }
   .auth { grid-template-columns: 1fr; }
   .auth-side { padding: 1.5rem; gap: 1rem; }
@@ -462,6 +464,9 @@ a.insight:hover { background: #e8edf1; }
   .donut svg { max-width: 200px; }
   .donut-legend { width: 100%; }
   .table th, .table td { padding: .5rem .7rem; }
+  .kpis-inline { gap: .75rem 1rem; }
+  .hide-sm { display: none; }
+  .only-sm { display: block; }
   h1 { font-size: 1.35rem; }
   /* Só o ícone aparece, mas o texto continua sendo o nome acessível do botão. */
   .topbar .btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

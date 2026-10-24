@@ -2,7 +2,7 @@
 import pytest
 
 from app.core.db import session
-from app.models import AiConfig, TelegramLink
+from app.models import AiConfig, TelegramLink, Tenant
 from app.services import ai_service, telegram as tg_service
 from conftest import API, Family
 
@@ -103,7 +103,7 @@ def test_ai_settings_never_return_key(client, family):
     r = family.put('/settings/ai', json={'provider': 'gemini', 'api_key': 'AIzaSy-chave-secreta-123'})
     assert r.status_code == 200
     body = family.get('/settings/ai').json()
-    assert body['configured'] and 'chave-secreta' not in str(body) and body['key_masked'].startswith('AIza')
+    assert body['configured'] and 'chave-secreta' not in str(body) and body['key_masked'] == '••••-123'
     stored = AiConfig.query.first().api_key
     assert 'chave-secreta' not in stored  # criptografada no banco
     session.remove()
@@ -159,3 +159,103 @@ def test_provider_errors_are_friendly(client, family, monkeypatch):
     monkeypatch.setattr(ai_service, '_post', boom)
     r = family.post('/ai/interpret', json={'text': 'gastei 10'})
     assert r.status_code == 502 and 'recusada' in r.json()['detail']
+
+
+# ── Regressão da auditoria (bot, IA, câmbio) ─────────────────────────────────
+
+def _member(client, family):
+    from conftest import API as _API
+    session.get(Tenant, family.tenant['id']).plan = 'anual'
+    session.commit()
+    session.remove()
+    family.post('/family/members', json={'name': 'Greyce', 'email': 'g@test.com', 'password': 'senha-greyce',
+                                         'confirm_password': 'senha-greyce'})
+    tok = client.post(f'{_API}/auth/login', json={'email': 'g@test.com', 'password': 'senha-greyce'}).json()['access_token']
+    return {'Authorization': f'Bearer {tok}'}
+
+
+def test_key_cannot_be_redirected_without_knowing_it(client, family, monkeypatch):
+    monkeypatch.setattr(ai_service, 'check_public_url', lambda url: None)  # sem DNS nos testes
+    assert family.put('/settings/ai', json={'provider': 'openai', 'api_key': 'sk-SEGREDO-123456'}).status_code == 200
+    r = family.put('/settings/ai', json={'provider': 'openai', 'base_url': 'https://atacante.example/v1'})
+    assert r.status_code == 422 and 'informe a chave' in r.json()['detail']
+    # membro que não é o dono não troca nem apaga a chave
+    member = _member(client, family)
+    assert client.put(f'{API}/settings/ai', headers=member, json={'provider': 'openai', 'api_key': 'x' * 20}).status_code == 403
+    assert client.delete(f'{API}/settings/ai', headers=member).status_code == 403
+
+
+def test_base_url_cannot_point_to_internal_network(client, family):
+    for url in ('https://127.0.0.1:8001/v1', 'https://localhost/v1', 'https://192.168.0.10/v1', 'https://169.254.169.254/x',
+                'https://user:pw@example.com/v1'):
+        r = family.put('/settings/ai', json={'provider': 'openai', 'api_key': 'sk-x-1234567890', 'base_url': url})
+        assert r.status_code == 422, (url, r.text)
+    assert family.put('/settings/ai', json={'provider': 'gemini', 'api_key': 'k' * 20,
+                                            'model': '../../v1/files'}).status_code == 422
+
+
+def test_redirect_is_blocked_and_errors_are_generic(monkeypatch):
+    import urllib.error, io
+    client = ai_service.AIClient('openai', 'sk-x', 'm', base_url='https://compat.example/v1')
+    monkeypatch.setattr(ai_service, 'check_public_url', lambda url: None)
+
+    class Opener:
+        def open(self, req, timeout):
+            assert timeout == ai_service.CUSTOM_TIMEOUT
+            raise urllib.error.URLError(ConnectionRefusedError(111, 'Connection refused'))
+    monkeypatch.setattr(ai_service.urllib.request, 'build_opener', lambda *a: Opener())
+    with pytest.raises(ai_service.AIError, match='^Não consegui conectar ao endereço'):
+        client.complete_json('s', 'u')
+
+    class Redirect:
+        def open(self, req, timeout):
+            raise urllib.error.HTTPError(req.full_url, 302, 'Found', {}, io.BytesIO(b''))
+    monkeypatch.setattr(ai_service.urllib.request, 'build_opener', lambda *a: Redirect())
+    with pytest.raises(ai_service.AIError, match='redirecionar'):
+        client.complete_json('s', 'u')
+
+
+def test_ai_calls_are_limited_per_family():
+    from fastapi import HTTPException
+    from app.routers.ai import _ai_slot
+    with _ai_slot(999), _ai_slot(999):
+        with pytest.raises(HTTPException) as exc:
+            with _ai_slot(999):
+                pass
+        assert exc.value.status_code == 429
+    with _ai_slot(999):  # liberou ao sair
+        pass
+
+
+def test_bot_key_only_from_this_server(client, family):
+    _link(client, family, '777')
+    via_tunnel = {**_bot('777'), 'X-Forwarded-For': '203.0.113.9'}
+    assert client.get(f'{API}/auth/me', headers=via_tunnel).status_code == 401
+    assert client.get(f'{API}/auth/me', headers={**_bot('777'), 'CF-Connecting-IP': '203.0.113.9'}).status_code == 401
+    code = family.post('/telegram/link-code').json()['code']
+    assert client.post(f'{API}/telegram/bot/link', headers={**BOT, 'X-Forwarded-For': '1.2.3.4'},
+                       json={'code': code, 'chat_id': '1'}).status_code == 403
+    assert client.post(f'{API}/telegram/bot/link', headers=BOT, json={'code': code, 'chat_id': '-100'}).status_code == 422
+
+
+def test_infinite_crypto_price_rejected(client, family):
+    r = client.post(f'{API}/investments', headers={**family.headers, 'Content-Type': 'application/json'},
+                    content=b'{"amount": "10", "investment_type": "Criptomoedas", "crypto_coin": "bitcoin", '
+                            b'"crypto_buy_price": 1e999, "month": 1, "year": 2026}')
+    assert r.status_code == 422
+    assert family.get('/investments').status_code == 200
+
+
+def test_reminder_is_cut_to_telegram_limit(monkeypatch):
+    sent = {}
+
+    class Resp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    def fake(req, timeout, context):
+        sent['len'] = len(__import__('json').loads(req.data)['text'])
+        return Resp()
+    monkeypatch.setattr(tg_service.urllib.request, 'urlopen', fake)
+    assert tg_service.send_message('t', '1', 'linha\n' * 2000)[0]
+    assert sent['len'] < 4096

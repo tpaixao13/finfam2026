@@ -4,11 +4,15 @@ Cada família escolhe o provedor e cola a chave dela; o FinFam só repassa a
 pergunta. A resposta da IA é sempre CONFERIDA aqui (categoria, cartão, pessoa,
 valores) e nunca grava nada: quem grava é o usuário, ao confirmar.
 """
+import ipaddress
 import json
 import logging
 import re
+import socket
 import time
+import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -28,11 +32,35 @@ PROVIDERS = {
                'key_url': 'https://platform.openai.com/api-keys'},
 }
 OPENAI_URL = 'https://api.openai.com/v1'
-TIMEOUT = 60  # Cloudflare corta em 100 s
+TIMEOUT = 60         # provedores oficiais (o Gemini às vezes demora); Cloudflare corta em 100 s
+CUSTOM_TIMEOUT = 20  # endereço informado pela família: curto, para não prender a API
 
 
 class AIError(Exception):
     """Falha ao falar com o provedor (mensagem já em português, sem segredos)."""
+
+
+def check_public_url(url: str) -> None:
+    """Endereço compatível informado pela família: só https para um host PÚBLICO.
+    Impede usar o servidor para sondar a rede interna (127.0.0.1, 192.168.x.x, nuvem...)."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != 'https' or not parts.hostname or parts.username or parts.password:
+        raise AIError('Endereço de IA não permitido: use https://host-publico/...')
+    try:
+        infos = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        raise AIError('Não encontrei o endereço de IA informado.') from None
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split('%')[0])
+        if not ip.is_global or ip.is_multicast:
+            raise AIError('Endereço de IA não permitido (rede interna).')
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Redirecionamento poderia levar a chave para outro host: vira erro."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
 
 
 @dataclass
@@ -81,8 +109,10 @@ class AIClient:
                                                   {'role': 'user', 'content': user}]}
         if not self.base_url:  # nem todo "compatível" aceita response_format
             body['response_format'] = {'type': 'json_object'}
+        if self.base_url:
+            check_public_url(self.base_url)  # de novo a cada chamada: o DNS pode ter mudado
         r = _post(f'{(self.base_url or OPENAI_URL).rstrip("/")}/chat/completions',
-                  {'Authorization': f'Bearer {self.api_key}'}, body)
+                  {'Authorization': f'Bearer {self.api_key}'}, body, custom=bool(self.base_url))
         return ((r.get('choices') or [{}])[0].get('message') or {}).get('content') or ''
 
 
@@ -92,42 +122,57 @@ def _gemini_thinking(model: str) -> dict:
     return {'thinkingLevel': 'low'}
 
 
-def _post(url: str, headers: dict, body: dict) -> dict:
-    """Uma nova tentativa se o provedor estiver sobrecarregado (5xx)."""
+class _Overloaded(AIError):
+    """Provedor com erro 5xx: vale uma nova tentativa."""
+
+
+def _post(url: str, headers: dict, body: dict, custom: bool = False) -> dict:
+    """Uma nova tentativa se o provedor oficial estiver sobrecarregado (5xx)."""
     try:
-        return _post_once(url, headers, body)
-    except _Overloaded:
+        return _post_once(url, headers, body, custom)
+    except _Overloaded as exc:
+        if custom:
+            raise AIError(str(exc)) from None
         time.sleep(2)
         try:
-            return _post_once(url, headers, body)
-        except _Overloaded as exc:
-            raise AIError(str(exc)) from None
+            return _post_once(url, headers, body, custom)
+        except _Overloaded as exc2:
+            raise AIError(str(exc2)) from None
 
 
-class _Overloaded(AIError):
-    pass
-
-
-def _post_once(url: str, headers: dict, body: dict) -> dict:
+def _post_once(url: str, headers: dict, body: dict, custom: bool = False) -> dict:
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method='POST',
                                  headers={'Content-Type': 'application/json', **headers})
+    opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=_ssl_context()))
+    where = urllib.parse.urlsplit(url).hostname
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT, context=_ssl_context()) as resp:
+        with opener.open(req, timeout=CUSTOM_TIMEOUT if custom else TIMEOUT) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
-        body_text = exc.read().decode('utf-8', 'replace')
-        log.warning('IA %s respondeu %s: %s', url.split('?')[0], exc.code, body_text[:300])
+        body_text = exc.read(4096).decode('utf-8', 'replace')
+        log.warning('IA %s respondeu %s: %s', where, exc.code, _log_safe(body_text))
+        if 300 <= exc.code < 400:
+            raise AIError('O endereço de IA tentou redirecionar a chamada (bloqueado).') from None
         error = _Overloaded if exc.code in (500, 502, 503, 504) else AIError
         raise error(_http_message(exc.code, body_text)) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, 'reason', exc)
-        log.warning('IA %s sem conexão: %s', url.split('?')[0], reason)
+        log.warning('IA %s sem conexão: %s', where, _log_safe(str(reason)))
+        if custom:  # não devolve o erro bruto: evitaria mapear a rede pelo erro
+            raise AIError('Não consegui conectar ao endereço de IA configurado.') from None
         if 'CERTIFICATE' in str(reason).upper():
             raise AIError('Certificado SSL não reconhecido pelo servidor. No Raspberry, defina '
                           'INSECURE_EXTERNAL_SSL=1 no .env ou atualize os certificados (ca-certificates).') from None
-        raise AIError(f'Não consegui falar com o provedor de IA ({reason}).') from None
+        if 'timed out' in str(reason).lower():
+            raise AIError('O provedor de IA demorou demais para responder. Tente de novo ou escolha outro modelo.') from None
+        raise AIError('Não consegui falar com o provedor de IA agora.') from None
     except ValueError:
         raise AIError('O provedor de IA devolveu uma resposta inválida.') from None
+
+
+def _log_safe(text: str) -> str:
+    """Uma linha só, curta: o corpo vem de fora e não pode forjar linhas no log."""
+    return re.sub(r'[\r\n\t]+', ' ', text)[:200]
 
 
 def _http_message(code: int, body: str) -> str:
@@ -191,7 +236,6 @@ _METHOD_ALIASES = {'credito': 'Cartão de Crédito', 'cartao': 'Cartão de Créd
 
 
 def _norm(text: str) -> str:
-    import unicodedata
     return unicodedata.normalize('NFKD', str(text or '')).encode('ascii', 'ignore').decode().lower().strip()
 
 

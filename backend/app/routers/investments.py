@@ -19,6 +19,7 @@ from app.services.serializers import investment_out, money
 router = APIRouter(tags=['investments'])
 
 _COINS_RE = re.compile(r'^[a-z0-9-]+(,[a-z0-9-]+)*$')
+_COIN_IDS = {c for c, _ in CRYPTO_COINS}
 
 
 class InvestmentIn(BaseModel):
@@ -28,7 +29,7 @@ class InvestmentIn(BaseModel):
     investment_type: str
     annual_rate: Decimal = Field(Decimal(0), ge=0, le=999, max_digits=6, decimal_places=2)
     crypto_coin: str | None = Field(None, pattern=r'^[a-z0-9-]+$')
-    crypto_buy_price: float | None = Field(None, gt=0)
+    crypto_buy_price: float | None = Field(None, gt=0, lt=1e12, allow_inf_nan=False)
     currency: Literal['BRL', 'USD', 'EUR', 'GBP', 'CHF', 'JPY', 'CAD', 'ARS'] = Field(
         'BRL', description='Moeda do valor informado em `amount`')
     fx_buy_rate: Decimal | None = Field(None, gt=0, max_digits=14, decimal_places=6,
@@ -42,7 +43,7 @@ class InvestmentIn(BaseModel):
             raise ValueError('Tipo de investimento inválido.')
         if self.investment_type == 'Criptomoedas' and not self.crypto_coin:
             raise ValueError('Selecione a criptomoeda.')
-        if self.crypto_coin and self.crypto_coin not in {c for c, _ in CRYPTO_COINS}:
+        if self.crypto_coin and self.crypto_coin not in _COIN_IDS:
             raise ValueError('Criptomoeda não suportada.')
         if self.investment_type == 'Criptomoedas' and self.currency != 'BRL':
             raise ValueError('Criptomoedas são registradas em reais.')
@@ -176,9 +177,9 @@ def fx(_: Ctx = Depends(get_ctx)):
 
 @router.get('/market/crypto-price', tags=['market'], summary='Cotação em BRL (CoinGecko)')
 def crypto_price(coins: str = Query('bitcoin', max_length=200), _: Ctx = Depends(get_ctx)):
-    allowed = {c for c, _ in CRYPTO_COINS}
-    if not _COINS_RE.match(coins) or not set(coins.split(',')) <= allowed:
+    if not _COINS_RE.match(coins) or not set(coins.split(',')) <= _COIN_IDS:
         raise HTTPException(status_code=422, detail='Moeda inválida.')
+    coins = ','.join(sorted(set(coins.split(','))))  # mesma consulta = mesmo cache
     data = market.crypto_prices(coins)
     if not data:
         raise HTTPException(status_code=503, detail='Não foi possível obter a cotação.')
@@ -188,7 +189,7 @@ def crypto_price(coins: str = Query('bitcoin', max_length=200), _: Ctx = Depends
 @router.get('/market/crypto-history', tags=['market'], summary='Histórico de preço em BRL')
 def crypto_history(coin: str = Query('bitcoin', pattern=r'^[a-z0-9-]+$'), days: int = Query(30, ge=1, le=365),
                    _: Ctx = Depends(get_ctx)):
-    if coin not in {c for c, _ in CRYPTO_COINS}:
+    if coin not in _COIN_IDS:
         raise HTTPException(status_code=422, detail='Moeda inválida.')
     data = market.crypto_history(coin, days)
     if not data or 'prices' not in data:

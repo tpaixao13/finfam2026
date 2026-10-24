@@ -27,6 +27,14 @@ def _request(url: str, method: str = 'GET', body: dict | None = None, headers: d
         return json.loads(raw) if raw else None
 
 
+def fit(text: str, limit: int = 4000) -> str:
+    """O Telegram recusa mensagens acima de 4096 caracteres: corta numa quebra de linha
+    (fora de qualquer tag HTML, já que cada linha é fechada em si)."""
+    if len(text) <= limit:
+        return text
+    return text[:limit - 100].rsplit('\n', 1)[0] + '\n\n… lista cortada. Veja tudo no site.'
+
+
 class _KeepAlive:
     """Conexão HTTPS reaproveitada: evita um aperto de mão TLS (0,2–0,5 s no Raspberry) a cada chamada."""
 
@@ -84,12 +92,12 @@ class Telegram:
                          allowed_updates=['message', 'callback_query'])
 
     def send(self, chat_id, text: str, buttons: list[list[dict]] | None = None):
-        return self.call('sendMessage', chat_id=chat_id, text=text, parse_mode='HTML',
+        return self.call('sendMessage', chat_id=chat_id, text=fit(text), parse_mode='HTML',
                          disable_web_page_preview=True,
                          reply_markup={'inline_keyboard': buttons} if buttons else None)
 
     def edit(self, chat_id, message_id: int, text: str, buttons: list[list[dict]] | None = None):
-        return self.call('editMessageText', chat_id=chat_id, message_id=message_id, text=text, parse_mode='HTML',
+        return self.call('editMessageText', chat_id=chat_id, message_id=message_id, text=fit(text), parse_mode='HTML',
                          disable_web_page_preview=True,
                          reply_markup={'inline_keyboard': buttons} if buttons else None)
 
@@ -115,7 +123,7 @@ class FinFam:
         if chat_id is not None:
             headers['X-Telegram-Chat'] = str(chat_id)
         try:
-            return _request(url, method, body, headers, timeout=90)
+            return _request(url, method, body, headers, timeout=75)
         except urllib.error.HTTPError as exc:
             try:
                 detail = json.loads(exc.read().decode('utf-8', 'replace')).get('detail')

@@ -30,6 +30,11 @@ export function pct(value: number | null | undefined, digits = 0): string {
   return `${value.toFixed(digits).replace('.', ',')}%`
 }
 
+/** 12.5 → "12,5" (campos de texto que aceitam vírgula). */
+export function decimalBR(value: number): string {
+  return String(value).replace('.', ',')
+}
+
 export function dateBR(iso: string | null | undefined): string {
   if (!iso) return '—'
   const [y, m, d] = iso.slice(0, 10).split('-')

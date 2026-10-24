@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / 'bot'))
 from finfam_bot.bot import Bot, parse_amount, parse_date, quick_parse  # noqa: E402
 from finfam_bot.http import FinFam  # noqa: E402
 
-KEY = 'k' * 40
+KEY = 'chave-de-teste-do-bot-0123456789abcdefXYZ'
 
 
 class FakeTelegram:
@@ -256,3 +256,31 @@ def test_ai_draft_confirm_and_missing_amount():
     b2 = Bot(tg, StubApi({'intent': 'expense', 'reply': '', 'draft': {**d, 'amount': None, 'missing': ['amount']}}))
     b2.handle(_msg(31, 'comprei uber'))
     assert 'Quanto custou' in tg.last['text'] and b2.flows[31]['step'] == 'amount'
+
+
+def test_unlinked_chat_cannot_open_guided_flows(bot):
+    b, tg = bot
+    for cmd in ('/lancar', '/investir'):
+        b.handle(_msg(12, cmd))
+        assert 'não está conectado' in tg.last['text'] and 12 not in b.flows
+
+
+def test_dispatcher_keeps_order_per_chat_and_runs_chats_in_parallel():
+    import threading
+    from finfam_bot.__main__ import Dispatcher
+    seen, slow_started, fast_done = [], threading.Event(), threading.Event()
+
+    def handle(update):
+        chat, n = update['message']['chat']['id'], update['n']
+        if chat == 1 and n == 0:
+            slow_started.set()
+            assert fast_done.wait(5)  # outra conversa termina enquanto esta espera
+        seen.append((chat, n))
+        if chat == 2:
+            fast_done.set()
+    d = Dispatcher(handle, workers=4)
+    for n in range(3):
+        d.submit({'n': n, 'message': {'chat': {'id': 1}}})
+    d.submit({'n': 0, 'message': {'chat': {'id': 2}}})
+    d.pool.shutdown(wait=True)
+    assert [x for x in seen if x[0] == 1] == [(1, 0), (1, 1), (1, 2)] and seen[0] == (2, 0)

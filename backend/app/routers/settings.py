@@ -69,7 +69,7 @@ def save_telegram(body: TelegramIn, ctx: Ctx = Depends(get_ctx_session)):
 
 
 @router.post('/settings/telegram/test', summary='Envia o lembrete de teste agora')
-def test_telegram(ctx: Ctx = Depends(get_ctx)):
+def test_telegram(ctx: Ctx = Depends(get_ctx_session)):
     tenant = _tenant(ctx)
     targets = reminder_targets(tenant, ctx.uids)
     if not targets:

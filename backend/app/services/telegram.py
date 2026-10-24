@@ -30,6 +30,8 @@ def _h(text) -> str:
 def send_message(token: str, chat_id: str, text_html: str) -> tuple[bool, str]:
     """Envia mensagem pelo Bot API. Retorna (sucesso, erro)."""
     url = f'https://api.telegram.org/bot{token}/sendMessage'
+    if len(text_html) > 4000:  # limite do Telegram é 4096: corta numa quebra de linha
+        text_html = text_html[:3900].rsplit('\n', 1)[0] + '\n\n… lista cortada. Veja tudo no site.'
     payload = json.dumps({'chat_id': chat_id, 'text': text_html, 'parse_mode': 'HTML'}).encode()
     req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'}, method='POST')
     try:

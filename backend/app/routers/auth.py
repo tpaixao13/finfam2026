@@ -118,7 +118,7 @@ def change_password(body: ChangePasswordIn, ctx: Ctx = Depends(get_ctx_session_a
 
 
 @router.post('/auth/avatar', summary='Envia foto de perfil (jpg, png, gif, webp — até 2 MB)')
-async def upload_avatar(file: UploadFile = File(...), ctx: Ctx = Depends(get_ctx_allow_expired)):
+async def upload_avatar(file: UploadFile = File(...), ctx: Ctx = Depends(get_ctx_session_allow_expired)):
     ext = Path(file.filename or '').suffix.lower()
     if ext not in AVATAR_EXT:
         raise HTTPException(status_code=422, detail='Formato de imagem não suportado.')

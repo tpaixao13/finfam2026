@@ -131,7 +131,7 @@ def pay_invoice(card_id: int, body: PayInvoiceIn, ctx: Ctx = Depends(get_ctx)):
 
 @router.get('/{card_id}/invoice-preview', summary='Em qual fatura cai uma compra e quanto do limite usa')
 def invoice_preview(card_id: int, day: int = Query(ge=1, le=31), month: int = Query(ge=1, le=12),
-                    year: int = Query(ge=2000, le=2100), amount: float = Query(0, ge=0),
+                    year: int = Query(ge=2000, le=2100), amount: float = Query(0, ge=0, lt=1e12, allow_inf_nan=False),
                     ctx: Ctx = Depends(get_ctx)):
     card = _get(ctx, card_id)
     try:

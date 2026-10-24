@@ -1,5 +1,7 @@
 # systemd — bot central do FinFam no Telegram (um bot para todas as famílias).
 # Usa long polling: não precisa abrir porta nem mexer no cloudflared.
+# O bot lê do backend/.env só TELEGRAM_BOT_TOKEN, BOT_API_KEY e FINFAM_SITE_URL
+# (de propósito, sem EnvironmentFile: o processo do bot não recebe a SECRET_KEY).
 # Instalar: sudo cp deploy/finfam2026-bot.service /etc/systemd/system/ && sudo systemctl enable --now finfam2026-bot
 [Unit]
 Description=FinFam 2026 - bot do Telegram
@@ -9,7 +11,6 @@ Wants=network-online.target
 [Service]
 User=finfam
 WorkingDirectory=/home/finfam/finfam2026/bot
-EnvironmentFile=/home/finfam/finfam2026/backend/.env
 Environment=FINFAM_API_URL=http://127.0.0.1:8001/api/v1
 ExecStart=/home/finfam/finfam2026/backend/.venv/bin/python -m finfam_bot
 Restart=always
