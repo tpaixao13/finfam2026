@@ -19,7 +19,8 @@ def avatar_url(user: User) -> str | None:
 
 
 def user_out(user: User, color: str | None = None) -> dict:
-    data = {'id': user.id, 'name': user.name, 'email': user.email, 'avatar_url': avatar_url(user)}
+    data = {'id': user.id, 'name': user.name, 'email': user.email, 'avatar_url': avatar_url(user),
+            'two_factor_enabled': bool(user.totp_enabled)}
     if color:
         data['color'] = color
     return data

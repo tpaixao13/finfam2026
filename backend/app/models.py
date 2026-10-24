@@ -107,6 +107,12 @@ class User(Base):
     avatar = Column(Text, nullable=True)
     is_admin = Column(Boolean, default=False)
     last_seen = Column(DateTime, nullable=True)
+    # verificação em duas etapas (TOTP): segredo criptografado; bloqueio após 3 códigos errados
+    totp_secret = Column(Text, nullable=True)
+    totp_enabled = Column(Boolean, default=False, server_default='0', nullable=False)
+    totp_failures = Column(Integer, default=0, server_default='0', nullable=False)
+    totp_locked = Column(Boolean, default=False, server_default='0', nullable=False)
+    totp_last_step = Column(Integer, nullable=True)  # impede reusar o mesmo código
 
     salaries = relationship('Salary', backref='user', lazy='dynamic', cascade='all, delete-orphan')
     expenses = relationship('Expense', backref='user', lazy='dynamic', cascade='all, delete-orphan')

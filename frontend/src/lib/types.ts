@@ -1,6 +1,6 @@
 // Tipos das respostas da API (espelham app/services/serializers.py).
 
-export interface User { id: number; name: string; email: string | null; avatar_url: string | null; color?: string }
+export interface User { id: number; name: string; email: string | null; avatar_url: string | null; color?: string; two_factor_enabled?: boolean }
 
 export interface Tenant {
   id: number; name: string; plan: string; plan_label: string; member_limit: number

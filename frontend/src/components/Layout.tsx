@@ -1,3 +1,4 @@
+import { TwoFactorBanner } from './TwoFactor'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from '../lib/router'
 import { useSession } from '../lib/session'
@@ -99,7 +100,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </Link>
           <Button icon="plus" onClick={() => openExpense()}>Nova despesa</Button>
         </header>
-        <main className="content">{children}</main>
+        <main className="content"><TwoFactorBanner />{children}</main>
       </div>
     </div>
   )

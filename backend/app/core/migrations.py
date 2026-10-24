@@ -57,6 +57,11 @@ _ALTERS = [
     'ALTER TABLE credit_cards ADD COLUMN account_id INTEGER REFERENCES credit_accounts(id)',
     'ALTER TABLE expenses ADD COLUMN purchase_month INTEGER',
     'ALTER TABLE investments ADD COLUMN currency TEXT',
+    'ALTER TABLE users ADD COLUMN totp_secret TEXT',
+    'ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE users ADD COLUMN totp_failures INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE users ADD COLUMN totp_locked INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE users ADD COLUMN totp_last_step INTEGER',
     'ALTER TABLE investments ADD COLUMN fx_buy_rate NUMERIC(14,6)',
     'ALTER TABLE expenses ADD COLUMN purchase_year INTEGER',
     # limpeza de dados órfãos (usuário/família já excluídos) — não podem ser herdados

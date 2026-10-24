@@ -7,7 +7,10 @@ import { navigate } from '../../lib/router'
 import { useSession } from '../../lib/session'
 import type { Tenant } from '../../lib/types'
 
-interface Member { id: number; name: string; email: string; last_seen: string | null; online: boolean }
+interface Member {
+  id: number; name: string; email: string; last_seen: string | null; online: boolean
+  two_factor_enabled: boolean; two_factor_locked: boolean; two_factor_failures: number
+}
 interface AdminTenant extends Tenant { code: string; created_at: string; members: Member[] }
 interface AdminData {
   admin: { name: string }
@@ -86,7 +89,17 @@ export function AdminPage() {
                             <div key={m.id} className="admin-member">
                               <span className={`dot ${m.online ? 'dot-on' : ''}`} aria-label={m.online ? 'online' : 'offline'} />
                               {m.name} <small className="muted">{m.email}</small>
+                              {m.two_factor_locked ? <Badge tone="danger">bloqueado (2FA)</Badge>
+                                : m.two_factor_enabled ? <Badge tone="success">2FA</Badge> : null}
+                              {m.two_factor_failures > 0 && !m.two_factor_locked && <small className="muted">{m.two_factor_failures} erro(s) 2FA</small>}
                               <button className="link-btn" onClick={() => { setReset(m); setNewPwd('') }}>senha</button>
+                              {(m.two_factor_locked || m.two_factor_failures > 0) && (
+                                <button className="link-btn" onClick={() => run(() => api.admin.post(`/admin/users/${m.id}/2fa/unlock`))}>zerar erros 2FA</button>
+                              )}
+                              {m.two_factor_enabled && (
+                                <ConfirmButton label={`Remover 2FA de ${m.name}`} icon="shield" text="remover 2FA" confirmLabel="Confirmar remoção do 2FA"
+                                  onConfirm={() => run(() => api.admin.del(`/admin/users/${m.id}/2fa`))} />
+                              )}
                               <ConfirmButton label={`Excluir ${m.name}`} confirmLabel="Excluir" onConfirm={() => run(() => api.admin.del(`/admin/users/${m.id}`))} />
                             </div>
                           ))}

@@ -7,6 +7,7 @@ python-multipart>=0.0.18
 python-dotenv>=1.0
 cryptography>=42.0
 openpyxl>=3.1
+segno>=1.6          # QR code do 2FA (opcional: sem ele, mostra só a chave)
 fpdf2>=2.8
 pdfplumber>=0.11.8
 pdfminer.six>=20251107

@@ -1,4 +1,5 @@
 """Login, cadastro de família, perfil, avatar e tokens de API."""
+import hmac
 import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -13,8 +14,10 @@ from app.core.types import Email, utcnow
 from app.core.db import db, get_or_404
 from app.core.deps import (Ctx, Period, get_ctx, get_ctx_allow_expired, get_ctx_session,
                            get_ctx_session_allow_expired, get_period)
-from app.core.security import create_access_token, new_api_token, session_fingerprint, verify_password
+from app.core.security import (create_access_token, decode_access_token, new_api_token, session_fingerprint,
+                               verify_password)
 from app.models import ApiToken, Tenant, User
+from app.services import two_factor as tfa
 from app.services.alert_service import quick_alert_count
 from app.services.serializers import iso, tenant_out, user_out
 
@@ -73,6 +76,37 @@ def login(body: LoginIn, request: Request):
     ratelimit.reset(request, 'login', body.email)
     if user.is_admin:
         raise HTTPException(status_code=403, detail='Esta conta é de administrador. Acesse em /admin.')
+    if user.totp_locked:
+        raise HTTPException(status_code=423, detail={'code': '2fa_locked', 'message': str(tfa.TwoFactorError(tfa._LOCKED))})
+    if user.totp_enabled:
+        # senha certa: falta o código do app. O desafio vale 5 min e não é uma sessão.
+        challenge, _ = create_access_token(user.id, kind='2fa', fingerprint=session_fingerprint(user.password_hash),
+                                           minutes=5)
+        return {'two_factor_required': True, 'challenge': challenge}
+    tenant = db.session.get(Tenant, user.tenant_id) if user.tenant_id else None
+    return _session_payload(user, tenant)
+
+
+class TwoFactorLoginIn(BaseModel):
+    challenge: str = Field(min_length=10, max_length=2000)
+    code: str = Field(min_length=6, max_length=10)
+
+
+@router.post('/auth/login/2fa', summary='Segundo passo do login: código do app autenticador')
+def login_2fa(body: TwoFactorLoginIn, request: Request):
+    payload = decode_access_token(body.challenge)
+    user = db.session.get(User, int(payload.get('sub', 0))) if payload and payload.get('typ') == '2fa' else None
+    if user is None or not hmac.compare_digest(str(payload.get('fp', '')), session_fingerprint(user.password_hash)):
+        raise HTTPException(status_code=401, detail='O login expirou. Digite e-mail e senha de novo.')
+    ratelimit.check(request, 'login2fa', str(user.id), limit=10, window=900)
+    try:
+        tfa.verify_login(user, body.code)
+    except tfa.TwoFactorError as exc:
+        db.session.commit()  # guarda a contagem de erros / o bloqueio
+        if exc.locked:
+            raise HTTPException(status_code=423, detail={'code': '2fa_locked', 'message': str(exc)})
+        raise HTTPException(status_code=401, detail=str(exc))
+    db.session.commit()
     tenant = db.session.get(Tenant, user.tenant_id) if user.tenant_id else None
     return _session_payload(user, tenant)
 
@@ -142,6 +176,50 @@ def get_avatar(filename: str):
     if not path.is_file():
         raise HTTPException(status_code=404)
     return FileResponse(path)
+
+
+# ── Verificação em duas etapas (2FA) ─────────────────────────────────────────
+
+class TwoFactorCodeIn(BaseModel):
+    code: str = Field(min_length=6, max_length=10)
+
+
+class TwoFactorDisableIn(TwoFactorCodeIn):
+    password: str = Field(min_length=1)
+
+
+def _tfa_call(fn, *args):
+    try:
+        result = fn(*args)
+    except tfa.TwoFactorError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.session.commit()
+    return result
+
+
+@router.get('/auth/2fa', summary='Situação da verificação em duas etapas')
+def tfa_status(ctx: Ctx = Depends(get_ctx_session_allow_expired)):
+    return tfa.status(ctx.user)
+
+
+@router.post('/auth/2fa/setup', summary='Começa a ativar: devolve o QR code / chave para o app autenticador')
+def tfa_setup(ctx: Ctx = Depends(get_ctx_session_allow_expired)):
+    return _tfa_call(tfa.start_setup, ctx.user)
+
+
+@router.post('/auth/2fa/enable', summary='Confirma a ativação com um código do app')
+def tfa_enable(body: TwoFactorCodeIn, ctx: Ctx = Depends(get_ctx_session_allow_expired)):
+    _tfa_call(tfa.confirm_setup, ctx.user, body.code)
+    return {'message': 'Verificação em duas etapas ativada! A partir de agora o login pede o código do app.',
+            'user': user_out(ctx.user)}
+
+
+@router.post('/auth/2fa/disable', summary='Desativa (exige senha e um código do app)')
+def tfa_disable(body: TwoFactorDisableIn, ctx: Ctx = Depends(get_ctx_session_allow_expired)):
+    if not ctx.user.check_password(body.password):
+        raise HTTPException(status_code=422, detail='Senha incorreta.')
+    _tfa_call(tfa.disable, ctx.user, body.code)
+    return {'message': 'Verificação em duas etapas desativada.', 'user': user_out(ctx.user)}
 
 
 # ── Tokens de API (para MCP / bot) ───────────────────────────────────────────

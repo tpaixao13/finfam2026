@@ -37,9 +37,10 @@ def session_fingerprint(password_hash: str | None) -> str:
     return hashlib.sha256(f'{password_hash}|{settings.secret_key}'.encode()).hexdigest()[:24]
 
 
-def create_access_token(user_id: int, kind: str = 'user', fingerprint: str = '') -> tuple[str, datetime]:
+def create_access_token(user_id: int, kind: str = 'user', fingerprint: str = '',
+                        minutes: int | None = None) -> tuple[str, datetime]:
     now = datetime.now(timezone.utc)
-    expires = now + timedelta(minutes=settings.access_token_minutes)
+    expires = now + timedelta(minutes=minutes or settings.access_token_minutes)
     payload = {'sub': str(user_id), 'typ': kind, 'exp': expires, 'iat': now, 'fp': fingerprint}
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM), expires
 

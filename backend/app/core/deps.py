@@ -106,7 +106,10 @@ def _resolve(creds: HTTPAuthorizationCredentials | None, chat_id: str | None = N
     if user is None or not hmac.compare_digest(str(payload.get('fp', '')),
                                                session_fingerprint(user.password_hash)):
         raise _unauthorized('Sessão expirada. Faça login novamente.')
-    return user, payload.get('typ', 'user')
+    kind = payload.get('typ', 'user')
+    if kind not in ('user', 'admin'):  # ex.: o desafio do 2FA ('2fa') não é uma sessão
+        raise _unauthorized('Sessão expirada. Faça login novamente.')
+    return user, kind
 
 
 def _touch(user: User) -> None:

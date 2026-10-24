@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Avatar, Badge, Button, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Modal, PageHeader,
   Panel, Spinner, Table } from '../components/ui'
+import { TwoFactorPanel } from '../components/TwoFactor'
 import { api, tokens as authTokens } from '../lib/api'
 import { dateBR } from '../lib/format'
 import { useApi } from '../lib/hooks'
@@ -154,6 +155,7 @@ export function SettingsPage() {
             <Button type="submit">Trocar senha</Button>
           </form>
         </Panel>
+        <TwoFactorPanel />
       </div>
       <Panel title="Tokens de API (MCP e bot do Telegram)">
         <p className="muted">Um token dá acesso aos dados da sua família pela API, em seu nome. Use um token por integração e revogue o que não usar mais.</p>

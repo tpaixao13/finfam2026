@@ -11,6 +11,7 @@ from app.core.db import db, get_or_404
 from app.core.deps import get_admin
 from app.core.security import create_access_token, session_fingerprint
 from app.models import Tenant, User
+from app.services import two_factor as tfa
 from app.services.serializers import iso, tenant_out
 
 router = APIRouter(prefix='/admin', tags=['admin'])
@@ -33,7 +34,9 @@ class PasswordIn(BaseModel):
 
 def _user_row(u: User, now: datetime) -> dict:
     return {'id': u.id, 'name': u.name, 'email': u.email, 'last_seen': iso(u.last_seen),
-            'online': bool(u.last_seen and now - u.last_seen <= ONLINE_THRESHOLD)}
+            'online': bool(u.last_seen and now - u.last_seen <= ONLINE_THRESHOLD),
+            'two_factor_enabled': bool(u.totp_enabled), 'two_factor_locked': bool(u.totp_locked),
+            'two_factor_failures': u.totp_failures or 0}
 
 
 @router.post('/login', summary='Login do administrador')
@@ -87,6 +90,22 @@ def reset_password(user_id: int, body: PasswordIn, admin: User = Depends(get_adm
     revoked = user.change_password(body.new_password)
     db.session.commit()
     return {'message': f'Senha de {user.name} redefinida com sucesso.' + (' Telegram e tokens de API foram desconectados: conecte de novo.' if revoked else '')}
+
+
+@router.post('/users/{user_id}/2fa/unlock', summary='Zera os erros do 2FA e desbloqueia o usuário')
+def unlock_2fa(user_id: int, _: User = Depends(get_admin)):
+    user = get_or_404(User.query.filter_by(id=user_id), 'Usuário não encontrado.')
+    tfa.unlock(user)
+    db.session.commit()
+    return {'message': f'Erros do 2FA de {user.name} zerados e conta desbloqueada.'}
+
+
+@router.delete('/users/{user_id}/2fa', summary='Remove o 2FA do usuário (ex.: perdeu o celular)')
+def remove_2fa(user_id: int, _: User = Depends(get_admin)):
+    user = get_or_404(User.query.filter_by(id=user_id), 'Usuário não encontrado.')
+    tfa.reset(user)
+    db.session.commit()
+    return {'message': f'Verificação em duas etapas de {user.name} removida. Ele entra só com a senha.'}
 
 
 @router.post('/tenants/{tenant_id}/plan', summary='Define o plano da família')
