@@ -77,10 +77,18 @@ class IdsIn(BaseModel):
 
 
 def _filtered_query(ctx: Ctx, *, user_id, month, year, category, payment_method, bank, paid,
-                    date_from, date_to, search):
+                    date_from, date_to, search, purchase_from=None, purchase_to=None):
     q = Expense.query.filter(Expense.user_id.in_(ctx.uids))
     date_int = Expense.year * 10000 + Expense.month * 100 + Expense.day
-    if date_from or date_to:
+    # data REAL da compra (no crédito, year/month são da fatura)
+    bought_int = (func.coalesce(Expense.purchase_year, Expense.year) * 10000
+                  + func.coalesce(Expense.purchase_month, Expense.month) * 100 + Expense.day)
+    if purchase_from or purchase_to:
+        if purchase_from:
+            q = q.filter(bought_int >= purchase_from.year * 10000 + purchase_from.month * 100 + purchase_from.day)
+        if purchase_to:
+            q = q.filter(bought_int <= purchase_to.year * 10000 + purchase_to.month * 100 + purchase_to.day)
+    elif date_from or date_to:
         if date_from:
             q = q.filter(date_int >= date_from.year * 10000 + date_from.month * 100 + date_from.day)
         if date_to:
@@ -112,11 +120,14 @@ def _filters(month: int | None = Query(None, ge=0, le=12, description='0 = todos
              payment_method: str | None = None, bank: str | None = None,
              paid: Literal['pago', 'pendente'] | None = None,
              date_from: _date | None = None, date_to: _date | None = None,
+             purchase_from: _date | None = Query(None, description='Data da compra a partir de (real, não a da fatura)'),
+             purchase_to: _date | None = Query(None, description='Data da compra até'),
              search: str | None = Query(None, max_length=100)) -> dict:
     now = datetime.now()
     return dict(user_id=user_id, month=now.month if month is None else month,
                 year=year or now.year, category=category, payment_method=payment_method,
-                bank=bank, paid=paid, date_from=date_from, date_to=date_to, search=search)
+                bank=bank, paid=paid, date_from=date_from, date_to=date_to, search=search,
+                purchase_from=purchase_from, purchase_to=purchase_to)
 
 
 @router.get('', summary='Lista despesas com filtros e paginação')

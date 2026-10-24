@@ -18,7 +18,9 @@ INSTRUCTIONS = """Ferramentas do FinFam, o controle financeiro da família.
 - Valores em reais (R$). Datas em AAAA-MM-DD; sem data = hoje.
 - Antes de lançar no cartão, se não souber o nome do cartão, use `listar_cartoes`.
 - Compras no crédito caem na fatura conforme o "melhor dia de compra" do cartão — a API calcula isso.
-- Para "contas a pagar", use `contas_a_pagar`. Para pagar, use `marcar_como_pago` com os IDs mostrados.
+- Para "contas a pagar" (ex.: "próximos 5 dias"), use `contas_a_pagar(dias=5)`.
+- "O que comprei dia X?" → `buscar_despesas(data=...)`. "Quanto gastei de X no mês?" → `buscar_despesas(categoria=...)`
+  ou `gastos_por_categoria`. Para pagar, use `marcar_como_pago` com os IDs mostrados.
 - Confirme com o usuário antes de excluir algo."""
 
 api = FinFamAPI()
@@ -164,14 +166,22 @@ def contas_a_pagar(dias: int = 7, pessoa: str | None = None, incluir_atrasadas: 
 @_safe
 def buscar_despesas(texto: str | None = None, mes: int | None = None, ano: int | None = None,
                     categoria: str | None = None, pessoa: str | None = None,
-                    situacao: str | None = None, limite: int = 20) -> str:
-    """Procura despesas. Com `texto` e sem `mes`, busca no ano inteiro; `mes`=0 também.
+                    situacao: str | None = None, data: str | None = None, de: str | None = None,
+                    ate: str | None = None, limite: int = 20) -> str:
+    """Procura despesas e mostra o total.
+    - Por DATA DA COMPRA (a real, não a da fatura): `data` (um dia, AAAA-MM-DD) ou `de`/`ate` (período).
+      Ex.: "o que comprei dia 20/10?" → data="2026-10-20".
+    - Por mês (competência): `mes`/`ano`. Com `texto` e sem `mes`, busca no ano inteiro; `mes`=0 também.
+    - "quanto gastei de alimentação este mês?" → categoria="Alimentação" (veja `listas_de_referencia`).
     `situacao`: "pago" ou "pendente"."""
     month, year = _period(mes, ano)
     if mes == 0 or (texto and mes is None):
         month = 0
+    if data:
+        de = ate = data
     r = api.get('/expenses', month=month, year=year, search=texto, category=categoria,
-                user_id=_resolve_person(pessoa), paid=situacao, per_page=max(1, min(limite, 100)))
+                user_id=_resolve_person(pessoa), paid=situacao, purchase_from=de, purchase_to=ate or de,
+                per_page=max(1, min(limite, 100)))
     if not r['items']:
         return 'Nenhuma despesa encontrada com esses filtros.'
     lines = [f"{r['total']} despesa(s), total {brl(r['total_amount'])}" +

@@ -13,7 +13,9 @@ HELP = ('<b>O que eu faço</b>\n'
         '/cancelar — cancela o lançamento em andamento\n'
         '/desconectar — desliga este Telegram da sua conta\n\n'
         'Com a IA configurada no site, é só escrever, por exemplo:\n'
-        '<i>gastei 87,50 no mercado no cartão Inter em 3x</i>')
+        '<i>gastei 87,50 no mercado no cartão Inter em 3x</i>\n'
+        '<i>quanto gastei de alimentação este mês?</i>\n'
+        '<i>o que comprei dia 20/10?</i> · <i>contas dos próximos 5 dias</i>')
 
 
 def draft_text(d: dict, title: str = 'Confere o lançamento?') -> str:
@@ -97,4 +99,39 @@ def portfolio_text(d: dict) -> str:
         lines.append(f'• {h(i["crypto_coin"])}: {brl(i["amount"])} aplicado')
     if not d['fixed'] and not d.get('crypto'):
         lines.append('Nenhum investimento ainda. Use /investir.')
+    return '\n'.join(lines)
+
+
+MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro',
+          'outubro', 'novembro', 'dezembro']
+
+
+def _items(items: list[dict], date_field: str) -> list[str]:
+    return [f'• {dm(e.get(date_field))} — {h(e["description"])} — {brl(e["amount"])}'
+            + (f' · {h(e["user_name"])}' if e.get('user_name') else '') for e in items]
+
+
+def spending_text(q: dict, r: dict) -> str:
+    """Resposta de "quanto gastei com X no mês"."""
+    what = q.get('category') or q.get('text') or 'tudo'
+    period = f'{MONTHS[q["month"] - 1]}/{q["year"]}'
+    if not r['total']:
+        return f'🔎 Nenhum gasto com <b>{h(what)}</b> em {period}.'
+    lines = [f'🔎 <b>{h(what)}</b> em {period}: <b>{brl(r["total_amount"])}</b> em {r["total"]} lançamento(s)', '']
+    lines += _items(r['items'], 'purchase_date')
+    if r['total'] > len(r['items']):
+        lines.append(f'… e mais {r["total"] - len(r["items"])}. Veja tudo no site.')
+    return '\n'.join(lines)
+
+
+def purchases_text(q: dict, r: dict) -> str:
+    """Resposta de "o que comprei dia X / no período"."""
+    period = dm(q['date_from']) if q['date_from'] == q['date_to'] else f'{dm(q["date_from"])} a {dm(q["date_to"])}'
+    extra = f' ({h(q.get("category") or q.get("text"))})' if q.get('category') or q.get('text') else ''
+    if not r['total']:
+        return f'🧾 Nenhuma compra registrada em {period}{extra}.'
+    lines = [f'🧾 Compras de {period}{extra}: <b>{brl(r["total_amount"])}</b> em {r["total"]} lançamento(s)', '']
+    lines += _items(r['items'], 'purchase_date')
+    if r['total'] > len(r['items']):
+        lines.append(f'… e mais {r["total"] - len(r["items"])}. Veja tudo no site.')
     return '\n'.join(lines)

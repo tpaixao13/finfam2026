@@ -208,13 +208,16 @@ def parse_json(text: str) -> dict:
 
 # ── Interpretação de mensagens ───────────────────────────────────────────────
 
-INTENTS = ('expense', 'bills', 'summary', 'chat')
+INTENTS = ('expense', 'bills', 'spending', 'purchases', 'summary', 'chat')
+QUERY_INTENTS = ('bills', 'spending', 'purchases')
 
 _SYSTEM = """Você é o assistente do FinFam, app de controle financeiro familiar no Brasil.
 Interprete a mensagem do usuário e responda SOMENTE com um objeto JSON, sem texto fora dele:
-{"intent": "expense" | "bills" | "summary" | "chat",
+{"intent": "expense" | "bills" | "spending" | "purchases" | "summary" | "chat",
  "expense": {"description": str, "amount": number, "payment_method": str, "card_id": int|null,
              "installments": int|null, "category": str|null, "date": "AAAA-MM-DD"|null, "person_id": int|null} | null,
+ "query": {"days": int|null, "category": str|null, "text": str|null, "month": int|null, "year": int|null,
+           "date_from": "AAAA-MM-DD"|null, "date_to": "AAAA-MM-DD"|null} | null,
  "reply": str}
 Regras:
 - "expense": a pessoa conta um gasto/compra/conta para lançar. amount é o valor TOTAL em reais (ex.: "87,50" → 87.5).
@@ -225,7 +228,13 @@ Regras:
 - category: uma de {categories}, ou null se não tiver certeza.
 - date: hoje é {today} ({weekday}); "ontem", "sexta" etc. viram data. Sem data → null.
 - person_id: só se a pessoa disser que o gasto é de outro membro. Senão null.
-- "bills": quer ver contas a pagar/vencimentos. "summary": quer resumo/saldo/quanto gastou no mês.
+- "bills": quer ver contas a pagar/vencimentos. query.days = quantos dias à frente ("próximos 5 dias" → 5; padrão 7).
+- "spending": pergunta QUANTO gastou com algo ("quanto gastei de alimentação/mercado este mês?").
+  query.category = uma de {categories} se der para mapear ("alimento", "comida" → Alimentação); senão null e
+  query.text = a palavra buscada ("uber", "ifood"). query.month/year = o mês perguntado (padrão: o mês atual).
+- "purchases": pergunta O QUE comprou/lançou num dia ou período ("o que comprei dia 20/10?", "compras da semana
+  passada"). query.date_from e query.date_to (o mesmo dia se for um dia só); category/text se a pessoa filtrar.
+- "summary": quer o resumo geral do mês (renda, gastos, saldo), sem categoria específica.
 - "chat": qualquer outra coisa; em "reply" explique em 1 frase o que você consegue fazer.
 - "reply": frase curta em português para o usuário."""
 
@@ -320,8 +329,42 @@ def to_draft(raw: dict | None, *, today: date, categories: list[str], methods: l
 
 
 def interpret(client: AIClient, text: str, system_prompt: str) -> dict:
-    """{'intent', 'expense' (cru, conferir com to_draft), 'reply'}."""
+    """{'intent', 'expense'/'query' (crus, conferir com to_draft/to_query), 'reply'}."""
     data = client.complete_json(system_prompt, text)
     intent = data.get('intent') if data.get('intent') in INTENTS else 'chat'
     reply = str(data.get('reply') or '').strip()[:500]
-    return {'intent': intent, 'expense': data.get('expense'), 'reply': reply}
+    return {'intent': intent, 'expense': data.get('expense'), 'query': data.get('query'), 'reply': reply}
+
+
+def match_category(value, categories: list[str]) -> str | None:
+    """'Alimentação', 'alimentacao' ou 'aliment' → 'Alimentação' (só categorias da família)."""
+    wanted = _norm(value)
+    if not wanted:
+        return None
+    for c in categories:
+        if _norm(c) == wanted:
+            return c
+    hits = [c for c in categories if len(wanted) >= 4 and (_norm(c).startswith(wanted[:5]) or wanted.startswith(_norm(c)[:5]))]
+    return hits[0] if len(hits) == 1 else None
+
+
+def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str]) -> dict:
+    """Confere os filtros da consulta: números em faixa, categoria real, datas plausíveis."""
+    raw = raw if isinstance(raw, dict) else {}
+    days = _int(raw.get('days'))
+    category = match_category(raw.get('category'), categories)
+    text = re.sub(r'[^\w\s.-]', '', str(raw.get('text') or ''))[:60].strip() or None
+    month, year = _int(raw.get('month')), _int(raw.get('year'))
+    month = month if month and 1 <= month <= 12 else today.month
+    year = year if year and abs(year - today.year) <= 3 else today.year
+    start = _date(raw.get('date_from'), today) if raw.get('date_from') else None
+    end = _date(raw.get('date_to'), today) if raw.get('date_to') else start
+    if intent == 'purchases' and start is None:
+        start = end = today
+    if start and end and end < start:
+        start, end = end, start
+    if start and end and (end - start).days > 400:
+        end = start + timedelta(days=400)
+    return {'days': days if days and 0 <= days <= 90 else 7, 'category': category,
+            'text': None if category else text, 'month': month, 'year': year,
+            'date_from': start.isoformat() if start else None, 'date_to': end.isoformat() if end else None}

@@ -277,3 +277,33 @@ def test_bot_peek_shows_owner_without_consuming_code(client, family):
     assert r.status_code == 200 and r.json()['user_name'] == 'Tiago'
     assert client.post(f'{API}/telegram/bot/link', headers=BOT, json={'code': code, 'chat_id': '5'}).status_code == 200
     assert client.post(f'{API}/telegram/bot/peek', headers=BOT, json={'code': code}).status_code == 422
+
+
+def test_interpret_queries_are_checked(client, family, fake_ai):
+    family.put('/settings/ai', json={'provider': 'gemini', 'api_key': 'AIzaSy-0000000000'})
+    fake_ai['answer'] = {'intent': 'spending', 'query': {'category': 'alimento', 'month': 13, 'year': 1999}}
+    q = family.post('/ai/interpret', json={'text': 'quanto gastei de alimento esse mes'}).json()['query']
+    from datetime import date as _d
+    assert q['category'] == 'Alimentação' and q['text'] is None and (q['month'], q['year']) == (_d.today().month, _d.today().year)
+    fake_ai['answer'] = {'intent': 'spending', 'query': {'category': 'Inexistente', 'text': 'uber<b>'}}
+    q = family.post('/ai/interpret', json={'text': 'quanto gastei de uber'}).json()['query']
+    assert q['category'] is None and q['text'] == 'uberb'
+    fake_ai['answer'] = {'intent': 'bills', 'query': {'days': 5}}
+    assert family.post('/ai/interpret', json={'text': 'contas dos próximos 5 dias'}).json()['query']['days'] == 5
+    fake_ai['answer'] = {'intent': 'bills', 'query': {'days': 9999}}
+    assert family.post('/ai/interpret', json={'text': 'contas'}).json()['query']['days'] == 7
+    fake_ai['answer'] = {'intent': 'purchases', 'query': {'date_from': '2026-10-20'}}
+    q = family.post('/ai/interpret', json={'text': 'o que comprei dia 20/10'}).json()['query']
+    assert (q['date_from'], q['date_to']) == ('2026-10-20', '2026-10-20')
+
+
+def test_purchase_date_filter_uses_real_purchase_date(client, family):
+    card = family.post('/cards', json={'supports_credit': True, 'last_digits': '1234', 'bank': 'Inter',
+                                       'due_day': 10, 'best_buy_day': 3}).json()['card']
+    r = family.post('/expenses', json={'description': 'Tênis', 'amount': '300', 'category': 'Vestuário',
+                                       'payment_method': 'Cartão de Crédito', 'card_id': card['id'],
+                                       'date': '2026-10-20'})
+    assert r.json()['expenses'][0]['month'] == 11  # caiu na fatura de novembro
+    found = family.get('/expenses', params={'purchase_from': '2026-10-20', 'purchase_to': '2026-10-20'}).json()
+    assert [e['description'] for e in found['items']] == ['Tênis']
+    assert family.get('/expenses', params={'purchase_from': '2026-11-20', 'purchase_to': '2026-11-20'}).json()['total'] == 0

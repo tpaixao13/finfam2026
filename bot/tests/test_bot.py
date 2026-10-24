@@ -255,6 +255,12 @@ class StubApi:
         self.answer, self.posted, self.ai, self.interpreted = answer, [], ai, 0
 
     def get(self, chat_id, path, **query):
+        self.gets = getattr(self, 'gets', []) + [(path, query)]
+        if path == '/expenses':
+            items = [{'description': 'Mercado <Extra>', 'amount': 120.5, 'purchase_date': '2026-10-20', 'user_name': 'Tiago'}]
+            return {'items': items, 'total': 3, 'total_amount': 300.0}
+        if path == '/expenses/bills':
+            return {'total': 0, 'totals': {}, 'overdue': [], 'today': [], 'upcoming': []}
         if path == '/expenses/options':
             return {'categories': ['Alimentação', 'Outros'], 'banks': ['Inter']}
         if path == '/meta':
@@ -363,3 +369,23 @@ def test_other_date_button_asks_to_type():
     b.handle(_click(61, 'f:cat:0'))
     b.handle(_msg(61, 'amanhã de manhã'))
     assert 'Não entendi a data' in tg.last['text']
+
+
+def test_ai_queries_spending_purchases_and_bills_days():
+    tg = FakeTelegram()
+    q = {'days': 7, 'category': 'Alimentação', 'text': None, 'month': 10, 'year': 2026, 'date_from': None, 'date_to': None}
+    b = Bot(tg, StubApi({'intent': 'spending', 'query': q, 'reply': ''}))
+    b.handle(_msg(70, 'quanto gastei de alimento esse mes'))
+    assert ('/expenses', {'per_page': 15, 'month': 10, 'year': 2026, 'category': 'Alimentação'}) in b.api.gets
+    assert '<b>Alimentação</b> em outubro/2026: <b>R$ 300,00</b> em 3' in tg.last['text']
+    assert 'Mercado &lt;Extra&gt;' in tg.last['text'] and 'e mais 2' in tg.last['text']
+
+    q2 = {**q, 'category': None, 'date_from': '2026-10-20', 'date_to': '2026-10-20'}
+    b2 = Bot(tg, StubApi({'intent': 'purchases', 'query': q2, 'reply': ''}))
+    b2.handle(_msg(71, 'o que comprei dia 20/10'))
+    assert ('/expenses', {'per_page': 15, 'purchase_from': '2026-10-20', 'purchase_to': '2026-10-20'}) in b2.api.gets
+    assert tg.last['text'].startswith('🧾 Compras de 20/10:')
+
+    b3 = Bot(tg, StubApi({'intent': 'bills', 'query': {**q, 'days': 5}, 'reply': ''}))
+    b3.handle(_msg(72, 'contas dos próximos 5 dias'))
+    assert ('/expenses/bills', {'days_ahead': 5}) in b3.api.gets

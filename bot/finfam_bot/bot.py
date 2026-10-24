@@ -18,7 +18,7 @@ from finfam_bot.fmt import btn, dm, h
 from finfam_bot.http import ApiError, FinFam, Telegram
 from finfam_bot.invest_flow import InvestFlow
 from finfam_bot.parsers import parse_amount, parse_date, quick_parse  # noqa: F401  (usados pelos testes)
-from finfam_bot.views import HELP, bills_view, draft_text, portfolio_text, summary_text
+from finfam_bot.views import HELP, bills_view, draft_text, portfolio_text, purchases_text, spending_text, summary_text
 
 log = logging.getLogger('finfam.bot')
 
@@ -218,15 +218,32 @@ class Bot:
                 self.tg.send(chat_id, self.ai_off_text('missing'))
                 return
             raise
-        intent = r['intent']
+        intent, q = r['intent'], r.get('query') or {}
         if intent == 'bills':
-            self.bills(chat_id)
+            self.bills(chat_id, days=q.get('days') or 7)
+        elif intent == 'spending':
+            self.spending(chat_id, q)
+        elif intent == 'purchases':
+            self.purchases(chat_id, q)
         elif intent == 'summary':
             self.summary(chat_id)
         elif intent == 'expense' and r.get('draft'):
             self.ai_expense(chat_id, r['draft'])
         else:
             self.tg.send(chat_id, h(r.get('reply') or 'Não entendi.') + '\n\nVeja o que eu faço em /ajuda.')
+
+    def _search(self, chat_id: int, **filters) -> dict:
+        clean = {k: v for k, v in filters.items() if v not in (None, '')}
+        return self.api.get(chat_id, '/expenses', per_page=15, **clean)
+
+    def spending(self, chat_id: int, q: dict) -> None:
+        r = self._search(chat_id, month=q['month'], year=q['year'], category=q.get('category'), search=q.get('text'))
+        self.tg.send(chat_id, spending_text(q, r))
+
+    def purchases(self, chat_id: int, q: dict) -> None:
+        r = self._search(chat_id, purchase_from=q['date_from'], purchase_to=q['date_to'],
+                         category=q.get('category'), search=q.get('text'))
+        self.tg.send(chat_id, purchases_text(q, r))
 
     def ai_expense(self, chat_id: int, d: dict) -> None:
         """O que a IA entendeu entra no passo a passo: pergunta só o que falta
