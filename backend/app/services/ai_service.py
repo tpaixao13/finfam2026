@@ -7,6 +7,7 @@ valores) e nunca grava nada: quem grava é o usuário, ao confirmar.
 import json
 import logging
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -92,6 +93,22 @@ def _gemini_thinking(model: str) -> dict:
 
 
 def _post(url: str, headers: dict, body: dict) -> dict:
+    """Uma nova tentativa se o provedor estiver sobrecarregado (5xx)."""
+    try:
+        return _post_once(url, headers, body)
+    except _Overloaded:
+        time.sleep(2)
+        try:
+            return _post_once(url, headers, body)
+        except _Overloaded as exc:
+            raise AIError(str(exc)) from None
+
+
+class _Overloaded(AIError):
+    pass
+
+
+def _post_once(url: str, headers: dict, body: dict) -> dict:
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method='POST',
                                  headers={'Content-Type': 'application/json', **headers})
     try:
@@ -100,7 +117,8 @@ def _post(url: str, headers: dict, body: dict) -> dict:
     except urllib.error.HTTPError as exc:
         body_text = exc.read().decode('utf-8', 'replace')
         log.warning('IA %s respondeu %s: %s', url.split('?')[0], exc.code, body_text[:300])
-        raise AIError(_http_message(exc.code, body_text)) from None
+        error = _Overloaded if exc.code in (500, 502, 503, 504) else AIError
+        raise error(_http_message(exc.code, body_text)) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, 'reason', exc)
         log.warning('IA %s sem conexão: %s', url.split('?')[0], reason)
@@ -118,6 +136,9 @@ def _http_message(code: int, body: str) -> str:
         return 'A chave de IA foi recusada pelo provedor. Confira a chave em Telegram e IA.'
     if code == 404:
         return 'Modelo de IA não encontrado. Confira o nome do modelo em Telegram e IA.'
+    if code in (500, 502, 503, 504):
+        return ('O modelo de IA está sobrecarregado no provedor agora. Tente de novo em instantes '
+                'ou escolha outro modelo em Telegram e IA.')
     if code == 429:
         return 'Limite ou crédito da chave de IA esgotado no provedor. Tente mais tarde.'
     try:  # mensagem do provedor, curta (nunca repete a chave)
