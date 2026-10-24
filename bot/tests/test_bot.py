@@ -149,7 +149,11 @@ def test_full_flow(bot, api_url, family):
     b, tg = bot
     code = _call(api_url, 'POST', '/telegram/link-code', token=family)['code']
     b.handle(_msg(20, f'/start {code}'))
-    assert 'conectado' in tg.last['text'] and 'Tiago' in tg.last['text']
+    assert 'Conectar este Telegram à conta de <b>Tiago</b>' in tg.last['text']
+    b.handle(_msg(20, '/contas'))  # ainda não conectou
+    assert 'não está conectado' in tg.last['text']
+    b.handle(_click(20, tg.button('✅ Conectar', tg.sent[-2])))
+    assert 'conectado' in tg.edits[-1]['text'] and 'Tiago' in tg.edits[-1]['text']
 
     # contas a pagar + botão pagar
     b.handle(_msg(20, '/contas'))
@@ -256,6 +260,16 @@ def test_ai_draft_confirm_and_missing_amount():
     b2 = Bot(tg, StubApi({'intent': 'expense', 'reply': '', 'draft': {**d, 'amount': None, 'missing': ['amount']}}))
     b2.handle(_msg(31, 'comprei uber'))
     assert 'Quanto custou' in tg.last['text'] and b2.flows[31]['step'] == 'amount'
+
+
+def test_link_can_be_declined(bot, api_url, family):
+    b, tg = bot
+    code = _call(api_url, 'POST', '/telegram/link-code', token=family)['code']
+    b.handle(_msg(40, f'/start {code}'))
+    b.handle(_click(40, 'lk:'))
+    assert 'não conectei' in tg.edits[-1]['text']
+    b.handle(_msg(40, '/contas'))
+    assert 'não está conectado' in tg.last['text']
 
 
 def test_unlinked_chat_cannot_open_guided_flows(bot):

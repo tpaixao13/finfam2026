@@ -259,3 +259,21 @@ def test_reminder_is_cut_to_telegram_limit(monkeypatch):
     monkeypatch.setattr(tg_service.urllib.request, 'urlopen', fake)
     assert tg_service.send_message('t', '1', 'linha\n' * 2000)[0]
     assert sent['len'] < 4096
+
+
+def test_password_change_disconnects_telegram_and_api_tokens(client, family):
+    _link(client, family, '888')
+    raw = family.post('/auth/tokens', json={'name': 'mcp'}).json()['token']
+    r = family.post('/auth/change-password', json={'current_password': 'senha-segura', 'new_password': 'outra-senha-9',
+                                                   'confirm_password': 'outra-senha-9'})
+    assert r.status_code == 200 and 'desconectados' in r.json()['message']
+    assert client.get(f'{API}/auth/me', headers=_bot('888')).status_code == 401
+    assert client.get(f'{API}/auth/me', headers={'Authorization': f'Bearer {raw}'}).status_code == 401
+
+
+def test_bot_peek_shows_owner_without_consuming_code(client, family):
+    code = family.post('/telegram/link-code').json()['code']
+    r = client.post(f'{API}/telegram/bot/peek', headers=BOT, json={'code': code})
+    assert r.status_code == 200 and r.json()['user_name'] == 'Tiago'
+    assert client.post(f'{API}/telegram/bot/link', headers=BOT, json={'code': code, 'chat_id': '5'}).status_code == 200
+    assert client.post(f'{API}/telegram/bot/peek', headers=BOT, json={'code': code}).status_code == 422

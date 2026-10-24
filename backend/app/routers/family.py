@@ -105,10 +105,9 @@ def edit_member(user_id: int, body: MemberUpdate, ctx: Ctx = Depends(get_ctx_ses
         raise HTTPException(status_code=409, detail='E-mail já está em uso por outro membro.')
     user.name = body.name.strip()
     user.email = email
-    if body.new_password:
-        user.set_password(body.new_password)
+    revoked = user.change_password(body.new_password) if body.new_password else 0
     db.session.commit()
-    return {'message': f'Dados de {user.name} atualizados!', 'member': user_out(user)}
+    return {'message': f'Dados de {user.name} atualizados!' + (' Telegram e tokens de API foram desconectados: conecte de novo.' if revoked else ''), 'member': user_out(user)}
 
 
 @router.delete('/members/{user_id}', summary='Remove um membro (e todos os dados dele)')

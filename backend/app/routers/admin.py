@@ -84,9 +84,9 @@ def reset_password(user_id: int, body: PasswordIn, admin: User = Depends(get_adm
     user = get_or_404(User.query.filter_by(id=user_id), 'Usuário não encontrado.')
     if user.is_admin and user.id != admin.id:
         raise HTTPException(status_code=403, detail='Não é possível redefinir a senha de outro administrador.')
-    user.set_password(body.new_password)
+    revoked = user.change_password(body.new_password)
     db.session.commit()
-    return {'message': f'Senha de {user.name} redefinida com sucesso.'}
+    return {'message': f'Senha de {user.name} redefinida com sucesso.' + (' Telegram e tokens de API foram desconectados: conecte de novo.' if revoked else '')}
 
 
 @router.post('/tenants/{tenant_id}/plan', summary='Define o plano da família')

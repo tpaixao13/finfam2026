@@ -128,6 +128,15 @@ class User(Base):
     def set_password(self, password: str) -> None:
         self.password_hash = hash_password(password)
 
+    def change_password(self, password: str) -> int:
+        """Troca a senha e desliga tudo que dava acesso sem ela: sessões (pelo `fp` do JWT),
+        tokens de API e Telegram conectado. Devolve quantos acessos foram desligados."""
+        self.set_password(password)
+        tokens = self.api_tokens.filter_by(revoked=False).update({'revoked': True}, synchronize_session=False)
+        chats = self.telegram_links.delete(synchronize_session=False)
+        self.telegram_codes.delete(synchronize_session=False)
+        return tokens + chats
+
     def check_password(self, password: str) -> bool:
         return verify_password(self.password_hash, password)
 

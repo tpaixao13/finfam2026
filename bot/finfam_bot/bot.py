@@ -118,11 +118,12 @@ class Bot:
 
     # comandos ────────────────────────────────────────────────────────────────
     def start(self, chat_id: int, code: str, sender: dict) -> None:
-        if code:
-            r = self.api.post(None, '/telegram/bot/link', {'code': code, 'chat_id': str(chat_id),
-                                                            'username': sender.get('username')})
-            family = f' (família {h(r["family"])})' if r.get('family') else ''
-            self.tg.send(chat_id, f'✅ {h(r["message"])}{family}\n\n{HELP}')
+        if code:  # link do site: confirma de quem é a conta antes de conectar
+            who = self.api.post(None, '/telegram/bot/peek', {'code': code[:64]})
+            family = f' (família {h(who["family"])})' if who.get('family') else ''
+            self.tg.send(chat_id, f'🔗 Conectar este Telegram à conta de <b>{h(who["user_name"])}</b>{family}?\n\n'
+                                  'Quem conectar verá as contas e poderá lançar gastos dessa família.',
+                         [[btn('✅ Conectar', f'lk:{code[:60]}'), btn('❌ Não', 'lk:')]])
             return
         try:
             me = self.api.get(chat_id, '/auth/me')
@@ -132,6 +133,17 @@ class Bot:
             self.tg.send(chat_id, '👋 Olá! Eu sou o bot do <b>FinFam</b>.\n\n' + self._how_to_link())
             return
         self.tg.send(chat_id, f'👋 Olá, {h(me["user"]["name"])}!\n\n{HELP}')
+
+    def _link_answer(self, cq: dict, code: str, chat_id: int, message_id: int) -> None:
+        self.tg.answer(cq['id'])
+        if not code:
+            return self.tg.edit(chat_id, message_id, 'Ok, não conectei. Se mudar de ideia, gere um novo link no site.')
+        r = self.api.post(None, '/telegram/bot/link', {'code': code, 'chat_id': str(chat_id),
+                                                        'username': (cq.get('from') or {}).get('username')})
+        self.cache.pop((chat_id, 'me'), None)
+        family = f' (família {h(r["family"])})' if r.get('family') else ''
+        self.tg.edit(chat_id, message_id, f'✅ {h(r["message"])}{family}')
+        self.tg.send(chat_id, HELP)
 
     def unlink(self, chat_id: int) -> None:
         self.api.delete(chat_id, '/telegram/link')
@@ -227,6 +239,8 @@ class Bot:
         if msg.get('chat', {}).get('type') != 'private':
             return self.tg.answer(cq['id'])
         kind, _, arg = data.partition(':')
+        if kind == 'lk':
+            return self._link_answer(cq, arg, chat_id, message_id)
         if kind == 'pay':
             self.tg.answer(cq['id'], 'Marcando como paga…')  # tira o "carregando" do botão na hora
             self.api.post(chat_id, '/expenses/pay', {'ids': [int(arg)], 'paid': True})

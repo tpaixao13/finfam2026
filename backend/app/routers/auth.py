@@ -111,10 +111,10 @@ def me(ctx: Ctx = Depends(get_ctx_allow_expired), period: Period = Depends(get_p
 def change_password(body: ChangePasswordIn, ctx: Ctx = Depends(get_ctx_session_allow_expired)):
     if not ctx.user.check_password(body.current_password):
         raise HTTPException(status_code=422, detail='Senha atual incorreta.')
-    ctx.user.set_password(body.new_password)
+    revoked = ctx.user.change_password(body.new_password)
     db.session.commit()
     # as sessões antigas deixam de valer; devolve uma nova para quem trocou a senha
-    return {'message': 'Senha alterada com sucesso!', **_session_payload(ctx.user, ctx.tenant)}
+    return {'message': 'Senha alterada com sucesso!' + (' Telegram e tokens de API foram desconectados: conecte de novo.' if revoked else ''), **_session_payload(ctx.user, ctx.tenant)}
 
 
 @router.post('/auth/avatar', summary='Envia foto de perfil (jpg, png, gif, webp — até 2 MB)')

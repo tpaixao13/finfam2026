@@ -79,14 +79,31 @@ class BotLinkIn(BaseModel):
     username: str | None = Field(None, max_length=64)
 
 
-@router.post('/bot/link', summary='(bot) Vincula a conversa pelo código do link', include_in_schema=False)
-def bot_link(body: BotLinkIn, _: None = Depends(get_bot)):
-    row = TelegramLinkCode.query.filter_by(code_hash=hash_api_token(body.code.strip())).first()
+def _valid_code(code: str) -> TelegramLinkCode:
+    row = TelegramLinkCode.query.filter_by(code_hash=hash_api_token(code.strip())).first()
     if row is None or row.expires_at < utcnow():
         if row is not None:
             db.session.delete(row)
             db.session.commit()
         raise HTTPException(status_code=422, detail='Link inválido ou expirado. Gere um novo no site do FinFam.')
+    return row
+
+
+class BotPeekIn(BaseModel):
+    code: str = Field(min_length=8, max_length=64)
+
+
+@router.post('/bot/peek', summary='(bot) De quem é o link, para confirmar antes de conectar', include_in_schema=False)
+def bot_peek(body: BotPeekIn, _: None = Depends(get_bot)):
+    user = db.session.get(User, _valid_code(body.code).user_id)
+    if user is None or user.is_admin:
+        raise HTTPException(status_code=422, detail='Conta não encontrada.')
+    return {'user_name': user.name, 'family': user.tenant.name if user.tenant else None}
+
+
+@router.post('/bot/link', summary='(bot) Vincula a conversa pelo código do link', include_in_schema=False)
+def bot_link(body: BotLinkIn, _: None = Depends(get_bot)):
+    row = _valid_code(body.code)
     user = db.session.get(User, row.user_id)
     db.session.delete(row)  # uso único
     if user is None or user.is_admin:
