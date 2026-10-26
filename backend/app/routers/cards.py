@@ -64,6 +64,47 @@ def list_cards(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx)
     }
 
 
+@router.get('/invoices', summary='Faturas de crédito do mês: uma por conta/cartão e o total (sem duplicar)')
+def invoices(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx)):
+    """Soma as compras no crédito da competência (mês da fatura). Cartões da mesma conta
+    (limite compartilhado) formam UMA fatura; compras no crédito sem cartão ficam à parte."""
+    rows = (Expense.query.filter(Expense.user_id.in_(ctx.uids), Expense.payment_method == CREDIT,
+                                 Expense.year == period.year, Expense.month == period.month).all())
+    cards = {c.id: c for c in CreditCard.query.filter(CreditCard.user_id.in_(ctx.uids)).all()}
+    groups: dict[str, dict] = {}
+    for e in rows:
+        card = cards.get(e.card_id)
+        if card is None:
+            key, label, due_day = 'none', 'Crédito sem cartão', None
+        elif card.account_id and card.account:
+            key, label, due_day = f'a{card.account_id}', card.account.display_label, card.due_day
+        else:
+            key, label, due_day = f'c{card.id}', card.label, card.due_day
+        g = groups.setdefault(key, {'label': label, 'due_day': due_day, 'card_ids': set(), 'total': 0.0,
+                                    'paid_total': 0.0, 'count': 0})
+        if card is not None:
+            g['card_ids'].add(card.id)
+        g['total'] += float(e.amount)
+        g['paid_total'] += float(e.amount) if e.paid else 0.0
+        g['count'] += 1
+    out = []
+    for g in sorted(groups.values(), key=lambda g: -g['total']):
+        due = None
+        if g['due_day']:
+            try:
+                due = _date(period.year, period.month, g['due_day']).isoformat()
+            except ValueError:
+                due = None
+        pending = round(g['total'] - g['paid_total'], 2)
+        out.append({'label': g['label'], 'card_ids': sorted(g['card_ids']), 'due_date': due, 'count': g['count'],
+                    'total': round(g['total'], 2), 'paid_total': round(g['paid_total'], 2), 'pending_total': pending,
+                    'status': 'paga' if pending <= 0 else 'aberta'})
+    total = round(sum(i['total'] for i in out), 2)
+    paid = round(sum(i['paid_total'] for i in out), 2)
+    return {'month': period.month, 'year': period.year, 'month_name': MONTH_NAMES_FULL[period.month - 1],
+            'total': total, 'paid_total': paid, 'pending_total': round(total - paid, 2), 'invoices': out}
+
+
 @router.post('', status_code=201, summary='Cadastra cartão')
 def create(body: CardIn, ctx: Ctx = Depends(get_ctx)):
     card = CreditCard(user_id=ctx.member(body.user_id).id)

@@ -208,15 +208,16 @@ def parse_json(text: str) -> dict:
 
 # ── Interpretação de mensagens ───────────────────────────────────────────────
 
-INTENTS = ('expense', 'bills', 'spending', 'purchases', 'summary', 'chat')
-QUERY_INTENTS = ('bills', 'spending', 'purchases')
+INTENTS = ('expense', 'bills', 'spending', 'purchases', 'invoices', 'summary', 'chat')
+QUERY_INTENTS = ('bills', 'spending', 'purchases', 'invoices')
 
 _SYSTEM = """Você é o assistente do FinFam, app de controle financeiro familiar no Brasil.
 Interprete a mensagem do usuário e responda SOMENTE com um objeto JSON, sem texto fora dele:
-{"intent": "expense" | "bills" | "spending" | "purchases" | "summary" | "chat",
+{"intent": "expense" | "bills" | "spending" | "purchases" | "invoices" | "summary" | "chat",
  "expense": {"description": str, "amount": number, "payment_method": str, "card_id": int|null,
              "installments": int|null, "category": str|null, "date": "AAAA-MM-DD"|null, "person_id": int|null} | null,
- "query": {"days": int|null, "category": str|null, "text": str|null, "month": int|null, "year": int|null,
+ "query": {"days": int|null, "category": str|null, "text": str|null, "payment_method": str|null,
+           "month": int|null, "year": int|null,
            "date_from": "AAAA-MM-DD"|null, "date_to": "AAAA-MM-DD"|null} | null,
  "reply": str}
 Regras:
@@ -232,6 +233,10 @@ Regras:
 - "spending": pergunta QUANTO gastou com algo ("quanto gastei de alimentação/mercado este mês?").
   query.category = uma de {categories} se der para mapear ("alimento", "comida" → Alimentação); senão null e
   query.text = a palavra buscada ("uber", "ifood"). query.month/year = o mês perguntado (padrão: o mês atual).
+  Se a pessoa falar da FORMA de pagamento ("no débito", "no PIX"), use query.payment_method (uma de {methods})
+  e deixe text null.
+- "invoices": pergunta o valor da FATURA do cartão de crédito ("qual o valor do cartão de crédito de novembro?",
+  "quanto vem a fatura?"). query.month/year = mês da fatura (padrão: o mês atual).
 - "purchases": pergunta O QUE comprou/lançou num dia ou período ("o que comprei dia 20/10?", "compras da semana
   passada"). query.date_from e query.date_to (o mesmo dia se for um dia só); category/text se a pessoa filtrar.
 - "summary": quer o resumo geral do mês (renda, gastos, saldo), sem categoria específica.
@@ -348,12 +353,17 @@ def match_category(value, categories: list[str]) -> str | None:
     return hits[0] if len(hits) == 1 else None
 
 
-def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str]) -> dict:
+def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str],
+             methods: list[str] | None = None) -> dict:
     """Confere os filtros da consulta: números em faixa, categoria real, datas plausíveis."""
     raw = raw if isinstance(raw, dict) else {}
     days = _int(raw.get('days'))
     category = match_category(raw.get('category'), categories)
     text = re.sub(r'[^\w\s.-]', '', str(raw.get('text') or ''))[:60].strip() or None
+    method = str(raw.get('payment_method') or '')
+    method = method if method in (methods or []) else _METHOD_ALIASES.get(_norm(method))
+    if method and _norm(text or '') in (_norm(method), 'cartao de credito', 'credito', 'debito', 'pix', 'cartao'):
+        text = None  # "no débito" é a forma de pagamento, não um nome de lançamento
     month, year = _int(raw.get('month')), _int(raw.get('year'))
     month = month if month and 1 <= month <= 12 else today.month
     year = year if year and abs(year - today.year) <= 3 else today.year
@@ -365,6 +375,6 @@ def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str
         start, end = end, start
     if start and end and (end - start).days > 400:
         end = start + timedelta(days=400)
-    return {'days': days if days and 0 <= days <= 90 else 7, 'category': category,
+    return {'days': days if days and 0 <= days <= 90 else 7, 'category': category, 'payment_method': method,
             'text': None if category else text, 'month': month, 'year': year,
             'date_from': start.isoformat() if start else None, 'date_to': end.isoformat() if end else None}

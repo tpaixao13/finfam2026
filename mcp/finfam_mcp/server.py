@@ -19,6 +19,7 @@ INSTRUCTIONS = """Ferramentas do FinFam, o controle financeiro da família.
 - Antes de lançar no cartão, se não souber o nome do cartão, use `listar_cartoes`.
 - Compras no crédito caem na fatura conforme o "melhor dia de compra" do cartão — a API calcula isso.
 - Para "contas a pagar" (ex.: "próximos 5 dias"), use `contas_a_pagar(dias=5)`.
+- "Valor do cartão/fatura de novembro?" → `faturas_do_mes(mes=11)`; detalhe de um cartão → `fatura_do_cartao`.
 - "O que comprei dia X?" → `buscar_despesas(data=...)`. "Quanto gastei de X no mês?" → `buscar_despesas(categoria=...)`
   ou `gastos_por_categoria`. Para pagar, use `marcar_como_pago` com os IDs mostrados.
 - Confirme com o usuário antes de excluir algo."""
@@ -224,6 +225,22 @@ def listar_cartoes(mes: int | None = None, ano: int | None = None) -> str:
             if c['supports_credit']:
                 extra += f", melhor dia {c['best_buy_day']}, vence dia {c['due_day']}"
         lines.append(f"• #{c['id']} {c['label']} ({c['owner_name']}): {extra}")
+    return '\n'.join(lines)
+
+
+@mcp.tool()
+@_safe
+def faturas_do_mes(mes: int | None = None, ano: int | None = None) -> str:
+    """Valor das faturas de cartão de crédito do mês (todas as contas/cartões, sem duplicar
+    cartões que dividem limite) e o total. Use para "qual o valor do cartão de crédito de novembro?"."""
+    month, year = _period(mes, ano)
+    r = api.get('/cards/invoices', month=month, year=year)
+    if not r['invoices']:
+        return f'Nenhuma compra no crédito na fatura de {month:02d}/{year}.'
+    lines = [f"Faturas de {r['month_name']}/{r['year']}: total {brl(r['total'])} "
+             f"(pago {brl(r['paid_total'])}, falta {brl(r['pending_total'])})"]
+    lines += [f"• {i['label']}: {brl(i['total'])} em {i['count']} compra(s)"
+              f"{', vence ' + dm(i['due_date']) if i['due_date'] else ''} — {i['status']}" for i in r['invoices']]
     return '\n'.join(lines)
 
 

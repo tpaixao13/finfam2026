@@ -282,6 +282,10 @@ class StubApi:
         if path == '/expenses':
             items = [{'description': 'Mercado <Extra>', 'amount': 120.5, 'purchase_date': '2026-10-20', 'user_name': 'Tiago'}]
             return {'items': items, 'total': 3, 'total_amount': 300.0}
+        if path == '/cards/invoices':
+            return {'month': 11, 'year': 2026, 'total': 350.0, 'paid_total': 100.0, 'pending_total': 250.0,
+                    'invoices': [{'label': 'Inter <conta>', 'due_date': '2026-11-15', 'status': 'aberta', 'total': 300.0},
+                                 {'label': 'Crédito sem cartão', 'due_date': None, 'status': 'paga', 'total': 50.0}]}
         if path == '/expenses/bills':
             return {'total': 0, 'totals': {}, 'overdue': [], 'today': [], 'upcoming': []}
         if path == '/expenses/options':
@@ -415,3 +419,15 @@ def test_ai_queries_spending_purchases_and_bills_days():
     b3 = Bot(tg, StubApi({'intent': 'bills', 'query': {**q, 'days': 5}, 'reply': ''}))
     b3.handle(_msg(72, 'contas dos próximos 5 dias'))
     assert ('/expenses/bills', {'days_ahead': 5}) in b3.api.gets
+
+
+def test_ai_invoice_question():
+    tg = FakeTelegram()
+    q = {'days': 7, 'category': None, 'text': None, 'payment_method': None, 'month': 11, 'year': 2026,
+         'date_from': None, 'date_to': None}
+    b = Bot(tg, StubApi({'intent': 'invoices', 'query': q, 'reply': ''}))
+    b.handle(_msg(80, 'qual o valor do cartão de credito do mes de novembro?'))
+    assert ('/cards/invoices', {'month': 11, 'year': 2026}) in b.api.gets
+    text = tg.last['text']
+    assert '<b>Fatura de novembro/2026</b>: <b>R$ 350,00</b> (falta pagar R$ 250,00)' in text
+    assert 'Inter &lt;conta&gt;: R$ 300,00 · vence 15/11 · ⏳ aberta' in text and '✅ paga' in text

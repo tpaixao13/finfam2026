@@ -15,7 +15,8 @@ HELP = ('<b>O que eu faço</b>\n'
         'Com a IA configurada no site, é só escrever, por exemplo:\n'
         '<i>gastei 87,50 no mercado no cartão Inter em 3x</i>\n'
         '<i>quanto gastei de alimentação este mês?</i>\n'
-        '<i>o que comprei dia 20/10?</i> · <i>contas dos próximos 5 dias</i>')
+        '<i>o que comprei dia 20/10?</i> · <i>contas dos próximos 5 dias</i>\n'
+        '<i>qual o valor da fatura do cartão de novembro?</i>')
 
 
 def draft_text(d: dict, title: str = 'Confere o lançamento?') -> str:
@@ -115,7 +116,7 @@ def _items(items: list[dict], date_field: str) -> list[str]:
 
 def spending_text(q: dict, r: dict) -> str:
     """Resposta de "quanto gastei com X no mês"."""
-    what = q.get('category') or q.get('text') or 'tudo'
+    what = q.get('category') or q.get('text') or ('no ' + q['payment_method'] if q.get('payment_method') else 'tudo')
     period = f'{MONTHS[q["month"] - 1]}/{q["year"]}'
     if not r['total']:
         return f'🔎 Nenhum gasto com <b>{h(what)}</b> em {period}.'
@@ -136,4 +137,18 @@ def purchases_text(q: dict, r: dict) -> str:
     lines += _items(r['items'], 'purchase_date')
     if r['total'] > len(r['items']):
         lines.append(f'… e mais {r["total"] - len(r["items"])}. Veja tudo no site.')
+    return '\n'.join(lines)
+
+
+def invoices_text(r: dict) -> str:
+    """Resposta de "qual o valor da fatura do cartão de <mês>"."""
+    period = f'{MONTHS[r["month"] - 1]}/{r["year"]}'
+    if not r['invoices']:
+        return f'💳 Nenhuma compra no crédito na fatura de {period}.'
+    lines = [f'💳 <b>Fatura de {period}</b>: <b>{brl(r["total"])}</b>'
+             + (f' (falta pagar {brl(r["pending_total"])})' if r['pending_total'] and r['paid_total'] else ''), '']
+    for i in r['invoices']:
+        due = f' · vence {dm(i["due_date"])}' if i.get('due_date') else ''
+        status = '✅ paga' if i['status'] == 'paga' else '⏳ aberta'
+        lines.append(f'• {h(i["label"])}: {brl(i["total"])}{due} · {status}')
     return '\n'.join(lines)

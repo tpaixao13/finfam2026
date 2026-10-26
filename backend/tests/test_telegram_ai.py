@@ -307,3 +307,13 @@ def test_purchase_date_filter_uses_real_purchase_date(client, family):
     found = family.get('/expenses', params={'purchase_from': '2026-10-20', 'purchase_to': '2026-10-20'}).json()
     assert [e['description'] for e in found['items']] == ['Tênis']
     assert family.get('/expenses', params={'purchase_from': '2026-11-20', 'purchase_to': '2026-11-20'}).json()['total'] == 0
+
+
+def test_interpret_invoices_and_payment_method(client, family, fake_ai):
+    family.put('/settings/ai', json={'provider': 'gemini', 'api_key': 'AIzaSy-0000000000'})
+    fake_ai['answer'] = {'intent': 'invoices', 'query': {'month': 11, 'year': 2026}}
+    q = family.post('/ai/interpret', json={'text': 'qual o valor do cartão de credito do mes de novembro?'}).json()
+    assert q['intent'] == 'invoices' and (q['query']['month'], q['query']['year']) == (11, 2026)
+    fake_ai['answer'] = {'intent': 'spending', 'query': {'payment_method': 'débito', 'text': 'débito'}}
+    q = family.post('/ai/interpret', json={'text': 'quanto gastei no débito'}).json()['query']
+    assert q['payment_method'] == 'Cartão de Débito' and q['text'] is None

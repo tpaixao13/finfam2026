@@ -263,3 +263,33 @@ def test_legacy_avatars_are_copied_with_random_name(client, family, tmp_path, mo
     url = family.get('/auth/me').json()['user']['avatar_url']
     assert 'user_1' not in url and client.get(url).content.startswith(b'\x89PNG')
     assert (legacy / 'user_1.png').is_file()  # a pasta antiga não é alterada
+
+
+def test_monthly_invoices_group_shared_accounts(family):
+    def card(digits, bank, **kw):
+        return family.post('/cards', json={'supports_credit': True, 'last_digits': digits, 'bank': bank,
+                                           'due_day': 15, 'best_buy_day': 3, **kw}).json()['card']
+    main = card('1111', 'Inter')
+    virtual = card('2222', 'Inter', is_virtual=True)
+    other = card('3333', 'Nubank')
+    assert main['account_id'] and main['account_id'] == virtual['account_id']  # limite compartilhado
+
+    def buy(desc, amount, card_id=None, paid=False):
+        body = {'description': desc, 'amount': amount, 'category': 'Outros', 'payment_method': 'Cartão de Crédito',
+                'date': '2026-11-02', 'paid': paid}
+        if card_id:
+            body['card_id'] = card_id
+        assert family.post('/expenses', json=body).status_code == 201
+    buy('A', '100', main['id'], paid=True)
+    buy('B', '50', virtual['id'])
+    buy('C', '30', other['id'])
+    buy('D', '20')  # crédito sem cartão
+    family.post('/expenses', json={'description': 'PIX', 'amount': '999', 'category': 'Outros',
+                                   'payment_method': 'PIX', 'date': '2026-11-02'})
+    r = family.get('/cards/invoices', params={'month': 11, 'year': 2026}).json()
+    assert (r['total'], r['paid_total'], r['pending_total']) == (200, 100, 100)
+    by_label = {i['label']: i for i in r['invoices']}
+    inter = next(i for i in r['invoices'] if set(i['card_ids']) == {main['id'], virtual['id']})
+    assert (inter['total'], inter['count'], inter['due_date'], inter['status']) == (150, 2, '2026-11-15', 'aberta')
+    assert by_label['Crédito sem cartão']['total'] == 20
+    assert family.get('/cards/invoices', params={'month': 12, 'year': 2026}).json()['invoices'] == []

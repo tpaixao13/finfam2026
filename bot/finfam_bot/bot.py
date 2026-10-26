@@ -18,7 +18,8 @@ from finfam_bot.fmt import btn, dm, h
 from finfam_bot.http import ApiError, FinFam, Telegram
 from finfam_bot.invest_flow import InvestFlow
 from finfam_bot.parsers import parse_amount, parse_date, quick_parse  # noqa: F401  (usados pelos testes)
-from finfam_bot.views import HELP, bills_view, draft_text, portfolio_text, purchases_text, spending_text, summary_text
+from finfam_bot.views import (HELP, bills_view, draft_text, invoices_text, portfolio_text, purchases_text,
+                              spending_text, summary_text)
 
 log = logging.getLogger('finfam.bot')
 
@@ -225,6 +226,8 @@ class Bot:
             self.spending(chat_id, q)
         elif intent == 'purchases':
             self.purchases(chat_id, q)
+        elif intent == 'invoices':
+            self.tg.send(chat_id, invoices_text(self.api.get(chat_id, '/cards/invoices', month=q['month'], year=q['year'])))
         elif intent == 'summary':
             self.summary(chat_id)
         elif intent == 'expense' and r.get('draft'):
@@ -237,7 +240,8 @@ class Bot:
         return self.api.get(chat_id, '/expenses', per_page=15, **clean)
 
     def spending(self, chat_id: int, q: dict) -> None:
-        r = self._search(chat_id, month=q['month'], year=q['year'], category=q.get('category'), search=q.get('text'))
+        r = self._search(chat_id, month=q['month'], year=q['year'], category=q.get('category'), search=q.get('text'),
+                         payment_method=q.get('payment_method'))
         self.tg.send(chat_id, spending_text(q, r))
 
     def purchases(self, chat_id: int, q: dict) -> None:
