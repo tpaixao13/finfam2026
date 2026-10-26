@@ -87,7 +87,7 @@ function AccountRow({ acc, cards, onChange }: { acc: BankAccount; cards: Card[];
       <div className="bank-acc-main">
         <b>{label}</b>{acc.last_digits && <span className="muted"> •••• {acc.last_digits}</span>}
         <div className="muted small">
-          {credit ? `Fatura atual ${money(acc.balance, acc.currency)}${acc.credit_limit ? ` · limite ${money(acc.credit_limit, acc.currency)}` : ''}`
+          {credit ? `Fatura atual ${money(acc.balance == null ? null : Math.abs(acc.balance), acc.currency)}${acc.credit_limit ? ` · limite ${money(acc.credit_limit, acc.currency)}` : ''}`
             : `Saldo ${money(acc.balance, acc.currency)}`}
         </div>
       </div>
