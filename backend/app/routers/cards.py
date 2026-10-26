@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.core.db import db, get_or_404
 from app.core.deps import Ctx, Period, get_ctx, get_period
-from app.models import CreditCard, Expense
+from app.models import BankAccount, CreditCard, Expense
 from app.services import card_service as cs
 from app.services.finance import CREDIT, MONTH_NAMES_FULL
 from app.services.serializers import card_out, expense_out
@@ -135,6 +135,7 @@ def update(card_id: int, body: CardIn, ctx: Ctx = Depends(get_ctx)):
 def delete(card_id: int, ctx: Ctx = Depends(get_ctx)):
     card = _get(ctx, card_id)
     Expense.query.filter_by(card_id=card.id).update({'card_id': None})
+    BankAccount.query.filter_by(card_id=card.id).update({'card_id': None})
     db.session.delete(card)
     db.session.commit()
     return {'message': 'Cartão excluído. As despesas vinculadas foram mantidas.'}

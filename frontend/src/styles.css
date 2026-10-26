@@ -484,3 +484,12 @@ a.insight:hover { background: #e8edf1; }
 .tfa-setup { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; }
 .tfa-setup img { border-radius: 8px; background: #fff; }
 .tfa-secret { display: inline-block; margin-top: .25rem; font-size: .95rem; letter-spacing: .05em; word-break: break-all; }
+
+/* Open Finance: bancos conectados */
+.bank-conn { border: 1px solid var(--line); border-left: 4px solid var(--primary); border-radius: var(--radius); padding: .9rem 1rem; display: grid; gap: .6rem; }
+.bank-conn h3 { margin: 0; font-size: 1.05rem; }
+.bank-conn p { margin: 0; }
+.bank-accs { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+.bank-acc { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem .75rem; padding: .55rem 0; border-top: 1px solid var(--line); }
+.bank-acc-main { min-width: 0; flex: 1 1 14rem; overflow-wrap: anywhere; }
+.bank-acc-map { flex: 0 1 16rem; min-width: 0; max-width: 100%; }

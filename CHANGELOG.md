@@ -14,8 +14,20 @@ pelo bot ou importando extrato, como antes.
 - `POST /api/v1/pluggy/webhook/<token>`: confere token, cabeçalho secreto e IP da Pluggy.
 - Novas variáveis: `PUBLIC_URL`, `PLUGGY_WEBHOOK_IPS`.
 
+**Etapa 2 — conectar bancos e ver contas e cartões** ✅
+- Botão "Conectar banco" abre o widget Pluggy Connect (a senha do banco vai direto para a
+  Pluggy). `POST /pluggy/connect-token` gera o token de 30 min com o webhook e o id da pessoa.
+- `POST /pluggy/items` registra o banco conferindo na conta Pluggy da própria pessoa;
+  `GET /pluggy/items` lista bancos com contas (saldo) e cartões (fatura atual e limite).
+- Cada cartão do banco é ligado a um cartão do FinFam (sozinho pelos 4 últimos dígitos,
+  ou escolhendo na tela): `PUT /pluggy/accounts/{id}`.
+- "Atualizar agora", "Reconectar" (senha recusada) e "Desconectar" (apaga na Pluggy e aqui).
+- O webhook anota a situação do banco (`item/*`) e a próxima listagem relê o que mudou.
+- Remover a chave ou trocar de aplicação Pluggy desconecta os bancos.
+- Limite de bancos por pessoa definido pelo admin. Tabelas novas: `bank_connections`, `bank_accounts`.
+- Nova variável: `PLUGGY_INCLUDE_SANDBOX` (bancos de teste no Connect; `0` em produção real).
+
 **Próximas etapas**
-2. Conectar banco (Pluggy Connect) e listar contas/cartões.
 3. Importação: duplicados, parcelas, categoria e a caixa "Revisar importados".
 4. Conferência de fatura, aviso no bot e ferramenta no MCP.
 

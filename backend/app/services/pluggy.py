@@ -107,10 +107,47 @@ class PluggyClient:
         if not re.fullmatch(r'[A-Za-z0-9-]{1,64}', hook_id or ''):
             return
         try:
-            self.call('DELETE', f'/webhooks/{hook_id}')
+            self.call('DELETE', f'/webhooks/{safe_id(hook_id)}')
         except PluggyError as exc:
             if exc.status != 404:  # já não existe: tudo bem
                 raise
+
+    # ── Connect e bancos conectados ("items") ──
+    def connect_token(self, client_user_id: str, webhook_url: str | None = None, item_id: str | None = None) -> str:
+        """Token de 30 min para o widget Pluggy Connect (seguro para o navegador)."""
+        options = {'clientUserId': client_user_id, 'avoidDuplicates': True}
+        if webhook_url:
+            options['webhookUrl'] = webhook_url
+        body = {'options': options, **({'itemId': safe_id(item_id)} if item_id else {})}
+        token = (self.call('POST', '/connect_token', body) or {}).get('accessToken')
+        if not token:
+            raise PluggyError('A Pluggy não devolveu o token de conexão.')
+        return token
+
+    def item(self, item_id: str) -> dict:
+        return self.call('GET', f'/items/{safe_id(item_id)}') or {}
+
+    def update_item(self, item_id: str) -> dict:
+        """Pede à Pluggy para buscar novidades no banco agora (roda em segundo plano lá)."""
+        return self.call('PATCH', f'/items/{safe_id(item_id)}', {}) or {}
+
+    def delete_item(self, item_id: str) -> None:
+        try:
+            self.call('DELETE', f'/items/{safe_id(item_id)}')
+        except PluggyError as exc:
+            if exc.status != 404:
+                raise
+
+    def accounts(self, item_id: str) -> list[dict]:
+        r = self.call('GET', f'/accounts?itemId={safe_id(item_id)}') or {}
+        return list(r.get('results') or []) if isinstance(r, dict) else list(r)
+
+
+def safe_id(value: str | None) -> str:
+    """Ids da Pluggy (UUID) — recusa qualquer coisa que mude o caminho da URL."""
+    if not re.fullmatch(r'[A-Za-z0-9-]{1,64}', value or ''):
+        raise PluggyError('Identificador da Pluggy inválido.', 400)
+    return value
 
 
 def forget(client_id: str) -> None:

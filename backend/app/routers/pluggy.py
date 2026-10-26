@@ -6,8 +6,13 @@
   conta Pluggy da pessoa um webhook exclusivo: /pluggy/webhook/<hook_token>, com um
   cabeçalho secreto. O token na URL diz de quem é o aviso; o cabeçalho e o IP da
   Pluggy confirmam a origem.
-- Importação, contas e revisão: próximas etapas.
+- Etapa 2: conectar bancos pelo widget Pluggy Connect (o token vem daqui; a senha do
+  banco vai direto do navegador para a Pluggy) e listar contas e cartões de cada banco,
+  ligando cada cartão do banco a um cartão do FinFam.
+- Importação e revisão: próximas etapas.
 """
+import re
+from datetime import datetime, timezone
 import hmac
 import logging
 import secrets
@@ -21,7 +26,7 @@ from app.core.db import db
 from app.core.deps import Ctx, get_ctx_session
 from app.core.security import decrypt_field, encrypt_field
 from app.core.types import utcnow
-from app.models import PluggyConfig, Tenant, User
+from app.models import BankAccount, BankConnection, CreditCard, PluggyConfig, Tenant, User
 from app.services import pluggy as pg
 
 log = logging.getLogger('finfam.pluggy')
@@ -58,6 +63,8 @@ def _out(ctx: Ctx, cfg: PluggyConfig | None) -> dict:
         'last_error': cfg.last_error if cfg else None,
         'webhook': bool(cfg and cfg.webhook_id),
         'public_url_ok': settings.public_url.startswith('https://'),
+        'include_sandbox': settings.pluggy_include_sandbox,
+        'connections': BankConnection.query.filter_by(user_id=ctx.user.id).count() if cfg else 0,
     }
 
 
@@ -84,6 +91,17 @@ def _drop_webhook(cfg: PluggyConfig) -> None:
     cfg.webhook_id = None
 
 
+def _drop_connections(cfg: PluggyConfig) -> None:
+    """Desconecta todos os bancos da pessoa (na Pluggy, melhor esforço) e apaga os dados locais."""
+    client = pg.PluggyClient(cfg.client_id, decrypt_field(cfg.client_secret))
+    for conn in BankConnection.query.filter_by(user_id=cfg.user_id).all():
+        try:
+            client.delete_item(conn.item_id)
+        except pg.PluggyError as exc:
+            log.warning('Não consegui apagar o item %s na Pluggy: %s', conn.item_id, exc)
+        db.session.delete(conn)
+
+
 @router.put('/config', summary='Salva e testa minha chave Pluggy; cria o webhook na minha conta Pluggy')
 def save_config(body: ConfigIn, ctx: Ctx = Depends(get_ctx_session)):
     _enabled_tenant(ctx)
@@ -107,6 +125,8 @@ def save_config(body: ConfigIn, ctx: Ctx = Depends(get_ctx_session)):
                            client_secret=encrypt_field(secret))
         db.session.add(cfg)
     else:
+        if cfg.client_id != client_id:
+            _drop_connections(cfg)  # os bancos eram da outra aplicação Pluggy
         _drop_webhook(cfg)  # credencial nova → webhook e segredo novos
         pg.forget(cfg.client_id)
         cfg.client_id, cfg.client_secret = client_id, encrypt_field(secret)
@@ -132,11 +152,249 @@ def save_config(body: ConfigIn, ctx: Ctx = Depends(get_ctx_session)):
 def delete_config(ctx: Ctx = Depends(get_ctx_session)):
     cfg = PluggyConfig.query.filter_by(user_id=ctx.user.id).first()
     if cfg:
+        _drop_connections(cfg)
         _drop_webhook(cfg)
         pg.forget(cfg.client_id)
         db.session.delete(cfg)
         db.session.commit()
     return {'message': 'Chave Pluggy removida.', 'config': _out(ctx, None)}
+
+
+# ── Bancos conectados (etapa 2) ──────────────────────────────────────────────
+
+def _client(ctx: Ctx) -> tuple[PluggyConfig, pg.PluggyClient]:
+    _enabled_tenant(ctx)
+    cfg = PluggyConfig.query.filter_by(user_id=ctx.user.id).first()
+    if cfg is None:
+        raise HTTPException(status_code=409, detail={
+            'code': 'pluggy_not_configured', 'message': 'Cadastre primeiro a sua chave Pluggy.'})
+    return cfg, pg.PluggyClient(cfg.client_id, decrypt_field(cfg.client_secret))
+
+
+def _pluggy(fn, *args):
+    """Chama a Pluggy e converte a falha em 502 com mensagem amigável (404 → 404)."""
+    try:
+        return fn(*args)
+    except pg.PluggyError as exc:
+        code = 404 if exc.status == 404 else 400 if exc.status == 400 else 502
+        raise HTTPException(status_code=code, detail=str(exc) if code != 404 else 'Banco não encontrado na sua conta Pluggy.')
+
+
+def _conn(ctx: Ctx, conn_id: int) -> BankConnection:
+    conn = db.session.get(BankConnection, conn_id)
+    if conn is None or conn.user_id != ctx.user.id:  # só a própria pessoa mexe nos bancos dela
+        raise HTTPException(status_code=404, detail='Banco conectado não encontrado.')
+    return conn
+
+
+def _when(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+
+
+def _money(value):
+    try:
+        return round(float(value), 2) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _apply_item(conn: BankConnection, item: dict) -> None:
+    connector = item.get('connector') or {}
+    color = str(connector.get('primaryColor') or '').lstrip('#')
+    conn.bank_name = str(connector.get('name') or conn.bank_name or 'Banco')[:120]
+    conn.bank_color = f'#{color[:6]}' if re.fullmatch(r'[0-9a-fA-F]{6}', color[:6]) else conn.bank_color
+    conn.status = str(item.get('status') or '')[:32] or conn.status
+    conn.execution_status = str(item.get('executionStatus') or '')[:48] or None
+    err = item.get('error') or {}
+    conn.error_message = (str(err.get('message') or '')[:300] or None) if isinstance(err, dict) else None
+    conn.last_updated_at = _when(item.get('lastUpdatedAt')) or conn.last_updated_at
+
+
+def _last4(number) -> str | None:
+    digits = re.sub(r'\D', '', str(number or ''))
+    return digits[-4:] if len(digits) >= 4 else None
+
+
+def _auto_card(conn: BankConnection, acc: BankAccount) -> None:
+    """Liga o cartão do banco ao cartão de crédito da pessoa com os mesmos 4 últimos dígitos."""
+    last4 = _last4(acc.number)
+    if acc.type != 'CREDIT' or acc.card_id or not last4:
+        return
+    cards = [c for c in CreditCard.query.filter_by(user_id=conn.user_id, last_digits=last4).all()
+             if c.card_type == 'credit' or c.supports_credit]
+    if len(cards) == 1:
+        acc.card_id = cards[0].id
+
+
+def _sync(conn: BankConnection, client: pg.PluggyClient) -> None:
+    """Relê o item e as contas na Pluggy."""
+    _apply_item(conn, client.item(conn.item_id))
+    seen = set()
+    for a in client.accounts(conn.item_id):
+        pid = str(a.get('id') or '')
+        if not re.fullmatch(r'[A-Za-z0-9-]{1,64}', pid):
+            continue
+        seen.add(pid)
+        acc = BankAccount.query.filter_by(pluggy_account_id=pid).first()
+        if acc is not None and acc.connection_id != conn.id:
+            continue  # pertence a outra conexão: nunca mistura
+        if acc is None:
+            acc = BankAccount(connection_id=conn.id, pluggy_account_id=pid, type='BANK')
+            db.session.add(acc)
+        credit = a.get('creditData') or {}
+        acc.type = 'CREDIT' if a.get('type') == 'CREDIT' else 'BANK'
+        acc.subtype = str(a.get('subtype') or '')[:32] or None
+        acc.name = str(a.get('marketingName') or a.get('name') or '')[:120] or None
+        acc.number = str(a.get('number') or '')[:32] or None
+        acc.balance = _money(a.get('balance'))
+        acc.currency = str(a.get('currencyCode') or 'BRL')[:3]
+        acc.credit_limit = _money(credit.get('creditLimit')) if isinstance(credit, dict) else None
+        _auto_card(conn, acc)
+    for acc in conn.accounts.all():
+        if acc.pluggy_account_id not in seen:
+            db.session.delete(acc)  # o banco deixou de devolver a conta
+    conn.needs_sync = False
+
+
+def _account_out(acc: BankAccount) -> dict:
+    card = db.session.get(CreditCard, acc.card_id) if acc.card_id else None
+    return {
+        'id': acc.id, 'type': acc.type, 'subtype': acc.subtype, 'name': acc.name,
+        'last_digits': _last4(acc.number), 'currency': acc.currency or 'BRL',
+        'balance': float(acc.balance) if acc.balance is not None else None,
+        'credit_limit': float(acc.credit_limit) if acc.credit_limit is not None else None,
+        'card_id': acc.card_id,
+        'card_label': (f"{card.nickname or card.bank or 'Cartão'} •••• {card.last_digits}" if card else None),
+    }
+
+
+def _conn_out(conn: BankConnection) -> dict:
+    return {
+        'id': conn.id, 'item_id': conn.item_id, 'bank_name': conn.bank_name, 'bank_color': conn.bank_color,
+        'status': conn.status, 'execution_status': conn.execution_status, 'error': conn.error_message,
+        'last_updated_at': conn.last_updated_at.isoformat() + 'Z' if conn.last_updated_at else None,
+        'accounts': [_account_out(a) for a in conn.accounts.order_by(BankAccount.type, BankAccount.id).all()],
+    }
+
+
+def _check_limit(ctx: Ctx) -> None:
+    limit = ctx.tenant.open_finance_max_items if ctx.tenant else None
+    if limit and BankConnection.query.filter_by(user_id=ctx.user.id).count() >= limit:
+        raise HTTPException(status_code=409, detail={
+            'code': 'open_finance_limit',
+            'message': f'Você já conectou {limit} banco(s), o limite da sua família. Desconecte um para conectar outro.'})
+
+
+class ConnectTokenIn(BaseModel):
+    connection_id: int | None = Field(None, description='Para reconectar/atualizar a senha de um banco já conectado')
+
+
+@router.post('/connect-token', summary='Token de 30 min para abrir o Pluggy Connect no navegador')
+def connect_token(body: ConnectTokenIn, ctx: Ctx = Depends(get_ctx_session)):
+    cfg, client = _client(ctx)
+    item_id = None
+    if body.connection_id:
+        item_id = _conn(ctx, body.connection_id).item_id
+    else:
+        _check_limit(ctx)
+    token = _pluggy(client.connect_token, str(ctx.user.id), webhook_url(cfg), item_id)
+    return {'connect_token': token, 'item_id': item_id, 'include_sandbox': settings.pluggy_include_sandbox}
+
+
+@router.get('/items', summary='Meus bancos conectados, com contas e cartões')
+def list_items(ctx: Ctx = Depends(get_ctx_session)):
+    _enabled_tenant(ctx)
+    conns = BankConnection.query.filter_by(user_id=ctx.user.id).order_by(BankConnection.id).all()
+    stale = [c for c in conns if c.needs_sync]
+    if stale:  # o webhook avisou que o banco atualizou: relê só esses
+        cfg = PluggyConfig.query.filter_by(user_id=ctx.user.id).first()
+        if cfg:
+            client = pg.PluggyClient(cfg.client_id, decrypt_field(cfg.client_secret))
+            for conn in stale:
+                try:
+                    _sync(conn, client)
+                except pg.PluggyError as exc:
+                    log.warning('Sincronização do item %s falhou: %s', conn.item_id, exc)
+            db.session.commit()
+    return {'items': [_conn_out(c) for c in conns]}
+
+
+class ItemIn(BaseModel):
+    item_id: str = Field(pattern=r'^[A-Za-z0-9-]{1,64}$', description='id devolvido pelo Pluggy Connect')
+
+
+@router.post('/items', summary='Registra o banco que acabou de ser conectado no Pluggy Connect')
+def add_item(body: ItemIn, ctx: Ctx = Depends(get_ctx_session)):
+    _cfg, client = _client(ctx)
+    conn = BankConnection.query.filter_by(item_id=body.item_id).first()
+    if conn is not None and conn.user_id != ctx.user.id:
+        raise HTTPException(status_code=404, detail='Banco não encontrado na sua conta Pluggy.')
+    item = _pluggy(client.item, body.item_id)  # só existe se for da conta Pluggy desta pessoa
+    owner = item.get('clientUserId')
+    if owner and str(owner) != str(ctx.user.id):
+        raise HTTPException(status_code=404, detail='Banco não encontrado na sua conta Pluggy.')
+    created = conn is None
+    if created:
+        _check_limit(ctx)
+        conn = BankConnection(user_id=ctx.user.id, item_id=body.item_id)
+        db.session.add(conn)
+        db.session.flush()
+    _apply_item(conn, item)
+    _pluggy(_sync, conn, client)
+    db.session.commit()
+    msg = f'{conn.bank_name} conectado!' if created else f'{conn.bank_name} atualizado.'
+    return {'message': msg, 'item': _conn_out(conn)}
+
+
+@router.post('/items/{conn_id}/refresh', summary='Pede ao banco as novidades agora')
+def refresh_item(conn_id: int, ctx: Ctx = Depends(get_ctx_session)):
+    _cfg, client = _client(ctx)
+    conn = _conn(ctx, conn_id)
+    _apply_item(conn, _pluggy(client.update_item, conn.item_id))
+    conn.needs_sync = True  # quando a Pluggy terminar, o webhook avisa (ou a próxima listagem relê)
+    db.session.commit()
+    return {'message': f'Atualização de {conn.bank_name} pedida. Pode levar alguns minutos.', 'item': _conn_out(conn)}
+
+
+@router.delete('/items/{conn_id}', summary='Desconecta o banco (na Pluggy também) e apaga os dados dele')
+def delete_item(conn_id: int, ctx: Ctx = Depends(get_ctx_session)):
+    cfg = PluggyConfig.query.filter_by(user_id=ctx.user.id).first()
+    conn = _conn(ctx, conn_id)
+    if cfg:
+        _pluggy(pg.PluggyClient(cfg.client_id, decrypt_field(cfg.client_secret)).delete_item, conn.item_id)
+    name = conn.bank_name or 'Banco'
+    db.session.delete(conn)
+    db.session.commit()
+    return {'message': f'{name} desconectado. Os dados vindos dele foram apagados.'}
+
+
+class AccountIn(BaseModel):
+    card_id: int | None = Field(None, description='Cartão do FinFam que corresponde a este cartão do banco (vazio = nenhum)')
+
+
+@router.put('/accounts/{account_id}', summary='Liga o cartão do banco a um cartão do FinFam')
+def map_account(account_id: int, body: AccountIn, ctx: Ctx = Depends(get_ctx_session)):
+    _enabled_tenant(ctx)
+    acc = db.session.get(BankAccount, account_id)
+    if acc is None or acc.connection.user_id != ctx.user.id:
+        raise HTTPException(status_code=404, detail='Conta não encontrada.')
+    if acc.type != 'CREDIT':
+        raise HTTPException(status_code=422, detail='Conta: só cartões de crédito do banco são ligados a cartões.')
+    if body.card_id is not None:
+        card = db.session.get(CreditCard, body.card_id)
+        if card is None or card.user_id not in ctx.uids:
+            raise HTTPException(status_code=404, detail='Cartão não encontrado.')
+        if not (card.card_type == 'credit' or card.supports_credit):
+            raise HTTPException(status_code=422, detail='Cartão: escolha um cartão de crédito.')
+    acc.card_id = body.card_id
+    db.session.commit()
+    return {'message': 'Cartão ligado.' if body.card_id else 'Cartão desligado.', 'account': _account_out(acc)}
 
 
 # ── Webhook (chamado pela Pluggy) ────────────────────────────────────────────
@@ -161,13 +419,40 @@ async def webhook(hook_token: str, request: Request):
     if len(raw) > 256 * 1024:
         return JSONResponse(status_code=413, content={'detail': 'Grande demais.'})
     try:
-        event = (await request.json()).get('event')
+        payload = await request.json()
+        payload = payload if isinstance(payload, dict) else {}
     except Exception:
-        event = None
+        payload = {}
+    event = payload.get('event')
     user = db.session.get(User, cfg.user_id)
     tenant = db.session.get(Tenant, user.tenant_id) if user and user.tenant_id else None
     if tenant is None or not tenant.open_finance_enabled:
         return {'ok': True, 'ignored': 'open_finance_disabled'}  # 2XX: a Pluggy não fica reenviando
     log.info('Webhook Pluggy de user %s: %s', cfg.user_id, str(event)[:60])
-    # etapa 3: enfileirar a importação deste evento
+    _item_event(cfg.user_id, str(event or ''), str(payload.get('itemId') or ''), payload.get('error'))
+    # etapa 3: enfileirar a importação dos lançamentos (transactions/*)
     return {'ok': True}
+
+
+_EVENT_STATUS = {'item/error': 'LOGIN_ERROR', 'item/waiting_user_input': 'WAITING_USER_INPUT',
+                 'item/waiting_user_action': 'WAITING_USER_ACTION', 'item/login_succeeded': 'UPDATING'}
+
+
+def _item_event(user_id: int, event: str, item_id: str, error) -> None:
+    """Só anota (sem chamar a Pluggy: o webhook tem de responder rápido). A próxima
+    listagem relê o banco quando há novidade."""
+    if not event.startswith('item/') or not item_id:
+        return
+    conn = BankConnection.query.filter_by(item_id=item_id[:64], user_id=user_id).first()
+    if conn is None:
+        return
+    if event == 'item/deleted':
+        db.session.delete(conn)
+    elif event in ('item/updated', 'item/created'):
+        conn.status, conn.error_message, conn.needs_sync = 'UPDATED', None, True
+        conn.last_updated_at = utcnow()
+    elif event in _EVENT_STATUS:
+        conn.status = _EVENT_STATUS[event]
+        if isinstance(error, dict) and error.get('message'):
+            conn.error_message = str(error['message'])[:300]
+    db.session.commit()

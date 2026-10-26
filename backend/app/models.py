@@ -2,7 +2,8 @@
 
 O schema é o MESMO do FinFam original (tabelas e colunas), então um `gastos.db`
 existente pode ser usado diretamente. Tabelas novas: `api_tokens`, `telegram_links`,
-`telegram_link_codes`, `ai_configs` e `pluggy_configs` (criadas sozinhas ao subir a API).
+`telegram_link_codes`, `ai_configs`, `pluggy_configs`, `bank_connections` e `bank_accounts`
+(criadas sozinhas ao subir a API).
 """
 import calendar
 from datetime import datetime, date as _date, timedelta
@@ -134,6 +135,7 @@ class User(Base):
     telegram_links = relationship('TelegramLink', lazy='dynamic', cascade='all, delete-orphan')
     telegram_codes = relationship('TelegramLinkCode', lazy='dynamic', cascade='all, delete-orphan')
     pluggy_config = relationship('PluggyConfig', uselist=False, cascade='all, delete-orphan')
+    bank_connections = relationship('BankConnection', lazy='dynamic', cascade='all, delete-orphan')
 
     def set_password(self, password: str) -> None:
         self.password_hash = hash_password(password)
@@ -219,6 +221,43 @@ class PluggyConfig(Base):
     last_error = Column(Text, nullable=True)
     consent_at = Column(DateTime, nullable=False, default=utcnow)
     created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class BankConnection(Base):
+    """Um banco conectado por uma pessoa (um "item" da Pluggy)."""
+    __tablename__ = 'bank_connections'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    item_id = Column(String(64), nullable=False, unique=True)
+    bank_name = Column(Text, nullable=True)
+    bank_color = Column(String(12), nullable=True)
+    status = Column(String(32), nullable=True)            # UPDATED | UPDATING | LOGIN_ERROR | OUTDATED | WAITING_...
+    execution_status = Column(String(48), nullable=True)
+    error_message = Column(Text, nullable=True)
+    last_updated_at = Column(DateTime, nullable=True)     # última atualização do banco na Pluggy
+    needs_sync = Column(Boolean, default=False, nullable=False)  # webhook avisou novidade: reler contas
+    created_at = Column(DateTime, default=utcnow)
+
+    accounts = relationship('BankAccount', backref='connection', lazy='dynamic', cascade='all, delete-orphan')
+
+
+class BankAccount(Base):
+    """Conta corrente/poupança ou cartão de crédito de uma conexão, ligável a um cartão do FinFam."""
+    __tablename__ = 'bank_accounts'
+
+    id = Column(Integer, primary_key=True)
+    connection_id = Column(Integer, ForeignKey('bank_connections.id'), nullable=False, index=True)
+    pluggy_account_id = Column(String(64), nullable=False, unique=True)
+    type = Column(String(16), nullable=False)             # BANK | CREDIT
+    subtype = Column(String(32), nullable=True)           # CHECKING_ACCOUNT | SAVINGS_ACCOUNT | CREDIT_CARD
+    name = Column(Text, nullable=True)
+    number = Column(String(32), nullable=True)
+    balance = Column(Numeric(14, 2), nullable=True)
+    currency = Column(String(3), nullable=True)
+    credit_limit = Column(Numeric(14, 2), nullable=True)
+    card_id = Column(Integer, ForeignKey('credit_cards.id', ondelete='SET NULL'), nullable=True)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
