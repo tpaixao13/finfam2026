@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Badge, Button, Check, ConfirmButton, ErrorBox, Field, Input, Modal, PageHeader, Panel, Select, Spinner, Table } from '../../components/ui'
+import { Badge, Button,ConfirmButton, ErrorBox, Field, Input, Modal, PageHeader, Panel, Select, Spinner, Switch, Table } from '../../components/ui'
 import { api, tokens, type ApiError } from '../../lib/api'
 import { CodeInput, DisableModal, EnableModal, type TwoFactorClient } from '../../components/TwoFactor'
 import { dateBR } from '../../lib/format'
@@ -95,16 +95,21 @@ function OpenFinanceCell({ t, run }: { t: AdminTenant; run: (fn: () => Promise<{
     run(() => api.admin.put(`/admin/tenants/${t.id}/open-finance`, { enabled, max_items: max }))
   const max = t.open_finance_max_items ?? null
   return (
-    <div className="stack-sm">
-      <Check label={t.open_finance ? 'Liberado' : 'Desligado'} checked={Boolean(t.open_finance)}
-        onChange={(v) => save(v, max)} />
-      {t.open_finance && <>
-        <Select aria-label={`Limite de bancos por pessoa da ${t.name}`} value={max === null ? '' : String(max)}
-          onChange={(e) => save(true, e.target.value ? Number(e.target.value) : null)}
-          options={[{ value: '', label: 'Sem limite' }, ...[1, 2, 3, 5, 10].map((n) => ({ value: String(n), label: `${n} banco(s)/pessoa` }))]} />
-        <small className="muted">{t.pluggy.configured ? `${t.pluggy.configured} chave(s) Pluggy` : 'Nenhuma chave Pluggy'}
-          {t.pluggy.errors ? ` · ${t.pluggy.errors} com problema` : ''}</small>
-      </>}
+    <div className="of-cell">
+      <div className="of-row">
+        <Switch label={`Open Finance da família ${t.name}`} checked={Boolean(t.open_finance)} onChange={(v) => save(v, max)} />
+        {t.open_finance && (
+          <Select aria-label={`Limite de bancos por pessoa da ${t.name}`} value={max === null ? '' : String(max)}
+            onChange={(e) => save(true, e.target.value ? Number(e.target.value) : null)}
+            options={[{ value: '', label: 'Sem limite' }, ...[1, 2, 3, 5, 10].map((n) => ({ value: String(n), label: `${n} por pessoa` }))]} />
+        )}
+      </div>
+      {t.open_finance && (
+        <small className="muted">
+          {t.pluggy.configured ? `${t.pluggy.configured} ${t.pluggy.configured === 1 ? 'chave' : 'chaves'}` : 'Nenhuma chave'}
+          {t.pluggy.errors ? ` · ${t.pluggy.errors} com erro` : ''}
+        </small>
+      )}
     </div>
   )
 }

@@ -83,6 +83,15 @@ export function Check({ label, checked, onChange, hint }:
   )
 }
 
+/** Interruptor liga/desliga. O `label` fica só para leitores de tela. */
+export function Switch({ label, checked, onChange, disabled }:
+  { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled}
+      className="switch" onClick={() => onChange(!checked)}><span className="switch-knob" /></button>
+  )
+}
+
 export function Segmented<T extends string>({ value, onChange, options, ariaLabel }:
   { value: T; onChange: (v: T) => void; options: { value: T; label: string }[]; ariaLabel: string }) {
   return (
