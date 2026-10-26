@@ -293,3 +293,17 @@ def test_monthly_invoices_group_shared_accounts(family):
     assert (inter['total'], inter['count'], inter['due_date'], inter['status']) == (150, 2, '2026-11-15', 'aberta')
     assert by_label['Crédito sem cartão']['total'] == 20
     assert family.get('/cards/invoices', params={'month': 12, 'year': 2026}).json()['invoices'] == []
+
+
+def test_monthly_invoices_filter_by_bank_and_card(family):
+    caixa = family.post('/cards', json={'supports_credit': True, 'last_digits': '4444', 'bank': 'Caixa Econômica Federal',
+                                        'due_day': 15, 'best_buy_day': 3}).json()['card']
+    c6 = family.post('/cards', json={'supports_credit': True, 'last_digits': '5555', 'bank': 'C6 Bank',
+                                     'due_day': 15, 'best_buy_day': 3}).json()['card']
+    for card, amount in ((caixa, '17.25'), (c6, '500')):
+        family.post('/expenses', json={'description': 'X', 'amount': amount, 'category': 'Outros', 'date': '2026-11-02',
+                                       'payment_method': 'Cartão de Crédito', 'card_id': card['id']})
+    r = family.get('/cards/invoices', params={'month': 11, 'year': 2026, 'bank': 'Caixa Econômica Federal'}).json()
+    assert r['filtered'] and [i['total'] for i in r['invoices']] == [17.25] and r['total'] == 17.25
+    r = family.get('/cards/invoices', params={'month': 11, 'year': 2026, 'card_id': c6['id']}).json()
+    assert [i['total'] for i in r['invoices']] == [500]

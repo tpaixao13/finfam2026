@@ -230,11 +230,17 @@ def listar_cartoes(mes: int | None = None, ano: int | None = None) -> str:
 
 @mcp.tool()
 @_safe
-def faturas_do_mes(mes: int | None = None, ano: int | None = None) -> str:
-    """Valor das faturas de cartão de crédito do mês (todas as contas/cartões, sem duplicar
-    cartões que dividem limite) e o total. Use para "qual o valor do cartão de crédito de novembro?"."""
+def faturas_do_mes(mes: int | None = None, ano: int | None = None, cartao: str | None = None) -> str:
+    """Valor das faturas de cartão de crédito do mês (sem duplicar cartões que dividem limite) e o total.
+    `cartao`: nome, banco ou final do cartão para ver só aquela fatura ("cartão da Caixa" → cartao="Caixa").
+    Use para "qual o valor do cartão de crédito de novembro?"."""
     month, year = _period(mes, ano)
-    r = api.get('/cards/invoices', month=month, year=year)
+    try:
+        card = _resolve_card(cartao)
+        filters = {'card_id': card['id']} if card else {}
+    except FinFamError:  # não achou um cartão só: tenta pelo banco
+        filters = {'bank': next((c['bank'] for c in _cards() if c['bank'] and _norm(cartao) in _norm(c['bank'])), cartao)}
+    r = api.get('/cards/invoices', month=month, year=year, **filters)
     if not r['invoices']:
         return f'Nenhuma compra no crédito na fatura de {month:02d}/{year}.'
     lines = [f"Faturas de {r['month_name']}/{r['year']}: total {brl(r['total'])} "

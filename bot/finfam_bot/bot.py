@@ -227,7 +227,9 @@ class Bot:
         elif intent == 'purchases':
             self.purchases(chat_id, q)
         elif intent == 'invoices':
-            self.tg.send(chat_id, invoices_text(self.api.get(chat_id, '/cards/invoices', month=q['month'], year=q['year'])))
+            filters = {k: q[k] for k in ('card_id', 'bank') if q.get(k)}
+            r = self.api.get(chat_id, '/cards/invoices', month=q['month'], year=q['year'], **filters)
+            self.tg.send(chat_id, invoices_text(r, q.get('bank')))
         elif intent == 'summary':
             self.summary(chat_id)
         elif intent == 'expense' and r.get('draft'):

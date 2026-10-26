@@ -317,3 +317,19 @@ def test_interpret_invoices_and_payment_method(client, family, fake_ai):
     fake_ai['answer'] = {'intent': 'spending', 'query': {'payment_method': 'débito', 'text': 'débito'}}
     q = family.post('/ai/interpret', json={'text': 'quanto gastei no débito'}).json()['query']
     assert q['payment_method'] == 'Cartão de Débito' and q['text'] is None
+
+
+def test_interpret_invoice_for_a_bank(client, family, other_family, fake_ai):
+    mine = family.post('/cards', json={'supports_credit': True, 'last_digits': '4444', 'bank': 'Caixa Econômica Federal',
+                                       'due_day': 15, 'best_buy_day': 3}).json()['card']
+    alien = other_family.post('/cards', json={'supports_credit': True, 'last_digits': '9999', 'bank': 'Nubank',
+                                              'due_day': 15, 'best_buy_day': 3}).json()['card']
+    family.put('/settings/ai', json={'provider': 'gemini', 'api_key': 'AIzaSy-0000000000'})
+    fake_ai['answer'] = {'intent': 'invoices', 'query': {'month': 11, 'bank': 'caixa', 'text': 'caixa'}}
+    q = family.post('/ai/interpret', json={'text': 'valor de novembro no cartão da caixa'}).json()['query']
+    assert q['bank'] == 'Caixa Econômica Federal' and q['card_id'] is None and q['text'] is None
+    fake_ai['answer'] = {'intent': 'invoices', 'query': {'card_id': mine['id']}}
+    assert family.post('/ai/interpret', json={'text': 'fatura do final 4444'}).json()['query']['card_id'] == mine['id']
+    fake_ai['answer'] = {'intent': 'invoices', 'query': {'card_id': alien['id'], 'bank': 'nubank'}}
+    q = family.post('/ai/interpret', json={'text': 'fatura do nubank'}).json()['query']
+    assert q['card_id'] is None and q['bank'] is None  # cartão/banco de outra família não vale

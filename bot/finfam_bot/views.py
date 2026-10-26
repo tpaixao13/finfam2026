@@ -140,11 +140,18 @@ def purchases_text(q: dict, r: dict) -> str:
     return '\n'.join(lines)
 
 
-def invoices_text(r: dict) -> str:
-    """Resposta de "qual o valor da fatura do cartão de <mês>"."""
+def invoices_text(r: dict, bank: str | None = None) -> str:
+    """Resposta de "qual o valor da fatura do cartão (da Caixa) de <mês>"."""
     period = f'{MONTHS[r["month"] - 1]}/{r["year"]}'
     if not r['invoices']:
-        return f'💳 Nenhuma compra no crédito na fatura de {period}.'
+        which = f' do cartão {h(bank)}' if bank else (' desse cartão' if r.get('filtered') else '')
+        return f'💳 Nenhuma compra no crédito{which} na fatura de {period}.'
+    if r.get('filtered') and len(r['invoices']) == 1:
+        i = r['invoices'][0]
+        due = f'\nVence {dm(i["due_date"])}' if i.get('due_date') else ''
+        status = '✅ paga' if i['status'] == 'paga' else f'⏳ aberta (falta {brl(i["pending_total"])})'
+        return (f'💳 <b>Fatura {h(i["label"])} — {period}</b>: <b>{brl(i["total"])}</b> em {i["count"]} compra(s)'
+                f'{due} · {status}')
     lines = [f'💳 <b>Fatura de {period}</b>: <b>{brl(r["total"])}</b>'
              + (f' (falta pagar {brl(r["pending_total"])})' if r['pending_total'] and r['paid_total'] else ''), '']
     for i in r['invoices']:

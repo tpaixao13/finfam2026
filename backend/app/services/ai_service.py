@@ -217,6 +217,7 @@ Interprete a mensagem do usuário e responda SOMENTE com um objeto JSON, sem tex
  "expense": {"description": str, "amount": number, "payment_method": str, "card_id": int|null,
              "installments": int|null, "category": str|null, "date": "AAAA-MM-DD"|null, "person_id": int|null} | null,
  "query": {"days": int|null, "category": str|null, "text": str|null, "payment_method": str|null,
+           "card_id": int|null, "bank": str|null,
            "month": int|null, "year": int|null,
            "date_from": "AAAA-MM-DD"|null, "date_to": "AAAA-MM-DD"|null} | null,
  "reply": str}
@@ -236,7 +237,9 @@ Regras:
   Se a pessoa falar da FORMA de pagamento ("no débito", "no PIX"), use query.payment_method (uma de {methods})
   e deixe text null.
 - "invoices": pergunta o valor da FATURA do cartão de crédito ("qual o valor do cartão de crédito de novembro?",
-  "quanto vem a fatura?"). query.month/year = mês da fatura (padrão: o mês atual).
+  "quanto vem a fatura?"). query.month/year = mês da fatura (padrão: o mês atual). Se citar um cartão ou banco
+  ("da Caixa", "do cartão roxo", "final 1234"): query.card_id = id da lista de cartões, se der para identificar;
+  senão query.bank = o banco citado.
 - "purchases": pergunta O QUE comprou/lançou num dia ou período ("o que comprei dia 20/10?", "compras da semana
   passada"). query.date_from e query.date_to (o mesmo dia se for um dia só); category/text se a pessoa filtrar.
 - "summary": quer o resumo geral do mês (renda, gastos, saldo), sem categoria específica.
@@ -353,8 +356,17 @@ def match_category(value, categories: list[str]) -> str | None:
     return hits[0] if len(hits) == 1 else None
 
 
+def match_bank(value, banks: list[str]) -> str | None:
+    """'caixa' → 'Caixa Econômica Federal', 'nu' não basta, 'nubank' → 'Nubank' (só bancos da família)."""
+    wanted = _norm(value)
+    if len(wanted) < 3:
+        return None
+    hits = [b for b in banks if wanted in _norm(b) or _norm(b) in wanted]
+    return hits[0] if len(set(hits)) == 1 else None
+
+
 def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str],
-             methods: list[str] | None = None) -> dict:
+             methods: list[str] | None = None, cards: list[dict] | None = None) -> dict:
     """Confere os filtros da consulta: números em faixa, categoria real, datas plausíveis."""
     raw = raw if isinstance(raw, dict) else {}
     days = _int(raw.get('days'))
@@ -375,6 +387,13 @@ def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str
         start, end = end, start
     if start and end and (end - start).days > 400:
         end = start + timedelta(days=400)
+    cards = cards or []
+    card_id = _int(raw.get('card_id'))
+    card_id = card_id if card_id in {c['id'] for c in cards} else None
+    bank = None if card_id else match_bank(raw.get('bank'), sorted({c['bank'] for c in cards if c.get('bank')}))
+    if bank and text and match_bank(text, [bank]):
+        text = None  # "da Caixa" é o banco, não um nome de lançamento
     return {'days': days if days and 0 <= days <= 90 else 7, 'category': category, 'payment_method': method,
+            'card_id': card_id, 'bank': bank,
             'text': None if category else text, 'month': month, 'year': year,
             'date_from': start.isoformat() if start else None, 'date_to': end.isoformat() if end else None}

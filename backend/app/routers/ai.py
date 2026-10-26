@@ -184,8 +184,8 @@ def interpret(body: InterpretIn, ctx: Ctx = Depends(get_ctx)):
     today = date.today()
     categories = svc.tenant_categories(ctx.uids)
     cards = {c.id: c for c in CreditCard.query.filter(CreditCard.user_id.in_(ctx.uids)).all()}
-    card_list = [{'id': c.id, 'label': c.label, 'kind': _card_kind(c), 'supports_credit': bool(c.supports_credit)}
-                 for c in cards.values()]
+    card_list = [{'id': c.id, 'label': c.label, 'kind': _card_kind(c), 'supports_credit': bool(c.supports_credit),
+                  'bank': c.bank} for c in cards.values()]
     prompt = ai.build_prompt(today=today, categories=categories, methods=PAYMENT_METHODS, cards=card_list,
                              members=[{'id': u.id, 'name': u.name} for u in ctx.members], me=ctx.user.name)
     try:
@@ -201,7 +201,7 @@ def interpret(body: InterpretIn, ctx: Ctx = Depends(get_ctx)):
     out = {'intent': result['intent'], 'reply': result['reply'], 'draft': None, 'query': None}
     if result['intent'] in ai.QUERY_INTENTS:
         out['query'] = ai.to_query(result['query'], intent=result['intent'], today=today, categories=categories,
-                                  methods=PAYMENT_METHODS)
+                                  methods=PAYMENT_METHODS, cards=card_list)
     if result['intent'] == 'expense':
         draft = ai.to_draft(result['expense'], today=today, categories=categories, methods=PAYMENT_METHODS,
                             cards=card_list, member_ids=ctx.uids, suggest=suggest)

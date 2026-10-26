@@ -65,7 +65,9 @@ def list_cards(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx)
 
 
 @router.get('/invoices', summary='Faturas de crédito do mês: uma por conta/cartão e o total (sem duplicar)')
-def invoices(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx)):
+def invoices(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx),
+             card_id: int | None = Query(None, description='Só a fatura que contém este cartão'),
+             bank: str | None = Query(None, max_length=60, description='Só faturas de cartões deste banco')):
     """Soma as compras no crédito da competência (mês da fatura). Cartões da mesma conta
     (limite compartilhado) formam UMA fatura; compras no crédito sem cartão ficam à parte."""
     rows = (Expense.query.filter(Expense.user_id.in_(ctx.uids), Expense.payment_method == CREDIT,
@@ -80,15 +82,21 @@ def invoices(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx)):
             key, label, due_day = f'a{card.account_id}', card.account.display_label, card.due_day
         else:
             key, label, due_day = f'c{card.id}', card.label, card.due_day
-        g = groups.setdefault(key, {'label': label, 'due_day': due_day, 'card_ids': set(), 'total': 0.0,
-                                    'paid_total': 0.0, 'count': 0})
+        g = groups.setdefault(key, {'label': label, 'due_day': due_day, 'card_ids': set(), 'banks': set(),
+                                    'total': 0.0, 'paid_total': 0.0, 'count': 0})
         if card is not None:
             g['card_ids'].add(card.id)
+            g['banks'].add((card.bank or '').lower())
         g['total'] += float(e.amount)
         g['paid_total'] += float(e.amount) if e.paid else 0.0
         g['count'] += 1
+    selected = list(groups.values())
+    if card_id is not None:
+        selected = [g for g in selected if card_id in g['card_ids']]
+    if bank:
+        selected = [g for g in selected if bank.lower() in g['banks']]
     out = []
-    for g in sorted(groups.values(), key=lambda g: -g['total']):
+    for g in sorted(selected, key=lambda g: -g['total']):
         due = None
         if g['due_day']:
             try:
@@ -102,7 +110,8 @@ def invoices(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx)):
     total = round(sum(i['total'] for i in out), 2)
     paid = round(sum(i['paid_total'] for i in out), 2)
     return {'month': period.month, 'year': period.year, 'month_name': MONTH_NAMES_FULL[period.month - 1],
-            'total': total, 'paid_total': paid, 'pending_total': round(total - paid, 2), 'invoices': out}
+            'total': total, 'paid_total': paid, 'pending_total': round(total - paid, 2), 'invoices': out,
+            'filtered': card_id is not None or bool(bank)}
 
 
 @router.post('', status_code=201, summary='Cadastra cartão')
