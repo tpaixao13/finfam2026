@@ -96,6 +96,7 @@ export const api = {
   admin: {
     get: <T>(path: string) => request<T>(path, { admin: true }),
     post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body, admin: true }),
+    put: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body, admin: true }),
     del: <T>(path: string) => request<T>(path, { method: 'DELETE', admin: true }),
   },
   /** Baixa um arquivo (export xlsx/pdf) usando o token. */

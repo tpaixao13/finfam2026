@@ -61,6 +61,8 @@ class Settings:
     telegram_bot_token: str = ''
     telegram_bot_username: str = ''
     bot_api_key: str = ''
+    public_url: str = ''           # https://finfam.net.br — endereço público, para o webhook da Pluggy
+    pluggy_webhook_ips: tuple = ('52.67.145.81',)
     api_prefix: str = '/api/v1'
     extra: dict = field(default_factory=dict)
 
@@ -101,6 +103,9 @@ def load_settings() -> Settings:
         telegram_bot_token=_env('TELEGRAM_BOT_TOKEN', '') or '',
         telegram_bot_username=(_env('TELEGRAM_BOT_USERNAME', '') or '').lstrip('@'),
         bot_api_key=_env('BOT_API_KEY', '') or '',
+        public_url=(_env('PUBLIC_URL', '') or '').rstrip('/'),
+        pluggy_webhook_ips=tuple(ip.strip() for ip in (_env('PLUGGY_WEBHOOK_IPS', '52.67.145.81') or '').split(',')
+                                 if ip.strip()),
     )
 
 

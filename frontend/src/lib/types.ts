@@ -5,6 +5,7 @@ export interface User { id: number; name: string; email: string | null; avatar_u
 export interface Tenant {
   id: number; name: string; plan: string; plan_label: string; member_limit: number
   expires_at: string | null; days_left: number | null; active: boolean; extra_members: number
+  open_finance?: boolean; open_finance_max_items?: number | null
 }
 
 export interface Me { user: User; tenant: Tenant | null; members: User[]; alert_count: number; via_api_token: boolean }

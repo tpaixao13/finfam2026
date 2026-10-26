@@ -141,6 +141,7 @@ input[type='file'].input { padding: .35rem; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem 1rem; }
 .span-2 { grid-column: span 2; }
 .stack { display: flex; flex-direction: column; gap: .9rem; }
+.stack-sm { display: flex; flex-direction: column; gap: .4rem; }
 .stack-lg { display: flex; flex-direction: column; gap: 1.25rem; }
 .plain-list { margin: 0 0 .9rem; padding-left: 1.1rem; display: grid; gap: .45rem; }
 .link-button { background: none; border: 0; padding: 0; font: inherit; color: var(--primary); text-decoration: underline; cursor: pointer; }

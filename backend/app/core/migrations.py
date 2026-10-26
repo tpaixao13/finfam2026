@@ -57,6 +57,8 @@ _ALTERS = [
     'ALTER TABLE credit_cards ADD COLUMN account_id INTEGER REFERENCES credit_accounts(id)',
     'ALTER TABLE expenses ADD COLUMN purchase_month INTEGER',
     'ALTER TABLE investments ADD COLUMN currency TEXT',
+    'ALTER TABLE tenants ADD COLUMN open_finance_enabled INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE tenants ADD COLUMN open_finance_max_items INTEGER',
     'ALTER TABLE users ADD COLUMN totp_secret TEXT',
     'ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE users ADD COLUMN totp_failures INTEGER NOT NULL DEFAULT 0',

@@ -34,6 +34,8 @@ def tenant_out(tenant: Tenant | None) -> dict | None:
         'plan_label': tenant.plan_label, 'member_limit': tenant.member_limit,
         'expires_at': iso(tenant.trial_expires_at), 'days_left': tenant.trial_days_left,
         'active': tenant.trial_active, 'extra_members': tenant.extra_members or 0,
+        'open_finance': bool(tenant.open_finance_enabled),
+        'open_finance_max_items': tenant.open_finance_max_items,
     }
 
 

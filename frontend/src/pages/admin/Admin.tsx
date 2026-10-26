@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Badge, Button, ConfirmButton, ErrorBox, Field, Input, Modal, PageHeader, Panel, Select, Spinner, Table } from '../../components/ui'
+import { Badge, Button, Check, ConfirmButton, ErrorBox, Field, Input, Modal, PageHeader, Panel, Select, Spinner, Table } from '../../components/ui'
 import { api, tokens, type ApiError } from '../../lib/api'
 import { CodeInput, DisableModal, EnableModal, type TwoFactorClient } from '../../components/TwoFactor'
 import { dateBR } from '../../lib/format'
@@ -12,7 +12,9 @@ interface Member {
   id: number; name: string; email: string; last_seen: string | null; online: boolean
   two_factor_enabled: boolean; two_factor_locked: boolean; two_factor_failures: number
 }
-interface AdminTenant extends Tenant { code: string; created_at: string; members: Member[] }
+interface AdminTenant extends Tenant {
+  code: string; created_at: string; members: Member[]; pluggy: { configured: number; errors: number }
+}
 interface AdminData {
   admin: { name: string }
   counts: Record<'tenants' | 'users' | 'trial_active' | 'expired' | 'mensal' | 'anual' | 'vitalicio' | 'expiring_soon', number>
@@ -87,6 +89,26 @@ export function AdminLoginPage() {
   )
 }
 
+/** Liga/desliga o Open Finance (Pluggy) da família e o limite de bancos por pessoa. */
+function OpenFinanceCell({ t, run }: { t: AdminTenant; run: (fn: () => Promise<{ message: string }>) => Promise<void> }) {
+  const save = (enabled: boolean, max: number | null) =>
+    run(() => api.admin.put(`/admin/tenants/${t.id}/open-finance`, { enabled, max_items: max }))
+  const max = t.open_finance_max_items ?? null
+  return (
+    <div className="stack-sm">
+      <Check label={t.open_finance ? 'Liberado' : 'Desligado'} checked={Boolean(t.open_finance)}
+        onChange={(v) => save(v, max)} />
+      {t.open_finance && <>
+        <Select aria-label={`Limite de bancos por pessoa da ${t.name}`} value={max === null ? '' : String(max)}
+          onChange={(e) => save(true, e.target.value ? Number(e.target.value) : null)}
+          options={[{ value: '', label: 'Sem limite' }, ...[1, 2, 3, 5, 10].map((n) => ({ value: String(n), label: `${n} banco(s)/pessoa` }))]} />
+        <small className="muted">{t.pluggy.configured ? `${t.pluggy.configured} chave(s) Pluggy` : 'Nenhuma chave Pluggy'}
+          {t.pluggy.errors ? ` · ${t.pluggy.errors} com problema` : ''}</small>
+      </>}
+    </div>
+  )
+}
+
 /** Botão no topo do painel: ativa/desativa o 2FA do próprio administrador. */
 function AdminTwoFactor() {
   const { toast } = useSession()
@@ -135,7 +157,7 @@ export function AdminPage() {
             </dl>
             <Panel flush>
               <Table>
-                  <thead><tr><th>Família</th><th>Pessoas</th><th>Plano</th><th>Validade</th><th>Ações</th></tr></thead>
+                  <thead><tr><th>Família</th><th>Pessoas</th><th>Plano</th><th>Validade</th><th>Open Finance</th><th>Ações</th></tr></thead>
                   <tbody>
                     {d.tenants.map((t) => (
                       <tr key={t.id}>
@@ -166,6 +188,7 @@ export function AdminPage() {
                             options={[{ value: 'trial', label: 'Trial' }, { value: 'mensal', label: 'Mensal' }, { value: 'anual', label: 'Anual' }, { value: 'vitalicio', label: 'Vitalício' }]} />
                         </td>
                         <td>{t.expires_at ? <>{dateBR(t.expires_at)} {!t.active ? <Badge tone="danger">expirado</Badge> : t.days_left !== null && t.days_left <= 7 ? <Badge tone="warning">{t.days_left}d</Badge> : null}</> : <Badge tone="success">sem prazo</Badge>}</td>
+                        <td><OpenFinanceCell t={t} run={run} /></td>
                         <td className="actions">
                           {(t.plan === 'anual' || t.plan === 'vitalicio') && <Button variant="ghost" onClick={() => run(() => api.admin.post(`/admin/tenants/${t.id}/extra-members`))}>+1 pessoa</Button>}
                           {t.extra_members > 0 && <Button variant="ghost" onClick={() => run(() => api.admin.del(`/admin/tenants/${t.id}/extra-members`))}>−1 pessoa</Button>}

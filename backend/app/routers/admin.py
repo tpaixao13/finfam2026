@@ -11,7 +11,7 @@ from app.core import ratelimit
 from app.core.db import db, get_or_404
 from app.core.deps import get_admin
 from app.core.security import create_access_token, decode_access_token, session_fingerprint
-from app.models import Tenant, User
+from app.models import PluggyConfig, Tenant, User
 from app.services import two_factor as tfa
 from app.services.serializers import iso, tenant_out
 
@@ -143,8 +143,10 @@ def dashboard(admin: User = Depends(get_admin)):
     rows = []
     for t in tenants:
         members = t.users.filter(User.is_admin == False).order_by(User.name).all()  # noqa: E712
+        configs = PluggyConfig.query.filter(PluggyConfig.user_id.in_([u.id for u in members])).all()
         rows.append({**tenant_out(t), 'code': t.code, 'created_at': iso(t.created_at),
-                     'members': [_user_row(u, now) for u in members]})
+                     'members': [_user_row(u, now) for u in members],
+                     'pluggy': {'configured': len(configs), 'errors': sum(1 for c in configs if c.status != 'ok')}})
 
     def active(t):
         return t.trial_expires_at and t.trial_expires_at > utc
@@ -213,6 +215,20 @@ def set_plan(tenant_id: int, body: PlanIn, _: User = Depends(get_admin)):
         tenant.trial_expires_at = utcnow() + timedelta(days=365)
     db.session.commit()
     return {'message': f'Plano de "{tenant.name}" alterado para {tenant.plan_label}.', 'tenant': tenant_out(tenant)}
+
+
+class OpenFinanceIn(BaseModel):
+    enabled: bool
+    max_items: int | None = Field(None, ge=1, le=50, description='Bancos por pessoa; vazio = sem limite')
+
+
+@router.put('/tenants/{tenant_id}/open-finance', summary='Libera/desliga o Open Finance (Pluggy) da família')
+def set_open_finance(tenant_id: int, body: OpenFinanceIn, _: User = Depends(get_admin)):
+    tenant = get_or_404(Tenant.query.filter_by(id=tenant_id), 'Família não encontrada.')
+    tenant.open_finance_enabled, tenant.open_finance_max_items = body.enabled, body.max_items
+    db.session.commit()
+    state = 'liberado' if body.enabled else 'desligado (nada é apagado; só para de importar)'
+    return {'message': f'Open Finance {state} para "{tenant.name}".', 'tenant': tenant_out(tenant)}
 
 
 @router.post('/tenants/{tenant_id}/extra-members', summary='Concede +1 membro extra (Anual/Vitalício)')

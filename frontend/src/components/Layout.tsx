@@ -5,7 +5,8 @@ import { useSession } from '../lib/session'
 import { Icon } from './Icon'
 import { Avatar, Button, IconButton } from './ui'
 
-const NAV: { section: string; items: { to: string; icon: string; label: string }[] }[] = [
+type NavItem = { to: string; icon: string; label: string; openFinance?: boolean }
+const NAV: { section: string; items: NavItem[] }[] = [
   { section: 'Dinheiro', items: [
     { to: '/', icon: 'speedometer2', label: 'Painel' },
     { to: '/expenses', icon: 'list-ul', label: 'Despesas' },
@@ -18,6 +19,7 @@ const NAV: { section: string; items: { to: string; icon: string; label: string }
   { section: 'Automação', items: [
     { to: '/alerts', icon: 'bell', label: 'Alertas' },
     { to: '/import', icon: 'cloud-upload', label: 'Importar extrato' },
+    { to: '/bank', icon: 'bank', label: 'Contas conectadas', openFinance: true },
     { to: '/rules', icon: 'tags', label: 'Regras de categoria' },
   ] },
   { section: 'Conta', items: [
@@ -56,7 +58,7 @@ export function Layout({ children }: { children: ReactNode }) {
           {NAV.map((group) => (
             <div key={group.section} className="nav-group">
               <span className="nav-section">{group.section}</span>
-              {group.items.map((item) => (
+              {group.items.filter((item) => !item.openFinance || me?.tenant?.open_finance).map((item) => (
                 <Link key={item.to} to={item.to} className={`nav-link ${isActive(item.to, pathname) ? 'active' : ''}`}
                   aria-current={isActive(item.to, pathname) ? 'page' : undefined}>
                   <Icon name={item.to === '/alerts' && alerts ? 'bell-fill' : item.icon} />

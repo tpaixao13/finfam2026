@@ -2,7 +2,7 @@
 
 O schema é o MESMO do FinFam original (tabelas e colunas), então um `gastos.db`
 existente pode ser usado diretamente. Tabelas novas: `api_tokens`, `telegram_links`,
-`telegram_link_codes` e `ai_configs` (criadas sozinhas ao subir a API).
+`telegram_link_codes`, `ai_configs` e `pluggy_configs` (criadas sozinhas ao subir a API).
 """
 import calendar
 from datetime import datetime, date as _date, timedelta
@@ -71,6 +71,9 @@ class Tenant(Base):
     trial_expires_at = Column(DateTime, nullable=True)
     plan = Column(Text, default='trial', nullable=False)
     extra_members = Column(Integer, default=0, nullable=False)
+    # Open Finance (Pluggy): liberado pelo admin, por família
+    open_finance_enabled = Column(Boolean, default=False, server_default='0', nullable=False)
+    open_finance_max_items = Column(Integer, nullable=True)  # bancos por pessoa; None = sem limite
 
     users = relationship('User', backref='tenant', lazy='dynamic', cascade='all, delete-orphan')
     category_rules = relationship('CategoryRule', lazy='dynamic', cascade='all, delete-orphan')
@@ -130,6 +133,7 @@ class User(Base):
     salary_groups = relationship('SalaryGroup', lazy='dynamic', cascade='all, delete-orphan')
     telegram_links = relationship('TelegramLink', lazy='dynamic', cascade='all, delete-orphan')
     telegram_codes = relationship('TelegramLinkCode', lazy='dynamic', cascade='all, delete-orphan')
+    pluggy_config = relationship('PluggyConfig', uselist=False, cascade='all, delete-orphan')
 
     def set_password(self, password: str) -> None:
         self.password_hash = hash_password(password)
@@ -196,6 +200,25 @@ class AiConfig(Base):
     base_url = Column(Text, nullable=True)                 # só para compatíveis com OpenAI
     api_key = Column(Text, nullable=False)                 # encrypt_field(...)
     enabled = Column(Boolean, default=True, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class PluggyConfig(Base):
+    """Conta Pluggy de UMA pessoa (cada membro usa a própria chave). O segredo e o
+    segredo do webhook ficam criptografados; `hook_token` identifica a pessoa na URL do webhook."""
+    __tablename__ = 'pluggy_configs'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, unique=True)
+    client_id = Column(String(64), nullable=False)
+    client_secret = Column(Text, nullable=False)          # encrypt_field(...)
+    hook_token = Column(String(48), nullable=False, unique=True)
+    hook_secret = Column(Text, nullable=False)            # encrypt_field(...)
+    webhook_id = Column(String(64), nullable=True)        # id do webhook na conta Pluggy da pessoa
+    status = Column(String(20), nullable=False, default='ok')  # ok | error
+    last_error = Column(Text, nullable=True)
+    consent_at = Column(DateTime, nullable=False, default=utcnow)
+    created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 

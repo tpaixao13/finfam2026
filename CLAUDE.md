@@ -41,6 +41,7 @@ python -m finfam_mcp --http --port 8765                   # Streamable HTTP
   - `get_admin` para `/admin/*` (JWT com `typ=admin`).
   - `get_ctx_session` para conta/credenciais/tokens/chave de IA: recusa token de API e o bot.
   - Bot: `ffbot_<BOT_API_KEY>` + header `X-Telegram-Chat` → usuário do `TelegramLink`; `get_bot` nas rotas `/telegram/bot/*`.
+- **Open Finance (Pluggy, ramo `pluggy` / versão 2026.2.0):** `services/pluggy.py` (cliente, API Key por Client ID em memória), `routers/pluggy.py` (chave POR PESSOA em `pluggy_configs`, só com login do site; webhook `/pluggy/webhook/<hook_token>` com cabeçalho `X-FinFam-Hook` e IP). O admin libera por família (`tenants.open_finance_enabled`). Ver `CHANGELOG.md`.
 - **IA:** `ai_service` (um método por provedor, só urllib). A resposta da IA é sempre conferida em `to_draft` (cartão/pessoa da família, categoria válida) e nunca grava: o bot só lança depois do ✅.
 - **Regras de negócio** ficam em `app/services/` sem depender de HTTP: `expense_service` (lançar/editar/parcelar/recorrência/contas a pagar), `card_service` (fatura, limite compartilhado por `CreditAccount`, VR/VA com saldo acumulado), `goal_service`, `insight_service`, `alert_service`, `categorizer`, `import_service`, `export_service`, `telegram`, `market`.
 - **Serialização:** `app/services/serializers.py` — o formato JSON de cada entidade. O frontend espelha em `frontend/src/lib/types.ts`.

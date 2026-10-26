@@ -16,11 +16,11 @@ from app.core.config import settings
 from app.core.db import DBSessionMiddleware
 from app.core.migrations import run_migrations
 from app.routers import (admin, ai, auth, cards, dashboard, expenses, family, goals, imports, incomes,
-                         investments, rules, settings as settings_router, telegram)
+                         investments, pluggy, rules, settings as settings_router, telegram)
 
 log = logging.getLogger('finfam')
 
-VERSION = '2026.1.0'
+VERSION = '2026.2.0-dev'  # ramo pluggy: Open Finance em construção
 
 _FIELD_LABELS = {
     'description': 'Descrição', 'amount': 'Valor', 'category': 'Categoria', 'payment_method': 'Forma de pagamento',
@@ -87,7 +87,7 @@ def create_app() -> FastAPI:
 
     prefix = settings.api_prefix
     for module in (auth, family, dashboard, expenses, incomes, cards, goals, rules, investments,
-                   imports, settings_router, telegram, ai, admin):
+                   imports, settings_router, telegram, ai, pluggy, admin):
         app.include_router(module.router, prefix=prefix)
 
     @app.get(f'{prefix}/health', tags=['meta'], summary='Status da API')
