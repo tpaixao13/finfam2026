@@ -199,6 +199,8 @@ def _account_out(acc: BankAccount) -> dict:
         'last_digits': of.last4(acc.number), 'currency': acc.currency or 'BRL',
         'balance': float(acc.balance) if acc.balance is not None else None,
         'credit_limit': float(acc.credit_limit) if acc.credit_limit is not None else None,
+        'available_limit': float(acc.available_limit) if acc.available_limit is not None else None,
+        'close_day': acc.close_day, 'due_day': acc.due_day,
         'card_id': acc.card_id,
         'card_label': (f"{card.nickname or card.bank or 'Cartão'} •••• {card.last_digits}" if card else None),
     }
@@ -370,8 +372,25 @@ def map_account(account_id: int, body: AccountIn, ctx: Ctx = Depends(get_ctx_ses
         if not (card.card_type == 'credit' or card.supports_credit):
             raise HTTPException(status_code=422, detail='Cartão: escolha um cartão de crédito.')
     acc.card_id = body.card_id
+    limit = of.apply_card_limit(acc)
     db.session.commit()
-    return {'message': 'Cartão ligado.' if body.card_id else 'Cartão desligado.', 'account': _account_out(acc)}
+    msg = 'Cartão ligado.' + (' O limite agora vem do banco.' if limit else '') if body.card_id else 'Cartão desligado.'
+    return {'message': msg, 'account': _account_out(acc)}
+
+
+@router.post('/accounts/{account_id}/card', summary='Cria no FinFam o cartão do banco (limite e datas vêm do banco)')
+def create_card(account_id: int, ctx: Ctx = Depends(get_ctx_session)):
+    _enabled_tenant(ctx)
+    acc = db.session.get(BankAccount, account_id)
+    if acc is None or acc.connection.user_id != ctx.user.id:
+        raise HTTPException(status_code=404, detail='Conta não encontrada.')
+    try:
+        card = of.create_card_from(acc)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.session.commit()
+    return {'message': f'Cartão {card.bank} •••• {card.last_digits} criado e ligado: vence dia {card.due_day}, '
+                       f'melhor dia de compra {card.best_buy_day}.', 'account': _account_out(acc)}
 
 
 # ── Revisar importados (etapa 3) ─────────────────────────────────────────────

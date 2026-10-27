@@ -72,6 +72,10 @@ pelo bot ou importando extrato, como antes.
   - confirmação digitando o nome da família.
 - `python -m scripts.restore_expenses BACKUP.db.gz --email ... --desde ... [--aplicar]`: devolve, do backup do
   Telegram, despesas apagadas que não voltaram pelo banco (com cartão, fatura, parcelas e "pago").
+- Limite do cartão vem do banco: cartão do FinFam ligado ao do banco recebe o limite a cada atualização
+  (na conta de crédito, quando o limite é compartilhado). Mostra também limite disponível e os dias de
+  fechamento e vencimento.
+- "Criar cartão" a partir do cartão do banco: final, banco, limite, vencimento e melhor dia vêm da Pluggy.
 - Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
 
 **Próximas etapas**

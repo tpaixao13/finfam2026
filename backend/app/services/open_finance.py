@@ -117,6 +117,58 @@ def _auto_card(conn: BankConnection, acc: BankAccount) -> None:
         acc.card_id = cards[0].id
 
 
+def apply_card_limit(acc: BankAccount) -> bool:
+    """Cartão do FinFam ligado ao do banco: o limite vem do banco (na conta de crédito, que é
+    o limite compartilhado, quando o cartão tem uma). Devolve True se mudou."""
+    if acc.type != 'CREDIT' or not acc.card_id or not acc.credit_limit:
+        return False
+    card = db.session.get(CreditCard, acc.card_id)
+    if card is None:
+        return False
+    limit = Decimal(str(acc.credit_limit))
+    target = card.account if card.account is not None else card
+    if target.credit_limit is not None and Decimal(str(target.credit_limit)) == limit:
+        return False
+    target.credit_limit = limit
+    if target is not card and card.credit_limit is not None:
+        card.credit_limit = limit
+    return True
+
+
+def card_days(acc: BankAccount) -> tuple[int, int]:
+    """(vencimento, melhor dia de compra) para criar o cartão. O FinFam exige melhor dia antes do
+    vencimento; quando o banco fecha num mês e vence no outro (ex.: fecha 28, vence 5), usa a
+    véspera do vencimento — a pessoa ajusta no cartão se quiser."""
+    due = acc.due_day or 10
+    best = acc.close_day or max(1, due - 7)
+    if best >= due:
+        best = max(1, due - 1)
+    return due, best
+
+
+def create_card_from(acc: BankAccount) -> CreditCard:
+    """Cadastra no FinFam o cartão do banco (final, banco, limite, vencimento, melhor dia) e liga."""
+    from app.services.card_service import apply_card_fields
+    digits = last4(acc.number)
+    if acc.type != 'CREDIT' or not digits:
+        raise ValueError('Só dá para criar cartão a partir de um cartão de crédito do banco com número.')
+    if acc.card_id:
+        raise ValueError('Este cartão do banco já está ligado a um cartão do FinFam.')
+    conn = acc.connection
+    due, best = card_days(acc)
+    card = CreditCard(user_id=conn.user_id)
+    db.session.add(card)
+    apply_card_fields(card, special_type=None, supports_credit=True, supports_debit=False,
+                      nickname=(acc.name or '')[:50] or None, last_digits=digits, bank=conn.label[:60],
+                      due_day=due, best_buy_day=best,
+                      credit_limit=Decimal(str(acc.credit_limit)) if acc.credit_limit else None,
+                      is_virtual=False, is_additional=False, monthly_amount=None, renewal_day=None)
+    db.session.flush()
+    acc.card_id = card.id
+    apply_card_limit(acc)
+    return card
+
+
 def sync_accounts(conn: BankConnection, client: pg.PluggyClient) -> None:
     apply_item(conn, client.item(conn.item_id))
     seen = set()
@@ -138,8 +190,13 @@ def sync_accounts(conn: BankConnection, client: pg.PluggyClient) -> None:
         acc.number = str(a.get('number') or '')[:32] or None
         acc.balance = money(a.get('balance'))
         acc.currency = str(a.get('currencyCode') or 'BRL')[:3]
-        acc.credit_limit = money(credit.get('creditLimit')) if isinstance(credit, dict) else None
+        credit = credit if isinstance(credit, dict) else {}
+        acc.credit_limit = money(credit.get('creditLimit'))
+        acc.available_limit = money(credit.get('availableCreditLimit'))
+        close, due = local_date(credit.get('balanceCloseDate')), local_date(credit.get('balanceDueDate'))
+        acc.close_day, acc.due_day = (close.day if close else None), (due.day if due else None)
         _auto_card(conn, acc)
+        apply_card_limit(acc)
     for acc in conn.accounts.all():
         if acc.pluggy_account_id not in seen:
             db.session.delete(acc)  # o banco deixou de devolver a conta

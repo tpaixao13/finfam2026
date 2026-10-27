@@ -278,3 +278,39 @@ def test_same_bank_twice_is_refused_but_two_meupluggy_banks_are_ok(client, famil
     assert family.post('/pluggy/items', json={'item_id': ITEM2}).status_code == 200
     assert BankConnection.query.count() == 2
     session.remove()
+
+
+def test_card_limit_comes_from_bank_and_create_card(client, family, bank):
+    _ready(client, family)
+    card = family.post('/cards', json={'supports_credit': True, 'last_digits': '5162', 'bank': 'Nubank',
+                                       'due_day': 10, 'best_buy_day': 3, 'credit_limit': '1000'}).json()['card']
+    bank['add'](ITEM)
+    conn = family.post('/pluggy/items', json={'item_id': ITEM}).json()['item']
+    cards = {c['id']: c for c in family.get('/cards?light=true').json()['cards']}
+    assert cards[card['id']]['effective_limit'] == 5000.0  # ligado sozinho → limite do banco
+
+    # outro banco: cartão que ainda não existe no FinFam → "Criar cartão"
+    bank['add'](ITEM2, accounts=[{'id': 'inter-cc', 'type': 'CREDIT', 'subtype': 'CREDIT_CARD', 'name': 'Inter Black',
+                                  'number': '7777', 'balance': 10, 'currencyCode': 'BRL',
+                                  'creditData': {'creditLimit': 8000, 'availableCreditLimit': 7500,
+                                                 'balanceCloseDate': '2026-10-03T03:00:00.000Z',
+                                                 'balanceDueDate': '2026-10-10T03:00:00.000Z'}}])
+    item2 = family.post('/pluggy/items', json={'item_id': ITEM2}).json()['item']
+    acc = item2['accounts'][0]
+    assert acc['close_day'] == 3 and acc['due_day'] == 10 and acc['available_limit'] == 7500.0
+    r = family.post(f"/pluggy/accounts/{acc['id']}/card")
+    assert r.status_code == 200, r.text
+    assert r.json()['account']['card_id'] is not None
+    new = next(c for c in family.get('/cards?light=true').json()['cards'] if c['last_digits'] == '7777')
+    assert (new['due_day'], new['best_buy_day'], new['effective_limit']) == (10, 3, 8000.0)
+    assert family.post(f"/pluggy/accounts/{acc['id']}/card").status_code == 422  # já ligado
+    conta = next(a for a in conn['accounts'] if a['type'] == 'BANK')
+    assert family.post(f"/pluggy/accounts/{conta['id']}/card").status_code == 422  # conta não vira cartão
+    session.remove()
+
+
+def test_card_days_when_bank_closes_after_due_day():
+    from app.models import BankAccount
+    from app.services import open_finance as of
+    assert of.card_days(BankAccount(close_day=28, due_day=5)) == (5, 4)
+    assert of.card_days(BankAccount(close_day=None, due_day=None)) == (10, 3)

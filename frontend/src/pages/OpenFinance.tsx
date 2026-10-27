@@ -19,6 +19,7 @@ type Saved = { message: string; config: PluggyConfig }
 interface BankAccount {
   id: number; type: 'BANK' | 'CREDIT'; subtype: string | null; name: string | null; last_digits: string | null
   currency: string; balance: number | null; credit_limit: number | null; card_id: number | null; card_label: string | null
+  available_limit: number | null; close_day: number | null; due_day: number | null
 }
 interface Connection {
   id: number; item_id: string; bank_name: string | null; connector_name: string | null; auto_import: boolean; bank_color: string | null; status: string | null
@@ -81,6 +82,7 @@ function when(iso: string | null) {
 
 function AccountRow({ acc, cards, onChange }: { acc: BankAccount; cards: Card[]; onChange: () => void }) {
   const act = useAction()
+  const [busy, setBusy] = useState(false)
   const credit = acc.type === 'CREDIT'
   const label = acc.name || (credit ? 'Cartão de crédito' : 'Conta')
   return (
@@ -88,16 +90,30 @@ function AccountRow({ acc, cards, onChange }: { acc: BankAccount; cards: Card[];
       <div className="bank-acc-main">
         <b>{label}</b>{acc.last_digits && <span className="muted"> •••• {acc.last_digits}</span>}
         <div className="muted small">
-          {credit ? `Fatura atual ${money(acc.balance == null ? null : Math.abs(acc.balance), acc.currency)}${acc.credit_limit ? ` · limite ${money(acc.credit_limit, acc.currency)}` : ''}`
-            : `Saldo ${money(acc.balance, acc.currency)}`}
+          {credit ? <>
+            Fatura atual {money(acc.balance == null ? null : Math.abs(acc.balance), acc.currency)}
+            {acc.credit_limit ? <> · limite {money(acc.credit_limit, acc.currency)}</> : null}
+            {acc.available_limit != null ? <> · disponível {money(acc.available_limit, acc.currency)}</> : null}
+            {acc.close_day && acc.due_day ? <> · fecha dia {acc.close_day}, vence dia {acc.due_day}</> : null}
+          </> : `Saldo ${money(acc.balance, acc.currency)}`}
         </div>
+        {credit && acc.card_id && acc.credit_limit ? <div className="small">Limite do cartão no FinFam vem do banco.</div> : null}
       </div>
       {credit && (
-        <div className="bank-acc-map"><Select aria-label={`Cartão do FinFam para ${label}`} value={acc.card_id ?? ''}
-          placeholder="Ligar a um cartão…"
-          options={cards.map((c) => ({ value: c.id, label: c.label }))}
-          onChange={(e) => act(() => api.put<{ message: string }>(`/pluggy/accounts/${acc.id}`,
-            { card_id: e.target.value ? Number(e.target.value) : null }), onChange)} /></div>
+        <div className="bank-acc-map">
+          <Select aria-label={`Cartão do FinFam para ${label}`} value={acc.card_id ?? ''}
+            placeholder="Ligar a um cartão…"
+            options={cards.map((c) => ({ value: c.id, label: c.label }))}
+            onChange={(e) => act(() => api.put<{ message: string }>(`/pluggy/accounts/${acc.id}`,
+              { card_id: e.target.value ? Number(e.target.value) : null }), onChange)} />
+          {!acc.card_id && acc.last_digits && (
+            <Button variant="ghost" icon="plus" busy={busy} onClick={async () => {
+              setBusy(true)
+              await act(() => api.post<{ message: string }>(`/pluggy/accounts/${acc.id}/card`), onChange)
+              setBusy(false)
+            }}>Criar cartão</Button>
+          )}
+        </div>
       )}
     </li>
   )

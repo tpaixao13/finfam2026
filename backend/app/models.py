@@ -265,6 +265,9 @@ class BankAccount(Base):
     balance = Column(Numeric(14, 2), nullable=True)
     currency = Column(String(3), nullable=True)
     credit_limit = Column(Numeric(14, 2), nullable=True)
+    available_limit = Column(Numeric(14, 2), nullable=True)
+    close_day = Column(Integer, nullable=True)            # dia de fechamento da fatura (cartão)
+    due_day = Column(Integer, nullable=True)              # dia de vencimento da fatura (cartão)
     card_id = Column(Integer, ForeignKey('credit_cards.id', ondelete='SET NULL'), nullable=True)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
