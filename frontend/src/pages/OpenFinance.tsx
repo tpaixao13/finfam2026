@@ -1,7 +1,7 @@
 // Open Finance (Pluggy) — cada pessoa cadastra a chave da própria conta Pluggy (etapa 1)
 // e conecta os bancos pelo widget Pluggy Connect, vendo contas e cartões (etapa 2).
 import { useState } from 'react'
-import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, Input, Modal, PageHeader, Panel, Segmented, Select, Spinner } from '../components/ui'
+import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Modal, PageHeader, Panel, Segmented, Select, Spinner } from '../components/ui'
 import { api } from '../lib/api'
 import { money } from '../lib/format'
 import { useApi } from '../lib/hooks'
@@ -21,7 +21,7 @@ interface BankAccount {
   currency: string; balance: number | null; credit_limit: number | null; card_id: number | null; card_label: string | null
 }
 interface Connection {
-  id: number; item_id: string; bank_name: string | null; bank_color: string | null; status: string | null
+  id: number; item_id: string; bank_name: string | null; connector_name: string | null; bank_color: string | null; status: string | null
   execution_status: string | null; error: string | null; last_updated_at: string | null; accounts: BankAccount[]
 }
 
@@ -103,7 +103,38 @@ function AccountRow({ acc, cards, onChange }: { acc: BankAccount; cards: Card[];
   )
 }
 
-function ConnectionCard({ conn, cards, onChange }: { conn: Connection; cards: Card[]; onChange: () => void }) {
+/** Nome do banco (o Meu Pluggy vem como "MeuPluggy"): vai nas despesas lançadas. */
+function BankName({ conn, banks, onChange }: { conn: Connection; banks: string[]; onChange: () => void }) {
+  const act = useAction()
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(conn.bank_name ?? '')
+  const listId = `banks-${conn.id}`
+  if (!editing) {
+    return (
+      <div className="bank-name">
+        <h3>{conn.bank_name ?? 'Banco'}</h3>
+        {conn.connector_name && conn.connector_name !== conn.bank_name && <span className="muted small">via {conn.connector_name}</span>}
+        <IconButton icon="pencil" label={`Renomear ${conn.bank_name ?? 'banco'}`} onClick={() => setEditing(true)} />
+      </div>
+    )
+  }
+  async function save(e: React.FormEvent) {
+    e.preventDefault()
+    await act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, { bank_name: name.trim() }),
+      () => { setEditing(false); onChange() })
+  }
+  return (
+    <form className="bank-name" onSubmit={save}>
+      <Input value={name} onChange={(e) => setName(e.target.value)} list={listId} maxLength={60} required autoFocus
+        aria-label="Nome do banco" />
+      <datalist id={listId}>{banks.map((b) => <option key={b} value={b} />)}</datalist>
+      <Button type="submit">Salvar</Button>
+      <Button type="button" variant="ghost" onClick={() => setEditing(false)}>Cancelar</Button>
+    </form>
+  )
+}
+
+function ConnectionCard({ conn, cards, banks, onChange }: { conn: Connection; cards: Card[]; banks: string[]; onChange: () => void }) {
   const act = useAction()
   const { toast } = useSession()
   const [busy, setBusy] = useState(false)
@@ -119,7 +150,7 @@ function ConnectionCard({ conn, cards, onChange }: { conn: Connection; cards: Ca
   return (
     <article className="bank-conn" style={{ borderLeftColor: conn.bank_color ?? undefined }}>
       <header className="row-between">
-        <h3>{conn.bank_name ?? 'Banco'}</h3>
+        <BankName conn={conn} banks={banks} onChange={onChange} />
         <Badge tone={st.tone}>{st.label}</Badge>
       </header>
       <p className="muted small">Última atualização do banco: {when(conn.last_updated_at)}</p>
@@ -178,7 +209,7 @@ function WindowModal({ open, withId, onClose, onGo }:
 }
 
 function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => void }) {
-  const items = useApi(() => api.get<{ items: Connection[] }>('/pluggy/items'), [])
+  const items = useApi(() => api.get<{ items: Connection[]; banks: string[] }>('/pluggy/items'), [])
   const cards = useApi(() => api.get<{ cards: Card[] }>('/cards?light=true'), [])
   const act = useAction()
   const { toast } = useSession()
@@ -219,7 +250,7 @@ function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => voi
         </Empty>
       ) : (
         <div className="stack">
-          {list.map((c) => <ConnectionCard key={c.id} conn={c} cards={creditCards} onChange={reload} />)}
+          {list.map((c) => <ConnectionCard key={c.id} conn={c} cards={creditCards} banks={items.data?.banks ?? []} onChange={reload} />)}
         </div>
       )}
       <p className="muted small">

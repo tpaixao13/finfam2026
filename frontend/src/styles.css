@@ -528,3 +528,6 @@ a.insight:hover { background: #e8edf1; }
   .review-bar .row { width: 100%; }
   .review-bar .row .btn { flex: 1; justify-content: center; }
 }
+.bank-name { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; min-width: 0; }
+.bank-name .input { flex: 1 1 12rem; min-width: 0; }
+.bank-conn header { align-items: center; flex-wrap: wrap; }

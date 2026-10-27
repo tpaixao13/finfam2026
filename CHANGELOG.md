@@ -50,6 +50,15 @@ pelo bot ou importando extrato, como antes.
 - Meu Pluggy compartilha um banco por autorização: o FinFam não pede mais `avoidDuplicates`
   (a Pluggy recusava o 2º banco). Duplicata de verdade (mesmas contas) é recusada pelo FinFam.
 
+- Ajustes com dados reais:
+  - saída da conta só casa com despesa que não é de crédito, e compra do cartão só com despesa de crédito;
+  - parcela k>1 usa a data em que entrou na fatura (a "data da compra original" do banco não é confiável)
+    e casa com a mesma parcela do FinFam em até 70 dias;
+  - "TOTAL DA FATURA ANTERIOR"/saldo anterior vai para Ignorados;
+  - o que foi classificado sozinho é reclassificado na próxima leitura; o que você mexeu (Lançar,
+    Ignorar, Revisar) fica como você deixou;
+  - nome do banco por conexão (Meu Pluggy vem como "MeuPluggy"): vai nas despesas lançadas.
+
 **Próximas etapas**
 4. Conferência de fatura, aviso no bot e ferramenta no MCP.
 

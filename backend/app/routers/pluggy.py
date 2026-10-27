@@ -30,7 +30,8 @@ from app.core.types import utcnow
 from app.models import BankAccount, Expense, BankConnection, BankTransaction, CreditCard, PluggyConfig, Tenant, User
 from app.services import open_finance as of
 from app.services import pluggy as pg
-from app.services.expense_service import ExpenseError, tenant_categories
+from app.services.expense_service import ExpenseError, tenant_banks, tenant_categories
+from app.services.finance import BANKS
 
 log = logging.getLogger('finfam.pluggy')
 router = APIRouter(prefix='/pluggy', tags=['open finance'])
@@ -205,7 +206,7 @@ def _account_out(acc: BankAccount) -> dict:
 
 def _conn_out(conn: BankConnection) -> dict:
     return {
-        'id': conn.id, 'item_id': conn.item_id, 'bank_name': conn.bank_name, 'bank_color': conn.bank_color,
+        'id': conn.id, 'item_id': conn.item_id, 'bank_name': conn.label, 'connector_name': conn.bank_name, 'bank_color': conn.bank_color,
         'status': conn.status, 'execution_status': conn.execution_status, 'error': conn.error_message,
         'last_updated_at': conn.last_updated_at.isoformat() + 'Z' if conn.last_updated_at else None,
         'accounts': [_account_out(a) for a in conn.accounts.order_by(BankAccount.type, BankAccount.id).all()],
@@ -242,7 +243,21 @@ def list_items(ctx: Ctx = Depends(get_ctx_session)):
     conns = BankConnection.query.filter_by(user_id=ctx.user.id).order_by(BankConnection.id).all()
     if any(c.needs_sync for c in conns):  # o webhook avisou novidade: relê só esses
         of.sync_stale(ctx.user.id)
-    return {'items': [_conn_out(c) for c in conns]}
+    return {'items': [_conn_out(c) for c in conns],
+            'banks': sorted(set(BANKS) | set(tenant_banks(ctx.uids)))}
+
+
+class RenameIn(BaseModel):
+    bank_name: str = Field(min_length=1, max_length=60, description='Nome do banco nas despesas lançadas (ex.: Caixa)')
+
+
+@router.put('/items/{conn_id}', summary='Dá nome ao banco (útil no Meu Pluggy, que vem como "MeuPluggy")')
+def rename_item(conn_id: int, body: RenameIn, ctx: Ctx = Depends(get_ctx_session)):
+    _enabled_tenant(ctx)
+    conn = _conn(ctx, conn_id)
+    conn.display_name = body.bank_name.strip()
+    db.session.commit()
+    return {'message': f'Banco renomeado para {conn.label}.', 'item': _conn_out(conn)}
 
 
 class ItemIn(BaseModel):
@@ -282,7 +297,7 @@ def add_item(body: ItemIn, ctx: Ctx = Depends(get_ctx_session)):
             raise HTTPException(status_code=409, detail='Esse banco já está conectado no FinFam.')
     count = _pluggy(of.sync, conn, client)
     db.session.commit()
-    msg = f'{conn.bank_name} conectado!' if created else f'{conn.bank_name} atualizado.'
+    msg = f'{conn.label} conectado!' if created else f'{conn.label} atualizado.'
     if count:
         msg += f' {count} lançamento(s) para revisar.'
     return {'message': msg, 'item': _conn_out(conn)}
@@ -301,12 +316,12 @@ def refresh_item(conn_id: int, ctx: Ctx = Depends(get_ctx_session)):
         # Então relê agora o que já está lá (contas novas do Meu Pluggy aparecem aqui).
         count = _pluggy(of.sync, conn, client)
         db.session.commit()
-        msg = f'{conn.bank_name} relido.' + (f' {count} lançamento(s) novo(s) para revisar.' if count else '')
+        msg = f'{conn.label} relido.' + (f' {count} lançamento(s) novo(s) para revisar.' if count else '')
         return {'message': msg, 'item': _conn_out(conn)}
     of.apply_item(conn, item)
     conn.needs_sync = True  # quando a Pluggy terminar, o webhook avisa (ou a próxima listagem relê)
     db.session.commit()
-    return {'message': f'Atualização de {conn.bank_name} pedida. Pode levar alguns minutos.', 'item': _conn_out(conn)}
+    return {'message': f'Atualização de {conn.label} pedida. Pode levar alguns minutos.', 'item': _conn_out(conn)}
 
 
 @router.delete('/items/{conn_id}', summary='Desconecta o banco (na Pluggy também) e apaga os dados dele')
@@ -315,7 +330,7 @@ def delete_item(conn_id: int, ctx: Ctx = Depends(get_ctx_session)):
     conn = _conn(ctx, conn_id)
     if cfg:
         _pluggy(pg.PluggyClient(cfg.client_id, decrypt_field(cfg.client_secret)).delete_item, conn.item_id)
-    name = conn.bank_name or 'Banco'
+    name = conn.label
     db.session.delete(conn)
     db.session.commit()
     return {'message': f'{name} desconectado. Os dados vindos dele foram apagados.'}
@@ -357,7 +372,7 @@ def _tx_out(tx: BankTransaction, ctx: Ctx) -> dict:
         'installment': ({'number': tx.installment_number, 'total': tx.total_installments}
                         if tx.total_installments and tx.total_installments > 1 else None),
         'status': tx.status, 'reason': tx.reason, 'bank_pending': tx.bank_status == 'PENDING',
-        'bank_name': acc.connection.bank_name, 'account_type': acc.type,
+        'bank_name': acc.connection.label, 'account_type': acc.type,
         'account_name': acc.name, 'account_last_digits': of.last4(acc.number),
         'card_id': acc.card_id,
         'expense': ({'id': match.id, 'description': match.description, 'amount': float(match.amount),
@@ -443,7 +458,7 @@ def restore_transactions(body: IdsIn, ctx: Ctx = Depends(get_ctx_session)):
     n = 0
     for tx in _my_tx(ctx, body.ids):
         if tx.status in ('ignored', 'duplicate'):
-            tx.status, tx.reason, tx.expense_id, tx.reviewed_at = 'pending', None, None, None
+            tx.status, tx.reason, tx.expense_id, tx.reviewed_at = 'pending', None, None, utcnow()
             n += 1
     db.session.commit()
     return {'message': f'{n} lançamento(s) de volta para revisar.'}

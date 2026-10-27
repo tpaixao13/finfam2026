@@ -231,7 +231,8 @@ class BankConnection(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     item_id = Column(String(64), nullable=False, unique=True)
-    bank_name = Column(Text, nullable=True)
+    bank_name = Column(Text, nullable=True)               # nome que a Pluggy dá (ex.: "MeuPluggy")
+    display_name = Column(Text, nullable=True)            # nome escolhido pela pessoa (ex.: "Caixa")
     bank_color = Column(String(12), nullable=True)
     status = Column(String(32), nullable=True)            # UPDATED | UPDATING | LOGIN_ERROR | OUTDATED | WAITING_...
     execution_status = Column(String(48), nullable=True)
@@ -243,6 +244,10 @@ class BankConnection(Base):
     created_at = Column(DateTime, default=utcnow)
 
     accounts = relationship('BankAccount', backref='connection', lazy='dynamic', cascade='all, delete-orphan')
+
+    @property
+    def label(self) -> str:
+        return self.display_name or self.bank_name or 'Banco'
 
 
 class BankAccount(Base):

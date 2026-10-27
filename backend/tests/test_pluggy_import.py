@@ -222,3 +222,39 @@ def test_bank_is_saved_even_if_transactions_fail(client, family, bank, txs):  # 
     txs['__state__']['fail'] = False
     assert family.get('/pluggy/transactions').json()['counts']['pending'] == 5  # a próxima leitura traz tudo
     session.remove()
+
+
+def test_real_bank_cases(client, family, bank, txs):  # noqa: F811
+    """Casos vistos no banco real: boleto da conta não casa com despesa do cartão; saldo da fatura
+    anterior é ignorado; reclassifica o que foi classificado sozinho; nome do banco no Meu Pluggy."""
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    when = (TODAY - timedelta(days=2)).isoformat()
+    family.post('/expenses', json={'description': 'Taxa Anuidade', 'amount': '17.25', 'category': 'Outros',
+                                   'payment_method': 'Cartão de Crédito', 'card_id': card['id'], 'date': when})
+    txs[acc].append({'id': 'b-1', 'type': 'DEBIT', 'amount': -17.25, 'date': day(1), 'description': 'PAGAMENTO DE BOLETO'})
+    txs[cc] += [{'id': 'c-1', 'type': 'DEBIT', 'amount': 17.25, 'date': day(1), 'description': 'ANUIDADE NAC'},
+                {'id': 'c-2', 'type': 'DEBIT', 'amount': 99.0, 'date': day(1), 'description': 'TOTAL DA FATURA ANTERIOR'}]
+    conn = _post_item(family)['item']
+    pend = [t['description'] for t in family.get('/pluggy/transactions').json()['items']]
+    assert pend == ['PAGAMENTO DE BOLETO']  # não casou com a anuidade do cartão
+    dup = family.get('/pluggy/transactions?status=duplicate').json()['items']
+    assert [d['description'] for d in dup] == ['ANUIDADE NAC']
+    ign = family.get('/pluggy/transactions?status=ignored').json()['items']
+    assert [i['description'] for i in ign] == ['TOTAL DA FATURA ANTERIOR']
+
+    # "Revisar" num duplicado o trava como pendente: a próxima leitura não o reclassifica
+    family.post('/pluggy/transactions/restore', json={'ids': [dup[0]['id']]})
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    session.remove()
+    assert family.get('/pluggy/transactions').json()['counts']['pending'] == 2
+
+    # nome do banco (Meu Pluggy vem como "MeuPluggy") vai nas despesas lançadas
+    r = family.put(f"/pluggy/items/{conn['id']}", json={'bank_name': 'Caixa'})
+    assert r.status_code == 200 and r.json()['item']['bank_name'] == 'Caixa'
+    assert 'Caixa Econômica Federal' in family.get('/pluggy/items').json()['banks']
+    boleto = next(t for t in family.get('/pluggy/transactions').json()['items'] if t['description'] == 'PAGAMENTO DE BOLETO')
+    assert boleto['bank_name'] == 'Caixa'
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': boleto['id'], 'category': 'Outros'}]})
+    assert Expense.query.filter_by(description='PAGAMENTO DE BOLETO').one().bank == 'Caixa'
+    session.remove()

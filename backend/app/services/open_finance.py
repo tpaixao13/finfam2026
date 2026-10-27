@@ -35,6 +35,8 @@ _SKIP = (
      'Transferência entre contas suas.'),
     (re.compile(r'^investments?$|aplica[cç][aã]o|resgate|investimento', re.I),
      'Aplicação/investimento.'),
+    (re.compile(r'total da fatura anterior|saldo (da fatura )?anterior|saldo em atraso', re.I),
+     'Saldo da fatura anterior: não é compra.'),
 )
 
 
@@ -164,9 +166,10 @@ def _expense_date(e: Expense) -> date:
 
 
 def target_date(tx: BankTransaction) -> date:
-    """Data de compra que o FinFam usa ao lançar (parcela k → mês da compra + k-1)."""
-    if tx.installment_number and tx.installment_number > 1 and tx.purchase_date:
-        return add_months(tx.purchase_date, tx.installment_number - 1)
+    """Data que o FinFam usa: 1ª parcela/à vista = data da compra; parcela k>1 = data em que
+    ela entrou na fatura (a "data da compra original" que alguns bancos mandam não é confiável)."""
+    if tx.installment_number and tx.installment_number > 1:
+        return tx.date
     return tx.purchase_date or tx.date
 
 
@@ -181,16 +184,21 @@ def find_existing(tx: BankTransaction, card_id: int | None) -> Expense | None:
                     BankTransaction.id != (tx.id or 0))}
     q = Expense.query.filter(Expense.user_id == tx.user_id, Expense.amount == Decimal(str(tx.amount)),
                              Expense.year.between(when.year - 1, when.year + 1))
+    credit = tx.account.type == 'CREDIT'
     best = None
     for e in q.all():
         if e.id in used:
             continue
+        if (e.payment_method == CREDIT) != credit:
+            continue  # saída da conta nunca é compra no cartão, e vice-versa
         if card_id and e.card_id and e.card_id != card_id:
             continue
         if n and n > 1 and e.installment_number and e.installment_number != n:
             continue
         gap = abs((_expense_date(e) - when).days)
-        if gap <= tolerance and (best is None or gap < best[0]):
+        # parcela com o mesmo número: o FinFam guarda no mês da fatura (até ~2 meses depois do lançamento)
+        limit = 70 if n and n > 1 and e.installment_number == n else tolerance
+        if gap <= limit and (best is None or gap < best[0]):
             best = (gap, e)
     return best[1] if best else None
 
@@ -264,8 +272,10 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
             if fresh:
                 tx = BankTransaction(account_id=acc.id, user_id=conn.user_id, pluggy_id=pid, status='pending')
                 db.session.add(tx)
-            elif tx.status != 'pending':
-                continue  # já revisado: não mexe
+            elif tx.reviewed_at is not None or tx.status == 'imported':
+                continue  # você já mexeu: não reclassifica
+            else:  # classificado sozinho antes: classifica de novo (regras podem ter melhorado)
+                tx.status, tx.reason, tx.expense_id = 'pending', None, None
             _apply_tx(tx, raw)
             if tx.date < start or not tx.amount:
                 if fresh:
@@ -362,7 +372,7 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
     data = ExpenseData(user_id=tx.user_id, description=desc, amount=amount,
                        category=category if category else 'Outros', payment_method=method,
                        day=when.day, month=when.month, year=when.year,
-                       bank=conn.bank_name, card_id=acc.card_id if credit else None,
+                       bank=conn.label, card_id=acc.card_id if credit else None,
                        paid=not credit, installments=installments)
     result = create_expense(uids, data)
     first = result['expenses'][0]
