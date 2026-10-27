@@ -27,7 +27,7 @@ from app.core.db import db
 from app.core.deps import Ctx, Period, get_ctx, get_ctx_session, get_period
 from app.core.security import decrypt_field, encrypt_field
 from app.core.types import utcnow
-from app.models import BankAccount, Expense, BankConnection, BankTransaction, CreditCard, PluggyConfig, Tenant, User
+from app.models import BankAccount, BankInvestment, Expense, BankConnection, BankTransaction, CreditCard, PluggyConfig, Tenant, User
 from app.services import open_finance as of
 from app.services import pluggy as pg
 from app.services.expense_service import ExpenseError, tenant_banks, tenant_categories
@@ -533,6 +533,27 @@ def invoice_check(period: Period = Depends(get_period), ctx: Ctx = Depends(get_c
     _enabled_tenant(ctx)
     return {'month': period.month, 'year': period.year,
             'cards': of.invoice_check(ctx.user.id, period.month, period.year)}
+
+
+@router.get('/investments', summary='Investimentos que os meus bancos informam (só consulta)')
+def bank_investments(ctx: Ctx = Depends(get_ctx)):
+    """Saldo como o banco informa na última leitura. Sem Open Finance liberado: lista vazia."""
+    if ctx.tenant is None or not ctx.tenant.open_finance_enabled:
+        return {'enabled': False, 'items': [], 'total': 0}
+    rows = (BankInvestment.query.join(BankConnection).filter(BankConnection.user_id == ctx.user.id)
+            .filter(func.coalesce(BankInvestment.status, '') != 'TOTAL_WITHDRAWAL')
+            .order_by(BankConnection.id, BankInvestment.name).all())
+    items = [{'id': i.id, 'name': i.name, 'bank': i.connection.label, 'type': i.type, 'subtype': i.subtype,
+              'issuer': i.issuer, 'balance': float(i.balance or 0),
+              'amount_invested': float(i.amount_invested) if i.amount_invested is not None else None,
+              'amount_withdrawal': float(i.amount_withdrawal) if i.amount_withdrawal is not None else None,
+              'currency': i.currency or 'BRL', 'rate': float(i.rate) if i.rate is not None else None,
+              'rate_type': i.rate_type, 'annual_rate': float(i.annual_rate) if i.annual_rate is not None else None,
+              'due_date': i.due_date.isoformat() if i.due_date else None,
+              'updated_at': i.updated_at.isoformat() + 'Z' if i.updated_at else None}
+             for i in rows if i.balance]
+    return {'enabled': True, 'items': items,
+            'total': round(sum(i['balance'] for i in items if i['currency'] == 'BRL'), 2)}
 
 
 @router.get('/summary', summary='Resumo do que chegou dos bancos (sem reler o banco)')

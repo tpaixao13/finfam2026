@@ -861,3 +861,27 @@ def test_c6_debit_card_purchase_is_not_bill_payment(client, family, bank, txs): 
     assert items[3.2]['payment_method'] == 'Cartão de Débito'
     assert 900.0 not in items
     session.remove()
+
+
+def test_bank_investments_read_only(client, family, other_family, bank, txs, monkeypatch):  # noqa: F811
+    """Investimentos do banco aparecem só para quem conectou, com o saldo do banco; resgatado some."""
+    acc, cc, _ = _connect(client, family, bank, txs)
+    inv = [{'id': 'inv-cdb', 'name': 'CDB C6 110% CDI', 'type': 'FIXED_INCOME', 'subtype': 'CDB', 'balance': 2215.37,
+            'amountOriginal': 2200, 'currencyCode': 'BRL', 'rate': 110, 'rateType': 'CDI',
+            'dueDate': '2028-10-15T00:00:00.000Z', 'status': 'ACTIVE', 'issuer': 'Banco C6'},
+           {'id': 'inv-old', 'name': 'CDB resgatado', 'type': 'FIXED_INCOME', 'balance': 0, 'status': 'TOTAL_WITHDRAWAL'}]
+    monkeypatch.setattr(pg, '_http', (lambda inner: lambda m, p, b=None, k=None: {'results': list(inv)}
+        if p.startswith('/investments?') else inner(m, p, b, k))(pg._http))
+    _post_item(family)
+    r = family.get('/pluggy/investments').json()
+    assert r['enabled'] and r['total'] == 2215.37
+    [it] = r['items']
+    assert (it['name'], it['subtype'], it['rate'], it['rate_type'], it['due_date'], it['amount_invested']) == \
+        ('CDB C6 110% CDI', 'CDB', 110.0, 'CDI', '2028-10-15', 2200.0)
+    assert other_family.get('/pluggy/investments').json()['items'] == []
+    inv.pop(0)  # resgatou: na próxima leitura some
+    conn = BankConnection.query.one()
+    of.sync(conn, of.client_for(conn.user_id))
+    session.commit()
+    assert family.get('/pluggy/investments').json()['items'] == []
+    session.remove()

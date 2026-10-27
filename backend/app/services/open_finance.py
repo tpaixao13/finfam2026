@@ -15,7 +15,7 @@ from decimal import Decimal
 from app.core.db import db
 from app.core.security import decrypt_field
 from app.core.types import utcnow
-from app.models import BankAccount, BankBill, BankConnection, BankTransaction, CreditCard, Expense, PluggyConfig, User
+from app.models import BankAccount, BankBill, BankConnection, BankInvestment, BankTransaction, CreditCard, Expense, PluggyConfig, User
 from app.services import pluggy as pg
 from app.services.categorizer import categorize
 from app.services.expense_service import ExpenseData, create_expense
@@ -302,6 +302,62 @@ def sync_accounts(conn: BankConnection, client: pg.PluggyClient) -> None:
     for acc in conn.accounts.all():
         if acc.pluggy_account_id not in seen:
             db.session.delete(acc)  # o banco deixou de devolver a conta
+    db.session.flush()
+    sync_investments(conn, client)
+
+
+def _num(value, digits: str = '0.01') -> Decimal | None:
+    try:
+        return Decimal(str(value)).quantize(Decimal(digits)) if value is not None else None
+    except (ArithmeticError, ValueError):
+        return None
+
+
+def _day(value) -> date | None:
+    try:
+        return date.fromisoformat(str(value)[:10]) if value else None
+    except ValueError:
+        return None
+
+
+def sync_investments(conn: BankConnection, client: pg.PluggyClient) -> None:
+    """Investimentos do banco (só consulta). Banco que não informa ou falha: fica o que já havia."""
+    try:
+        r = client.call('GET', f'/investments?itemId={pg.safe_id(conn.item_id)}&pageSize=500')
+    except pg.PluggyError as exc:
+        log.info('Investimentos do item %s não vieram: %s', conn.item_id, exc)
+        return
+    if not isinstance(r, dict) or not isinstance(r.get('results'), list):
+        return
+    seen = set()
+    for i in r['results']:
+        pid = str((i or {}).get('id') or '')
+        if not _ID.fullmatch(pid):
+            continue
+        inv = BankInvestment.query.filter_by(pluggy_id=pid).first()
+        if inv is not None and inv.connection_id != conn.id:
+            continue
+        if inv is None:
+            inv = BankInvestment(connection_id=conn.id, pluggy_id=pid)
+            db.session.add(inv)
+        seen.add(pid)
+        inv.name = str(i.get('name') or i.get('code') or 'Investimento')[:160]
+        inv.type = str(i.get('type') or '')[:32] or None
+        inv.subtype = str(i.get('subtype') or '')[:48] or None
+        issuer = i.get('issuer')
+        inv.issuer = (str(issuer.get('name') if isinstance(issuer, dict) else issuer or '')[:160]) or None
+        inv.balance = money(i.get('balance'))
+        inv.amount_invested = money(i.get('amountOriginal') if i.get('amountOriginal') is not None else i.get('amount'))
+        inv.amount_withdrawal = money(i.get('amountWithdrawal'))
+        inv.currency = str(i.get('currencyCode') or 'BRL')[:3]
+        inv.rate = _num(i.get('rate'), '0.0001')
+        inv.rate_type = str(i.get('rateType') or '')[:16] or None
+        inv.annual_rate = _num(i.get('annualRate'), '0.0001')
+        inv.due_date = _day(i.get('dueDate'))  # data de vencimento: vale o dia escrito, sem fuso
+        inv.status = str(i.get('status') or '')[:16] or None
+    for inv in conn.investments.all():
+        if inv.pluggy_id not in seen:
+            db.session.delete(inv)  # resgatado ou o banco deixou de informar
     db.session.flush()
 
 

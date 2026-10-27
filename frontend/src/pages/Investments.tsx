@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { LineChart } from '../components/charts'
 import { ConfirmButton, Empty, ErrorBox, Money, PageHeader, Panel, Spinner, Table, Button } from '../components/ui'
 import { api } from '../lib/api'
-import { brl, money, MONTHS_SHORT, pct, rate } from '../lib/format'
+import { brl, dateBR, money, MONTHS_SHORT, pct, rate } from '../lib/format'
 import { useApi } from '../lib/hooks'
 import { useAction, useSession } from '../lib/session'
 import type { Investment } from '../lib/types'
@@ -65,11 +65,58 @@ function CryptoTable({ items, onRemove }: { items: Investment[]; onRemove: (id: 
   )
 }
 
+interface BankInvestment {
+  id: number; name: string; bank: string; type: string | null; subtype: string | null; issuer: string | null
+  balance: number; amount_invested: number | null; amount_withdrawal: number | null; currency: string
+  rate: number | null; rate_type: string | null; annual_rate: number | null; due_date: string | null; updated_at: string | null
+}
+interface BankInvestments { enabled: boolean; items: BankInvestment[]; total: number }
+
+/** "110% do CDI", "IPCA + 6%", "12,5% a.a." — como o banco descreve a taxa. */
+function bankRate(i: BankInvestment): string {
+  const kind = (i.rate_type ?? '').toUpperCase()
+  if (i.rate != null && ['CDI', 'SELIC'].includes(kind)) return `${pct(i.rate, 2)} do ${kind}`
+  if (i.rate != null && kind.startsWith('IPCA')) return `IPCA + ${pct(i.rate, 2)}`
+  if (i.annual_rate != null) return `${pct(i.annual_rate, 2)} a.a.`
+  if (i.rate != null) return `${pct(i.rate, 2)}${kind ? ` ${kind}` : ''}`
+  return '—'
+}
+
+/** Investimentos que os bancos conectados informam: só consulta, com o saldo do banco. */
+function BankInvestmentsPanel({ data }: { data: BankInvestments }) {
+  if (!data.enabled || data.items.length === 0) return null
+  return (
+    <Panel title={<>Nos bancos <small className="muted">· saldo informado pelo banco (Open Finance), só consulta</small></>} flush
+      actions={<b><Money value={data.total} /></b>}>
+      <Table>
+        <thead><tr><th>Investimento</th><th className="hide-sm">Banco</th><th className="num hide-sm">Taxa</th>
+          <th className="hide-sm">Vence</th><th className="num hide-sm">Aplicado</th><th className="num">Saldo hoje</th></tr></thead>
+        <tbody>{data.items.map((i) => {
+          const gain = i.amount_invested != null ? i.balance - i.amount_invested : null
+          return (
+            <tr key={i.id}>
+              <td><b>{i.name}</b>{(i.subtype || i.issuer) && <small className="muted block">{[i.subtype, i.issuer].filter(Boolean).join(' · ')}</small>}
+                <small className="muted block only-sm">{i.bank} · {bankRate(i)}{i.due_date ? ` · vence ${dateBR(i.due_date)}` : ''}</small></td>
+              <td className="hide-sm">{i.bank}</td>
+              <td className="num hide-sm">{bankRate(i)}</td>
+              <td className="hide-sm">{i.due_date ? dateBR(i.due_date) : '—'}</td>
+              <td className="num hide-sm">{i.amount_invested != null ? brl(i.amount_invested) : '—'}</td>
+              <td className="num">{money(i.balance, i.currency)}
+                {gain != null && Math.abs(gain) >= 0.01 && <small className={`block money ${gain < 0 ? 'neg' : 'pos'}`}>{gain >= 0 ? '+' : ''}{brl(gain)}</small>}
+                {i.amount_withdrawal != null && <small className="muted block">líquido {brl(i.amount_withdrawal)}</small>}</td>
+            </tr>)
+        })}</tbody>
+      </Table>
+    </Panel>
+  )
+}
+
 export function InvestmentsPage() {
   const { dataVersion } = useSession()
   const act = useAction()
   const data = useApi(() => api.get<InvestmentsData>('/investments'), [dataVersion])
   const proj = useApi(() => api.get<Projection>('/charts/investments'), [dataVersion])
+  const bank = useApi(() => api.get<BankInvestments>('/pluggy/investments').catch(() => null), [dataVersion])
   const [open, setOpen] = useState(false)
   const d = data.data
   const reloadAll = () => { data.reload(); proj.reload() }
@@ -102,6 +149,7 @@ export function InvestmentsPage() {
               ? <Empty icon="piggy-bank" title="Nenhum investimento na carteira." />
               : <PortfolioTable items={d.fixed} onRemove={remove} />}
           </Panel>
+          {bank.data && <BankInvestmentsPanel data={bank.data} />}
           {d.crypto.length > 0 && <Panel title="Criptomoedas" flush><CryptoTable items={d.crypto} onRemove={remove} /></Panel>}
         </>
       )}

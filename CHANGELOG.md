@@ -130,6 +130,13 @@ pelo bot ou importando extrato, como antes.
 - MCP: `importados_do_banco(situacao)` e `conferir_fatura_com_banco(mes, ano)` — leitura com token de API
   (`GET /pluggy/summary` e `/pluggy/invoice-check`); aprovar continua só pelo site.
 
+**Depois da etapa 4**
+- Investimentos dos bancos (`bank_investments`, `GET /pluggy/investments`): CDB, fundos etc. que o banco
+  informa aparecem em Investimentos › "Nos bancos", com o saldo do banco, taxa e vencimento — só consulta,
+  não entram na carteira lançada à mão. Resgatado some na leitura seguinte. Só quem conectou vê.
+- C6: "DÉBITO DE CARTÃO" na conta é compra no débito (a Pluggy marca como pagamento de cartão).
+- Despesas: atalho para selecionar as vencidas da página e marcar como pagas.
+
 ## 2026.1.0 — versão estável antes do Open Finance
 
 API FastAPI + site React + MCP + bot do Telegram com IA da família, 2FA, investimentos

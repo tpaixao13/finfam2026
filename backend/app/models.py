@@ -246,6 +246,7 @@ class BankConnection(Base):
     created_at = Column(DateTime, default=utcnow)
 
     accounts = relationship('BankAccount', backref='connection', lazy='dynamic', cascade='all, delete-orphan')
+    investments = relationship('BankInvestment', backref='connection', lazy='dynamic', cascade='all, delete-orphan')
 
     @property
     def label(self) -> str:
@@ -274,6 +275,30 @@ class BankAccount(Base):
 
     transactions = relationship('BankTransaction', backref='account', lazy='dynamic', cascade='all, delete-orphan')
     bills = relationship('BankBill', backref='account', lazy='dynamic', cascade='all, delete-orphan')
+
+
+class BankInvestment(Base):
+    """Investimento que o banco informa (CDB, fundo, Tesouro...) — só consulta, com o saldo do banco.
+    Não entra nos investimentos lançados no FinFam."""
+    __tablename__ = 'bank_investments'
+
+    id = Column(Integer, primary_key=True)
+    connection_id = Column(Integer, ForeignKey('bank_connections.id'), nullable=False, index=True)
+    pluggy_id = Column(String(64), nullable=False, unique=True)
+    name = Column(Text, nullable=True)
+    type = Column(String(32), nullable=True)              # FIXED_INCOME | MUTUAL_FUND | SECURITY | EQUITY | ...
+    subtype = Column(String(48), nullable=True)           # CDB | LCI | LCA | TREASURY | ...
+    issuer = Column(Text, nullable=True)
+    balance = Column(Numeric(14, 2), nullable=True)       # quanto vale hoje (bruto)
+    amount_invested = Column(Numeric(14, 2), nullable=True)
+    amount_withdrawal = Column(Numeric(14, 2), nullable=True)  # líquido se resgatar hoje (quando o banco diz)
+    currency = Column(String(3), nullable=True)
+    rate = Column(Numeric(10, 4), nullable=True)
+    rate_type = Column(String(16), nullable=True)         # CDI | IPCA | SELIC | PRE_FIXADO ...
+    annual_rate = Column(Numeric(10, 4), nullable=True)
+    due_date = Column(Date, nullable=True)
+    status = Column(String(16), nullable=True)            # ACTIVE | PENDING | TOTAL_WITHDRAWAL
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class BankBill(Base):
