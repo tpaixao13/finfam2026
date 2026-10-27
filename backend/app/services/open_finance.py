@@ -169,6 +169,17 @@ def sync_bills(acc: BankAccount, client: pg.PluggyClient) -> None:
         acc.due_day = latest.due_date.day
 
 
+def apply_close_day(acc: BankAccount, source: str | None) -> None:
+    """Fechamento do cartão: o que o banco informa manda; sem isso, o que a pessoa digitou; sem os
+    dois, o FinFam calcula pelas compras (infer_close_day, na leitura dos lançamentos)."""
+    if source == 'bank' and acc.close_day:
+        acc.close_source = 'bank'
+    elif acc.manual_close_day:
+        acc.close_day, acc.close_source = acc.manual_close_day, 'manual'
+    else:
+        acc.close_day, acc.close_source = None, None
+
+
 def infer_close_day(acc: BankAccount, raws: list[dict]) -> int | None:
     """Banco que não informa o fechamento (C6, Santander pelo Meu Pluggy): descobre o dia de
     corte pelas compras que vêm com o código da fatura. Só usa se explica 90%+ delas."""
@@ -186,7 +197,7 @@ def infer_close_day(acc: BankAccount, raws: list[dict]) -> int | None:
         return None
     best = max(((sum(bill_of(d, cut, acc.due_day) == b for d, b in samples), cut) for cut in range(1, 29)))
     if best[0] >= 0.9 * len(samples):
-        acc.close_day = best[1]
+        acc.close_day, acc.close_source = best[1], 'inferred'
         return best[1]
     return None
 
@@ -297,6 +308,7 @@ def sync_accounts(conn: BankConnection, client: pg.PluggyClient) -> None:
         acc.available_limit = money(credit.get('availableCreditLimit'))
         close, due = local_date(credit.get('balanceCloseDate')), local_date(credit.get('balanceDueDate'))
         acc.close_day, acc.due_day = (close.day if close else None), (due.day if due else None)
+        apply_close_day(acc, 'bank' if close else None)
         _auto_card(conn, acc)
         apply_card_limit(acc)
     for acc in conn.accounts.all():

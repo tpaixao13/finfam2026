@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from app.core.db import db, get_or_404
 from app.core.deps import Ctx, get_ctx
 from app.models import CategoryRule
+from app.services.categorizer import learn_from_history
 from app.services.serializers import iso
 
 router = APIRouter(prefix='/rules', tags=['rules'])
@@ -49,6 +50,14 @@ def create(body: RuleIn, ctx: Ctx = Depends(get_ctx)):
     db.session.add(rule)
     db.session.commit()
     return {'message': f'Regra criada: "{keyword}" → {rule.category}', 'rule': _out(rule)}
+
+
+@router.post('/learn', summary='Cria regras a partir das despesas já lançadas pela família')
+def learn(ctx: Ctx = Depends(get_ctx)):
+    created = learn_from_history(ctx.uids, _tid(ctx))
+    db.session.commit()
+    return {'created': created, 'message': f'{created} regra(s) criada(s) pelo histórico.' if created
+            else 'Nenhuma regra nova: o histórico não tem padrões claros que já não estejam nas regras.'}
 
 
 @router.put('/{rule_id}', summary='Edita regra')

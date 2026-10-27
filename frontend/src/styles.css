@@ -504,6 +504,8 @@ a.insight:hover { background: #e8edf1; }
 .bank-acc { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem .75rem; padding: .55rem 0; border-top: 1px solid var(--line); }
 .bank-acc-main { min-width: 0; flex: 1 1 14rem; overflow-wrap: anywhere; }
 .bank-acc-map { flex: 0 1 16rem; min-width: 0; max-width: 100%; display: grid; gap: .4rem; }
+.bank-close { display: flex; gap: .4rem; align-items: center; }
+.bank-close input { width: 7.5rem; }
 
 /* Open Finance: revisar importados */
 .review-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: .85rem 1.1rem; border-bottom: 1px solid var(--line); }

@@ -193,7 +193,9 @@ export function RulesPage() {
 
   return (
     <div className="page">
-      <PageHeader title="Regras de categoria" subtitle="Se a descrição contém a palavra, a categoria é sugerida automaticamente — no lançamento e na importação." />
+      <PageHeader title="Regras de categoria"
+        subtitle="Se a descrição contém a palavra, a categoria é sugerida automaticamente — no lançamento, na importação e no Open Finance. Quando você troca a categoria sugerida em Revisar importados, a regra é criada sozinha."
+        actions={<Button variant="ghost" icon="lightning" onClick={() => act(() => api.post<{ message: string }>('/rules/learn'), rules.reload)}>Criar pelo histórico</Button>} />
       <Panel>
         <form className="inline-form" onSubmit={save}>
           <Field label="Palavra-chave"><Input value={keyword} onChange={(e) => setKeyword(e.target.value)} required minLength={2} placeholder="Ex.: IFOOD" /></Field>

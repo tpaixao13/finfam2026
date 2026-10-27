@@ -885,3 +885,69 @@ def test_bank_investments_read_only(client, family, other_family, bank, txs, mon
     session.commit()
     assert family.get('/pluggy/investments').json()['items'] == []
     session.remove()
+
+
+def test_manual_close_day_until_bank_informs(client, family, bank, txs, monkeypatch):  # noqa: F811
+    """Fechamento digitado vale enquanto o banco não informa; quando informa, o do banco manda."""
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    due = of.add_months(date(TODAY.year, TODAY.month, 15), 1)
+    monkeypatch.setattr(pg, '_http', (lambda inner: lambda m, p, b=None, k=None: {'results': [
+        {'id': 'b-open', 'dueDate': f'{due.isoformat()}T03:00:00Z', 'totalAmount': 10.0}]}
+        if p.startswith('/bills?') else inner(m, p, b, k))(pg._http))
+    _post_item(family)
+    cc_out = next(a for c in family.get('/pluggy/items').json()['items'] for a in c['accounts'] if a['type'] == 'CREDIT')
+    assert cc_out['close_day'] is None and cc_out['due_day'] == 15
+    r = family.put(f"/pluggy/accounts/{cc_out['id']}/close-day", json={'close_day': 9})
+    assert r.status_code == 200, r.text
+    assert (r.json()['account']['close_day'], r.json()['account']['close_source']) == (9, 'manual')
+    c = next(c for c in family.get('/cards?light=true').json()['cards'] if c['id'] == card['id'])
+    assert (c['best_buy_day'], c['due_day']) == (9, 15)
+    # o banco passa a informar: o dele manda (o digitado fica guardado)
+    for a in bank['accounts'][ITEM]:
+        if a['type'] == 'CREDIT':
+            a['creditData'] = {'creditLimit': 5000, 'balanceCloseDate': f'{TODAY.year}-{TODAY.month:02d}-07T03:00:00Z',
+                               'balanceDueDate': f'{TODAY.year}-{TODAY.month:02d}-14T03:00:00Z'}
+    family.put(f"/pluggy/accounts/{cc_out['id']}/close-day", json={'close_day': 9})
+    a = next(a for c in family.get('/pluggy/items').json()['items'] for a in c['accounts'] if a['type'] == 'CREDIT')
+    conn = BankConnection.query.one()
+    of.sync(conn, of.client_for(conn.user_id))
+    session.commit()
+    a = next(a for c in family.get('/pluggy/items').json()['items'] for a in c['accounts'] if a['type'] == 'CREDIT')
+    assert (a['close_day'], a['close_source'], a['manual_close_day']) == (7, 'bank', 9)
+    assert family.put(f"/pluggy/accounts/{a['id']}/close-day", json={'close_day': 40}).status_code == 422
+    session.remove()
+
+
+def test_category_rules_learn_and_count(client, family, bank, txs):  # noqa: F811
+    from app.models import CategoryRule
+    from app.services.categorizer import keyword_of
+    assert keyword_of('DL*UBERRIDES') == 'UBERRIDES'
+    assert keyword_of('99APP *99APP SAO PAULO BRA') == '99APP'
+    assert keyword_of('COOP DIADEMA BRA') == 'COOP'
+    assert keyword_of('IFD*57.834.531 ELAINE') == 'ELAINE'
+    assert keyword_of('MERCADOLIVRE*OBEROINF') == 'OBEROINF'
+    assert keyword_of('DÉBITO DE CARTÃO') is None
+    acc, cc, _ = _connect(client, family, bank, txs)
+    txs[cc] += [{'id': 'r1', 'type': 'DEBIT', 'amount': 26.9, 'date': day(3), 'description': 'TELLERINA COMERCIO DE BRA'},
+                {'id': 'r2', 'type': 'DEBIT', 'amount': 31.0, 'date': day(2), 'description': 'TELLERINA COMERCIO DE BRA'}]
+    _post_item(family)
+    items = family.get('/pluggy/transactions').json()['items']
+    first = next(t for t in items if t['amount'] == 26.9)
+    assert first['category'] == 'Outros'
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': first['id'], 'category': 'Lazer'}]})
+    rule = CategoryRule.query.filter_by(keyword='TELLERINA').one()
+    assert rule.category == 'Lazer'
+    session.remove()
+    second = next(t for t in family.get('/pluggy/transactions').json()['items'] if t['amount'] == 31.0)
+    assert second['category'] == 'Lazer'            # aprendeu
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': second['id'], 'category': 'Lazer'}]})
+    assert CategoryRule.query.filter_by(keyword='TELLERINA').one().match_count >= 1   # "Usos" sobe
+    session.remove()
+    # histórico: 3 despesas iguais viram regra
+    for i in range(3):
+        family.post('/expenses', json={'description': f'PADARIA NOBREGA {i}', 'amount': 10, 'category': 'Alimentação',
+                                       'payment_method': 'PIX', 'day': 1, 'month': TODAY.month, 'year': TODAY.year})
+    r = family.post('/rules/learn').json()
+    assert r['created'] >= 1
+    assert any(x['keyword'] == 'PADARIA' and x['category'] == 'Alimentação' for x in family.get('/rules').json())
+    session.remove()

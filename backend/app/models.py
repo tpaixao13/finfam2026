@@ -270,6 +270,8 @@ class BankAccount(Base):
     available_limit = Column(Numeric(14, 2), nullable=True)
     close_day = Column(Integer, nullable=True)            # dia de fechamento da fatura (cartão)
     due_day = Column(Integer, nullable=True)              # dia de vencimento da fatura (cartão)
+    manual_close_day = Column(Integer, nullable=True)     # fechamento digitado pela pessoa (vale se o banco não diz)
+    close_source = Column(String(8), nullable=True)       # bank | manual | inferred — de onde veio o close_day
     card_id = Column(Integer, ForeignKey('credit_cards.id', ondelete='SET NULL'), nullable=True)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 

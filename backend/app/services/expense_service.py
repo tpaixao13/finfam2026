@@ -7,8 +7,8 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import func
 
 from app.core.db import db
-from app.models import CreditCard, Expense, InstallmentGroup, RecurringGroup
-from app.services.categorizer import is_duplicate
+from app.models import CreditCard, Expense, InstallmentGroup, RecurringGroup, User
+from app.services.categorizer import count_rule_use, is_duplicate
 from app.services.finance import (BANK_PAYMENTS, CATEGORIES, CREDIT, DEBIT, MONTH_NAMES_SHORT,
                                   brl, month_offset)
 from app.services.serializers import expense_due_date
@@ -117,6 +117,8 @@ def create_expense(uids: list, data: ExpenseData) -> dict:
     card, bill_month, bill_year = resolve_card(uids, data.payment_method, data.card_id,
                                                data.day, data.month, data.year)
     card_id = card.id if card else None
+    owner = db.session.get(User, data.user_id)
+    count_rule_use(owner.tenant_id if owner else None, data.description, data.category)  # "Usos" da regra
     bank = _bank_for(data.payment_method, data.bank, card)
     amount = Decimal(str(data.amount))
 

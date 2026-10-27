@@ -136,6 +136,12 @@ pelo bot ou importando extrato, como antes.
   não entram na carteira lançada à mão. Resgatado some na leitura seguinte. Só quem conectou vê.
 - C6: "DÉBITO DE CARTÃO" na conta é compra no débito (a Pluggy marca como pagamento de cartão).
 - Despesas: atalho para selecionar as vencidas da página e marcar como pagas.
+- Regras de categoria passam a ser preenchidas: em Revisar importados, trocar a categoria sugerida cria
+  (ou corrige) a regra da palavra principal (`categorizer.keyword_of`, sem prefixos como DL/IFD/cidade);
+  botão "Criar pelo histórico" (`POST /rules/learn`: palavra em 3+ despesas, 80%+ na mesma categoria);
+  "Usos" conta cada despesa salva com a categoria da regra.
+- Cartão do banco: dia de fechamento digitado (`bank_accounts.manual_close_day`, `PUT /pluggy/accounts/{id}/close-day`)
+  vale enquanto o banco não informa; o do banco sempre manda. `close_source`: bank | manual | inferred.
 
 ## 2026.1.0 — versão estável antes do Open Finance
 

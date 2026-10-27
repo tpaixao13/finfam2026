@@ -9,6 +9,9 @@ Prioridade:
 Retorna (categoria, fonte) onde fonte é 'rule' | 'history' | None.
 """
 
+import re
+from collections import Counter, defaultdict
+
 from sqlalchemy import func
 from app.core.db import db
 from app.models import CategoryRule, Expense
@@ -104,3 +107,80 @@ def is_duplicate(user_id: int, year: int, month: int, day: int,
             Expense.description.like(desc_prefix + '%'),
         ).exists()
     ).scalar()
+
+
+# ── Aprender regras ──────────────────────────────────────────────────────────
+
+# palavras que não identificam o estabelecimento (prefixos de maquininha, cidade, banco, marketplace)
+_GENERIC = set('''
+DL EC IFD MP PG PAG PAGTO PGTO PAGAMENTO PAGAMENTOS PIX TED DOC TRANSF TRANSFERENCIA TRANSFERÊNCIA COMPRA COMPRAS
+CARTAO CARTÃO DEBITO DÉBITO CREDITO CRÉDITO DEB CRED BRA BRASIL SAO SÃO PAULO RIO JANEIRO DIADEMA SANTO ANDRE
+BERNARDO CAMPO CAMPOS BELO HORIZONTE LTDA EIRELI COMERCIO COMÉRCIO SERVICOS SERVIÇOS DAS DOS PARC PARCELA
+BOLETO TARIFA ESTORNO REFUND APLICACAO APLICAÇÃO THE AND LOJA LOJAS SHOP STORE ONLINE WWW COM NET
+MERCADOLIVRE MERCADOPAGO MERCADO PAYPAL PICPAY AMAZON SHOPEE ALIEXPRESS SHEIN PAGSEGURO PAGBANK STONE CIELO
+SUMUP REDE GETNET INFINITEPAY TON ASAAS SUPER ATACADO
+'''.split())
+_TOKEN = re.compile(r'[0-9A-ZÀ-Ü]+')
+
+
+def keyword_of(description: str) -> str | None:
+    """A palavra que identifica o estabelecimento: "DL*UBERRIDES" → UBERRIDES, "COOP DIADEMA BRA" → COOP,
+    "99APP *99APP SAO PAULO" → 99APP. Nada útil (ex.: "DÉBITO DE CARTÃO") → None."""
+    for tok in _TOKEN.findall((description or '').upper()):
+        if len(tok) >= 3 and not tok.isdigit() and tok not in _GENERIC:
+            return tok[:30]
+    return None
+
+
+def _first_rule(description: str, tenant_id: int) -> CategoryRule | None:
+    desc_upper = (description or '').upper()
+    for rule in (CategoryRule.query.filter_by(tenant_id=tenant_id)
+                 .order_by(CategoryRule.match_count.desc(), CategoryRule.keyword).all()):
+        if rule.keyword.upper() in desc_upper:
+            return rule
+    return None
+
+
+def count_rule_use(tenant_id: int | None, description: str, category: str) -> None:
+    """Despesa salva com a categoria que a regra daria: +1 em "Usos" (sem commit)."""
+    if not tenant_id or not category:
+        return
+    rule = _first_rule(description, tenant_id)
+    if rule is not None and rule.category == category:
+        rule.match_count = (rule.match_count or 0) + 1
+
+
+def learn_rule(tenant_id: int | None, description: str, category: str) -> CategoryRule | None:
+    """A pessoa escolheu outra categoria: cria (ou corrige) a regra da palavra principal (sem commit)."""
+    keyword = keyword_of(description)
+    if not tenant_id or not keyword or not category or category == 'Outros':
+        return None
+    rule = CategoryRule.query.filter_by(tenant_id=tenant_id, keyword=keyword).first()
+    if rule is None:
+        rule = CategoryRule(tenant_id=tenant_id, keyword=keyword, category=category[:50])
+        db.session.add(rule)
+    elif rule.category != category:
+        rule.category = category[:50]
+    db.session.flush()
+    return rule
+
+
+def learn_from_history(uids: list, tenant_id: int, min_count: int = 3, share: float = 0.8) -> int:
+    """Cria regras a partir das despesas da família: palavra que aparece em 3+ despesas e em 80%+
+    delas com a mesma categoria (fora "Outros"). Não mexe em regra que já existe. Devolve quantas criou."""
+    by_word: dict[str, Counter] = defaultdict(Counter)
+    rows = db.session.query(Expense.description, Expense.category).filter(Expense.user_id.in_(uids or [0])).all()
+    for desc, cat in rows:
+        word = keyword_of(desc or '')
+        if word and cat:
+            by_word[word][cat] += 1
+    have = {r.keyword.upper() for r in CategoryRule.query.filter_by(tenant_id=tenant_id).all()}
+    created = 0
+    for word, cats in sorted(by_word.items()):
+        total = sum(cats.values())
+        cat, n = cats.most_common(1)[0]
+        if total >= min_count and n >= share * total and cat != 'Outros' and word not in have:
+            db.session.add(CategoryRule(tenant_id=tenant_id, keyword=word, category=cat[:50], match_count=n))
+            created += 1
+    db.session.flush()
+    return created

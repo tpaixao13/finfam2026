@@ -20,6 +20,7 @@ interface BankAccount {
   id: number; type: 'BANK' | 'CREDIT'; subtype: string | null; name: string | null; last_digits: string | null
   currency: string; balance: number | null; credit_limit: number | null; card_id: number | null; card_label: string | null
   available_limit: number | null; close_day: number | null; due_day: number | null
+  close_source: 'bank' | 'manual' | 'inferred' | null; manual_close_day: number | null
 }
 interface Connection {
   id: number; item_id: string; bank_name: string | null; connector_name: string | null; auto_import: boolean; bank_color: string | null; status: string | null
@@ -80,6 +81,29 @@ function when(iso: string | null) {
   return iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : 'nunca'
 }
 
+const SOURCE = { bank: 'do banco', manual: 'digitado por você', inferred: 'calculado pelas compras' } as const
+
+/** Fechamento digitado: vale enquanto o banco não informa o dele (vazio = o FinFam calcula). */
+function CloseDayField({ acc, onChange }: { acc: BankAccount; onChange: () => void }) {
+  const act = useAction()
+  const [day, setDay] = useState(acc.manual_close_day ? String(acc.manual_close_day) : '')
+  const [busy, setBusy] = useState(false)
+  const changed = day !== (acc.manual_close_day ? String(acc.manual_close_day) : '')
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBusy(true)
+    await act(() => api.put<{ message: string }>(`/pluggy/accounts/${acc.id}/close-day`, { close_day: day ? Number(day) : null }), onChange)
+    setBusy(false)
+  }
+  return (
+    <form className="bank-close" onSubmit={save} title="O banco não informa o fechamento. O que você digitar vale até ele passar a informar.">
+      <Input type="number" min={1} max={31} inputMode="numeric" aria-label="Dia de fechamento da fatura" placeholder="Fecha dia"
+        value={day} onChange={(e) => setDay(e.target.value)} />
+      {changed && <Button type="submit" variant="ghost" icon="check2" busy={busy}>Salvar</Button>}
+    </form>
+  )
+}
+
 function AccountRow({ acc, cards, onChange }: { acc: BankAccount; cards: Card[]; onChange: () => void }) {
   const act = useAction()
   const [busy, setBusy] = useState(false)
@@ -94,7 +118,7 @@ function AccountRow({ acc, cards, onChange }: { acc: BankAccount; cards: Card[];
             Fatura atual {money(acc.balance == null ? null : Math.abs(acc.balance), acc.currency)}
             {acc.credit_limit ? <> · limite {money(acc.credit_limit, acc.currency)}</> : null}
             {acc.available_limit != null ? <> · disponível {money(acc.available_limit, acc.currency)}</> : null}
-            {acc.close_day && acc.due_day ? <> · fecha dia {acc.close_day}, vence dia {acc.due_day}</> : null}
+            {acc.close_day && acc.due_day ? <> · fecha dia {acc.close_day} ({SOURCE[acc.close_source ?? 'inferred']}), vence dia {acc.due_day}</> : null}
           </> : `Saldo ${money(acc.balance, acc.currency)}`}
         </div>
         {credit && acc.card_id && acc.credit_limit ? <div className="small">Limite do cartão no FinFam vem do banco.</div> : null}
@@ -106,6 +130,7 @@ function AccountRow({ acc, cards, onChange }: { acc: BankAccount; cards: Card[];
             options={cards.map((c) => ({ value: c.id, label: c.label }))}
             onChange={(e) => act(() => api.put<{ message: string }>(`/pluggy/accounts/${acc.id}`,
               { card_id: e.target.value ? Number(e.target.value) : null }), onChange)} />
+          {acc.close_source !== 'bank' && <CloseDayField acc={acc} onChange={onChange} />}
           {!acc.card_id && acc.last_digits && (
             <Button variant="ghost" icon="plus" busy={busy} onClick={async () => {
               setBusy(true)

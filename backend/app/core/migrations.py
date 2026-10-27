@@ -66,6 +66,8 @@ _ALTERS = [
     'ALTER TABLE bank_accounts ADD COLUMN available_limit NUMERIC(14, 2)',
     'ALTER TABLE bank_accounts ADD COLUMN close_day INTEGER',
     'ALTER TABLE bank_accounts ADD COLUMN due_day INTEGER',
+    'ALTER TABLE bank_accounts ADD COLUMN manual_close_day INTEGER',
+    'ALTER TABLE bank_accounts ADD COLUMN close_source VARCHAR(8)',
     'ALTER TABLE bank_transactions ADD COLUMN bill_year INTEGER',
     'ALTER TABLE bank_transactions ADD COLUMN bill_month INTEGER',
     'ALTER TABLE bank_transactions ADD COLUMN bill_ref VARCHAR(64)',

@@ -30,6 +30,7 @@ from app.core.types import utcnow
 from app.models import BankAccount, BankInvestment, Expense, BankConnection, BankTransaction, CreditCard, PluggyConfig, Tenant, User
 from app.services import open_finance as of
 from app.services import pluggy as pg
+from app.services.categorizer import learn_rule
 from app.services.expense_service import ExpenseError, tenant_banks, tenant_categories
 from app.services.finance import BANKS
 
@@ -202,6 +203,7 @@ def _account_out(acc: BankAccount) -> dict:
         'credit_limit': float(acc.credit_limit) if acc.credit_limit is not None else None,
         'available_limit': float(acc.available_limit) if acc.available_limit is not None else None,
         'close_day': acc.close_day, 'due_day': acc.due_day,
+        'close_source': acc.close_source, 'manual_close_day': acc.manual_close_day,
         'card_id': acc.card_id,
         'card_label': (f"{card.nickname or card.bank or 'Cartão'} •••• {card.last_digits}" if card else None),
     }
@@ -379,6 +381,44 @@ def map_account(account_id: int, body: AccountIn, ctx: Ctx = Depends(get_ctx_ses
     return {'message': msg, 'account': _account_out(acc)}
 
 
+class CloseDayIn(BaseModel):
+    close_day: int | None = Field(None, ge=1, le=31, description='Dia de fechamento da fatura (vazio = o FinFam calcula)')
+
+
+@router.put('/accounts/{account_id}/close-day', summary='Dia de fechamento do cartão, quando o banco não informa')
+def set_close_day(account_id: int, body: CloseDayIn, ctx: Ctx = Depends(get_ctx_session)):
+    """Vale só enquanto o banco não informar o fechamento; quando informar, o do banco manda.
+    Relê o banco na hora para refazer o mês da fatura das compras."""
+    _enabled_tenant(ctx)
+    acc = db.session.get(BankAccount, account_id)
+    if acc is None or acc.connection.user_id != ctx.user.id:
+        raise HTTPException(status_code=404, detail='Conta não encontrada.')
+    if acc.type != 'CREDIT':
+        raise HTTPException(status_code=422, detail='Fechamento: só cartões de crédito têm fatura.')
+    acc.manual_close_day = body.close_day
+    from_bank = acc.close_source == 'bank'
+    of.apply_close_day(acc, 'bank' if from_bank else None)
+    of.apply_card_limit(acc)
+    conn = acc.connection
+    conn.needs_sync = True
+    db.session.commit()
+    client = of.client_for(ctx.user.id)
+    if client is not None and not from_bank:
+        try:
+            of.sync(conn, client)
+            db.session.commit()
+        except pg.PluggyError as exc:
+            db.session.rollback()
+            log.warning('Releitura após mudar o fechamento falhou: %s', exc)
+    if from_bank:
+        msg = f'Guardado, mas o banco já informa o fechamento (dia {acc.close_day}) e ele é que vale.'
+    elif body.close_day:
+        msg = f'Fechamento dia {body.close_day} guardado. Vale até o banco passar a informar o dele.'
+    else:
+        msg = 'Fechamento manual removido: o FinFam volta a calcular pelas compras.'
+    return {'message': msg, 'account': _account_out(acc)}
+
+
 @router.post('/accounts/{account_id}/card', summary='Cria no FinFam o cartão do banco (limite e datas vêm do banco)')
 def create_card(account_id: int, ctx: Ctx = Depends(get_ctx_session)):
     _enabled_tenant(ctx)
@@ -462,12 +502,16 @@ def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_session)):
     allowed = tenant_categories(ctx.uids)
     done = known = 0
     # mais antigos primeiro: a parcela 6/12 cria a série e a 7/12 do mesmo lote é reconhecida
-    for item in sorted(body.items, key=lambda i: (rows[i.id].date, rows[i.id].installment_number or 0)):
+    items = [i for i in body.items if i.id in rows]
+    for item in sorted(items, key=lambda i: (rows[i.id].date, rows[i.id].installment_number or 0)):
         tx = rows[item.id]
         if tx.status == 'imported':
             continue
+        category = of.valid_category(item.category, allowed)
+        if tx.kind != 'refund' and category != of.suggestion(tx, ctx.uids, ctx.tenant_id)['category']:
+            learn_rule(ctx.tenant_id, tx.description, category)  # trocou a sugestão: a próxima já vem certa
         try:
-            of.approve(tx, ctx.uids, of.valid_category(item.category, allowed), item.description, item.payment_method)
+            of.approve(tx, ctx.uids, category, item.description, item.payment_method)
         except ExpenseError as exc:
             db.session.rollback()
             raise HTTPException(status_code=422, detail=f'{tx.description}: {exc}')
