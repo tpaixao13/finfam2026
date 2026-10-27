@@ -483,3 +483,21 @@ def test_bank_question_without_ai():
     assert 'Total investido</b>: R$ 3.839,92' in tg.last['text'] and 'CDB - BANCO C6 S.A. (C6 Bank)' in tg.last['text']
     b.handle(_msg(91, 'almoço 25 no banco'))  # gasto com valor segue para o lançamento
     assert 'Bancos conectados' not in tg.last['text']
+
+
+def test_investments_and_balance_questions_without_ai():
+    tg = FakeTelegram()
+    b = Bot(tg, StubApi({}, ai=(False, False)), 'https://finfam.test')
+    b.handle(_msg(92, 'quais os meus investimentos?'))
+    assert 'CDB - BANCO C6 S.A. (C6 Bank)' in tg.last['text']
+    b.handle(_msg(92, 'qual o saldo da conta do C6?'))
+    assert 'Saldo nas contas</b>: R$ 1.832,44' in tg.last['text']
+    b.handle(_msg(92, 'quanto tenho na conta'))
+    assert 'Saldo nas contas' in tg.last['text']
+
+
+def test_ai_investments_intent():
+    tg = FakeTelegram()
+    b = Bot(tg, StubApi({'intent': 'investments', 'reply': ''}), 'https://finfam.test')
+    b.handle(_msg(93, 'como estão minhas economias?'))
+    assert 'Total investido' in tg.last['text']

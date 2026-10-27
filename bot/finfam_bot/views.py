@@ -9,7 +9,7 @@ HELP = ('<b>O que eu faço</b>\n'
         '/resumo — resumo do mês\n'
         '/lancar — lançar um gasto passo a passo\n'
         '/investir — registrar um investimento (real, dólar, euro…)\n'
-        '/carteira — seus investimentos em reais\n'
+        '/carteira — seus investimentos (lançados e dos bancos)\n'
         '/banco ou /openfinance — bancos conectados: o que chegou, saldo, investimentos e se a fatura bate\n'
         '/cancelar — cancela o lançamento em andamento\n'
         '/desconectar — desliga este Telegram da sua conta\n\n'
@@ -17,7 +17,8 @@ HELP = ('<b>O que eu faço</b>\n'
         '<i>gastei 87,50 no mercado no cartão Inter em 3x</i>\n'
         '<i>quanto gastei de alimentação este mês?</i>\n'
         '<i>o que comprei dia 20/10?</i> · <i>contas dos próximos 5 dias</i>\n'
-        '<i>qual o valor da fatura do cartão de novembro?</i> · <i>chegou algo do banco?</i>')
+        '<i>qual o valor da fatura do cartão de novembro?</i> · <i>chegou algo do banco?</i>\n'
+        '<i>quais os meus investimentos?</i> · <i>qual o saldo da conta do C6?</i>')
 
 
 def draft_text(d: dict, title: str = 'Confere o lançamento?') -> str:
@@ -167,6 +168,20 @@ def invoices_text(r: dict, bank: str | None = None) -> str:
         due = f' · vence {dm(i["due_date"])}' if i.get('due_date') else ''
         status = '✅ paga' if i['status'] == 'paga' else '⏳ aberta'
         lines.append(f'• {h(i["label"])}: {brl(i["total"])}{due} · {status}')
+    return '\n'.join(lines)
+
+
+def balances_text(r: dict | None) -> str:
+    """Saldo das contas correntes conectadas (Open Finance)."""
+    if not r or not r.get('enabled'):
+        return '🏦 O saldo das contas vem dos bancos conectados (Open Finance), que não está liberado para a sua família.'
+    if not r['items']:
+        return '🏦 Nenhuma conta corrente conectada. Conecte em <b>Contas conectadas</b> no site.'
+    lines = [f"💵 <b>Saldo nas contas</b>: {brl(r['total'])}"]
+    for a in r['items']:
+        when = f" · atualizado {dm(a['updated_at'][:10])}" if a.get('updated_at') else ''
+        digits = f" •••• {h(a['last_digits'])}" if a.get('last_digits') else ''
+        lines.append(f"• {h(a['bank'])}{digits}: {brl(a['balance'])}{when}")
     return '\n'.join(lines)
 
 

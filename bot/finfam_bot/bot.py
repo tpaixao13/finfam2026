@@ -19,7 +19,7 @@ from finfam_bot.fmt import btn, dm, h
 from finfam_bot.http import ApiError, FinFam, Telegram
 from finfam_bot.invest_flow import InvestFlow
 from finfam_bot.parsers import parse_amount, parse_date, quick_parse  # noqa: F401  (usados pelos testes)
-from finfam_bot.views import (HELP, bank_text, bills_view, draft_text, invoices_text, portfolio_text, purchases_text,
+from finfam_bot.views import (HELP, balances_text, bank_text, bills_view, draft_text, invoices_text, portfolio_text, purchases_text,
                               spending_text, summary_text)
 
 # perguntas sobre os bancos conectados — respondidas sem IA
@@ -30,6 +30,11 @@ BANK_QUESTION = re.compile(
     r'|^\s*(banco|bancos|importados)\s*\??\s*$'
     r'|\bfatura\b.{0,40}\bbate\b.{0,30}\bbanco\b|\bpara revisar\b'
     r'|\b(falta|faltam|pendente\w*)\b.{0,20}\brevis', re.I)
+# investimentos e saldo das contas — também sem IA
+INVEST_QUESTION = re.compile(r'\b(investiment\w*|investid[oa]s?|minha carteira|aplica[çc](ão|ões|oes)|meus? cdbs?|rendimento\w*)\b', re.I)
+BALANCE_QUESTION = re.compile(
+    r'\bsaldo\b.{0,25}\b(conta|contas|banco|bancos|c6|nubank|inter|caixa|santander|ita[uú]|bradesco)\b'
+    r'|\bquanto (eu )?tenho\b.{0,20}\b(na conta|nas contas|no banco|nos bancos)\b', re.I)
 _AMOUNT = re.compile(r'(?<![a-z])\d+(?:[.,]\d{1,2})?\b', re.I)  # valor solto ("25"), não o 6 de "C6"
 
 log = logging.getLogger('finfam.bot')
@@ -211,6 +216,9 @@ class Bot:
     def summary(self, chat_id: int) -> None:
         self.tg.send(chat_id, summary_text(self.api.get(chat_id, '/dashboard')))
 
+    def balances(self, chat_id: int) -> None:
+        self.tg.send(chat_id, balances_text(self.optional(chat_id, '/pluggy/balances')))
+
     def portfolio(self, chat_id: int) -> None:
         self.tg.send(chat_id, portfolio_text(self.api.get(chat_id, '/investments'),
                                              self.optional(chat_id, '/pluggy/investments')))
@@ -236,9 +244,16 @@ class Bot:
                 '• <b>Sem IA:</b> use /lancar, ou escreva no formato simples: <b>almoço 25 no pix</b>.')
 
     def free_text(self, chat_id: int, text: str) -> None:
-        if BANK_QUESTION.search(text) and not _AMOUNT.search(text):  # "chegou algo do banco?" (com ou sem IA)
-            self.bank(chat_id)
-            return
+        if not _AMOUNT.search(text):  # perguntas que não precisam de IA
+            if BALANCE_QUESTION.search(text):
+                self.balances(chat_id)
+                return
+            if INVEST_QUESTION.search(text):
+                self.portfolio(chat_id)
+                return
+            if BANK_QUESTION.search(text):  # "chegou algo do banco?"
+                self.bank(chat_id)
+                return
         status = self.ai_status(chat_id)
         if not status['on']:  # verifica antes: sem IA, só o formato simples
             if not self.quick_flow(chat_id, text):
@@ -271,6 +286,15 @@ class Bot:
             self.tg.send(chat_id, invoices_text(r, q.get('bank')))
         elif intent == 'summary':
             self.summary(chat_id)
+        elif intent == 'investments':
+            if _AMOUNT.search(text):  # "investi 500 no CDB": abre o passo a passo de registrar
+                self.invest.start(chat_id)
+            else:
+                self.portfolio(chat_id)
+        elif intent == 'balance':
+            self.balances(chat_id)
+        elif intent == 'bank':
+            self.bank(chat_id)
         elif intent == 'expense' and r.get('draft'):
             self.ai_expense(chat_id, r['draft'])
         else:

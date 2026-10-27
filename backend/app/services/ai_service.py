@@ -208,12 +208,12 @@ def parse_json(text: str) -> dict:
 
 # ── Interpretação de mensagens ───────────────────────────────────────────────
 
-INTENTS = ('expense', 'bills', 'spending', 'purchases', 'invoices', 'summary', 'chat')
+INTENTS = ('expense', 'bills', 'spending', 'purchases', 'invoices', 'summary', 'investments', 'balance', 'bank', 'chat')
 QUERY_INTENTS = ('bills', 'spending', 'purchases', 'invoices')
 
 _SYSTEM = """Você é o assistente do FinFam, app de controle financeiro familiar no Brasil.
 Interprete a mensagem do usuário e responda SOMENTE com um objeto JSON, sem texto fora dele:
-{"intent": "expense" | "bills" | "spending" | "purchases" | "invoices" | "summary" | "chat",
+{"intent": "expense" | "bills" | "spending" | "purchases" | "invoices" | "summary" | "investments" | "balance" | "bank" | "chat",
  "expense": {"description": str, "amount": number, "payment_method": str, "card_id": int|null,
              "installments": int|null, "category": str|null, "date": "AAAA-MM-DD"|null, "person_id": int|null} | null,
  "query": {"days": int|null, "category": str|null, "text": str|null, "payment_method": str|null,
@@ -243,7 +243,12 @@ Regras:
 - "purchases": pergunta O QUE comprou/lançou num dia ou período ("o que comprei dia 20/10?", "compras da semana
   passada"). query.date_from e query.date_to (o mesmo dia se for um dia só); category/text se a pessoa filtrar.
 - "summary": quer o resumo geral do mês (renda, gastos, saldo), sem categoria específica.
-- "chat": qualquer outra coisa; em "reply" explique em 1 frase o que você consegue fazer.
+- "investments": pergunta sobre investimentos/aplicações/carteira ("quais meus investimentos?", "quanto tenho
+  investido?", "quanto rende meu CDB?"). Não é lançar: "investi 500 no CDB" também é "investments".
+- "balance": pergunta o SALDO da conta corrente/banco ("quanto tenho na conta?", "saldo do C6?").
+- "bank": pergunta sobre os bancos conectados/Open Finance ("chegou algo do banco?", "a fatura bate com o banco?").
+- "chat": qualquer outra coisa; em "reply" explique em 1 frase o que você consegue fazer (lançar gastos,
+  contas a pagar, faturas, gastos por categoria, resumo, investimentos, saldo e bancos conectados).
 - "reply": frase curta em português para o usuário."""
 
 _WEEKDAYS = ['segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado', 'domingo']
