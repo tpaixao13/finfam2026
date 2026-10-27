@@ -23,16 +23,25 @@ def day(n_ago: int) -> str:
 def txs(bank):  # noqa: F811
     """Acrescenta /transactions à Pluggy de mentira: {account_id: [lançamentos]}."""
     data: dict[str, list] = {}
+    state = {'fail': False}
+    data_state = state
     inner = pg._http
 
     def http(method, path, body=None, api_key=None):
         if path.startswith('/transactions?'):
+            raise pg.PluggyError('A Pluggy respondeu 410.', 410)  # endpoint antigo desligado
+        if path.startswith('/v2/transactions?'):
             params = dict(p.split('=', 1) for p in path.split('?', 1)[1].split('&'))
-            since = params['from']
+            if state['fail']:
+                raise pg.PluggyError('A Pluggy respondeu 500.', 500)
+            since = params.get('dateFrom', '')[:10]
             rows = [t for t in data.get(params['accountId'], []) if t['date'][:10] >= since]
-            return {'total': len(rows), 'totalPages': 1, 'page': 1, 'results': rows}
+            start = int(params.get('after', 0))  # páginas de 2 para exercitar o cursor
+            nxt = f"?accountId={params['accountId']}&after={start + 2}" if start + 2 < len(rows) else None
+            return {'results': rows[start:start + 2], 'next': nxt}
         return inner(method, path, body, api_key)
     pg._http = http
+    data['__state__'] = data_state  # type: ignore[assignment]
     return data
 
 
@@ -198,4 +207,18 @@ def test_disconnect_keeps_approved_expenses(client, family, bank, txs):  # noqa:
     assert BankTransaction.query.count() == 0  # dados do banco apagados
     assert Expense.query.filter_by(description='Uber').count() == 1  # a despesa aprovada é sua
     _save(family)  # chave continua
+    session.remove()
+
+
+def test_bank_is_saved_even_if_transactions_fail(client, family, bank, txs):  # noqa: F811
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    for i in range(5):  # mais de uma página
+        txs[acc].append({'id': f't-{i}', 'type': 'DEBIT', 'amount': -(10.0 + i), 'date': day(i), 'description': f'Compra {i}'})
+    txs['__state__']['fail'] = True
+    r = family.post('/pluggy/items', json={'item_id': ITEM})
+    assert r.status_code == 200, r.text  # banco e contas ficam salvos
+    assert BankConnection.query.one().needs_sync is True
+    session.remove()
+    txs['__state__']['fail'] = False
+    assert family.get('/pluggy/transactions').json()['counts']['pending'] == 5  # a próxima leitura traz tudo
     session.remove()

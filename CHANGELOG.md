@@ -41,6 +41,8 @@ pelo bot ou importando extrato, como antes.
 - `python -m scripts.pluggy_sync` (cron de hora em hora) relê quem ficou sem novidade há 24 h.
 - Desconectar apaga os lançamentos vindos do banco; as despesas aprovadas continuam.
 - Tabela nova: `bank_transactions`; colunas `bank_connections.import_from` e `tx_synced_at`.
+- Lançamentos lidos pelo `GET /v2/transactions` (cursor): a Pluggy desligou o `/transactions` antigo
+  (410) nas aplicações de produção. Se só os lançamentos falharem, o banco fica salvo e a leitura tenta de novo.
 
 **Próximas etapas**
 4. Conferência de fatura, aviso no bot e ferramenta no MCP.

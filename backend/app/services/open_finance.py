@@ -21,8 +21,7 @@ from app.services.finance import CATEGORIES, CREDIT, DEBIT
 
 log = logging.getLogger('finfam.pluggy')
 
-PAGE_SIZE = 500
-MAX_PAGES = 20           # 10 mil lançamentos por conta e leitura é mais que suficiente
+MAX_PAGES = 20           # páginas de 500: 10 mil lançamentos por conta e leitura bastam
 RESYNC_DAYS = 40         # a cada leitura, relê os últimos 40 dias (pendentes viram lançados)
 WINDOW_MONTHS = (1, 3, 6, 12)
 _BRT = timezone(timedelta(hours=-3))
@@ -212,15 +211,21 @@ def _is_expense(acc: BankAccount, raw: dict) -> bool:
     return raw.get('type') == 'DEBIT' or (raw.get('type') is None and amount < 0)
 
 
+_NEXT = re.compile(r'\?[A-Za-z0-9=&%._:+\-]{1,1000}')
+
+
 def _fetch(client: pg.PluggyClient, account_id: str, since: date) -> list[dict]:
-    out, page = [], 1
-    while page <= MAX_PAGES:
-        r = client.call('GET', f'/transactions?accountId={pg.safe_id(account_id)}'
-                               f'&from={since.isoformat()}&pageSize={PAGE_SIZE}&page={page}') or {}
+    """GET /v2/transactions com cursor (o /transactions antigo foi desligado pela Pluggy).
+    `next` vem pronto ("?accountId=...&after=...") e é colado no caminho."""
+    out = []
+    path = f'/v2/transactions?accountId={pg.safe_id(account_id)}&dateFrom={since.isoformat()}T00:00:00.000Z'
+    for _ in range(MAX_PAGES):
+        r = client.call('GET', path) or {}
         out.extend(r.get('results') or [])
-        if page >= int(r.get('totalPages') or 1):
+        nxt = r.get('next')
+        if not nxt or not isinstance(nxt, str) or not _NEXT.fullmatch(nxt):
             break
-        page += 1
+        path = '/v2/transactions' + nxt
     return out
 
 
@@ -270,9 +275,16 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
 
 
 def sync(conn: BankConnection, client: pg.PluggyClient, today: date | None = None) -> int:
-    """Relê banco, contas e lançamentos."""
+    """Relê banco, contas e lançamentos. Se só os lançamentos falharem, banco e contas
+    ficam salvos e a próxima leitura tenta de novo (needs_sync continua ligado)."""
     sync_accounts(conn, client)
-    count = sync_transactions(conn, client, today)
+    try:
+        with db.session.begin_nested():
+            count = sync_transactions(conn, client, today)
+    except pg.PluggyError as exc:
+        log.warning('Lançamentos do item %s não vieram: %s', conn.item_id, exc)
+        conn.needs_sync = True
+        return 0
     conn.needs_sync = False
     return count
 
