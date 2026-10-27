@@ -15,12 +15,11 @@ from decimal import Decimal
 from app.core.db import db
 from app.core.security import decrypt_field
 from app.core.types import utcnow
-from app.models import (BankAccount, BankConnection, BankTransaction, CreditCard, Expense, InstallmentGroup,
-                        PluggyConfig, RecurringGroup, User)
+from app.models import BankAccount, BankConnection, BankTransaction, CreditCard, Expense, PluggyConfig, User
 from app.services import pluggy as pg
 from app.services.categorizer import categorize
 from app.services.expense_service import ExpenseData, create_expense
-from app.services.finance import BANK_PAYMENTS, CATEGORIES, CREDIT, DEBIT
+from app.services.finance import CATEGORIES, CREDIT, DEBIT
 
 log = logging.getLogger('finfam.pluggy')
 
@@ -174,6 +173,18 @@ def target_date(tx: BankTransaction) -> date:
     if tx.installment_number and tx.installment_number > 1:
         return tx.date
     return tx.purchase_date or tx.date
+
+
+def card_family(card_id: int | None) -> set[int]:
+    """O cartão e os que dividem a mesma conta de crédito (virtual/adicional do mesmo banco)."""
+    if not card_id:
+        return set()
+    card = db.session.get(CreditCard, card_id)
+    if card is None:
+        return {card_id}
+    if not card.account_id:
+        return {card.id}
+    return {c.id for c in CreditCard.query.filter_by(account_id=card.account_id).all()} | {card.id}
 
 
 def find_existing(tx: BankTransaction, card_id: int | None) -> Expense | None:
@@ -433,103 +444,6 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
 def valid_category(category: str | None, allowed: list[str]) -> str:
     category = (category or '').strip()[:60]
     return category if category in allowed or category in CATEGORIES else 'Outros'
-
-
-# ── recomeçar pelo banco ─────────────────────────────────────────────────────
-
-def _norm(text: str | None) -> str:
-    import unicodedata
-    t = unicodedata.normalize('NFKD', text or '').encode('ascii', 'ignore').decode().lower()
-    return re.sub(r'[^a-z0-9 ]+', ' ', t).strip()
-
-
-def same_bank(a: str | None, b: str | None) -> bool:
-    """"Caixa" == "Caixa Econômica Federal"; "Nubank" == "nubank"."""
-    a, b = _norm(a), _norm(b)
-    return bool(a and b) and (a == b or a.startswith(b + ' ') or b.startswith(a + ' '))
-
-
-def card_family(card_id: int | None) -> set[int]:
-    """O cartão e os que dividem a mesma conta de crédito (virtual/adicional do mesmo banco)."""
-    if not card_id:
-        return set()
-    card = db.session.get(CreditCard, card_id)
-    if card is None:
-        return {card_id}
-    if not card.account_id:
-        return {card.id}
-    return {c.id for c in CreditCard.query.filter_by(account_id=card.account_id).all()} | {card.id}
-
-
-def coverage(user_id: int) -> tuple[set[int], list[str]]:
-    """O que os bancos conectados da pessoa trazem: (cartões cobertos, nomes dos bancos das contas)."""
-    cards: set[int] = set()
-    banks: list[str] = []
-    for conn in BankConnection.query.filter_by(user_id=user_id).all():
-        for acc in conn.accounts.all():
-            if acc.type == 'CREDIT' and acc.card_id:
-                cards |= card_family(acc.card_id)
-            elif acc.type == 'BANK':
-                banks += [n for n in (conn.display_name, conn.bank_name) if n]
-    return cards, banks
-
-
-def reset_candidates(user_id: int, date_from: date, today: date | None = None) -> list[Expense]:
-    """Despesas da pessoa, entre date_from e hoje, que os bancos conectados vão trazer de volta:
-    crédito só nos cartões ligados (e virtuais/adicionais da mesma conta); PIX/débito só quando o
-    banco da despesa é um dos conectados. Todo o resto fica (dinheiro, VR/VA, cartões e bancos não
-    conectados, PIX sem banco, outras pessoas e o que está no futuro)."""
-    today = today or date.today()
-    cards, banks = coverage(user_id)
-    rows = (Expense.query.filter(Expense.user_id == user_id, Expense.payment_method.in_(BANK_PAYMENTS),
-                                 Expense.year >= date_from.year - 1).all())
-    out = []
-    for e in rows:
-        if not date_from <= _expense_date(e) <= today:
-            continue
-        if e.payment_method == CREDIT:
-            if e.card_id in cards:
-                out.append(e)
-        elif any(same_bank(e.bank, b) for b in banks):
-            out.append(e)
-    return out
-
-
-def coverage_labels(user_id: int) -> list[str]:
-    cards, banks = coverage(user_id)
-    labels = [f"Cartão {c.nickname or c.bank or ''} •••• {c.last_digits}".replace('  ', ' ')
-              for c in CreditCard.query.filter(CreditCard.id.in_(cards or {0})).all()]
-    seen = []
-    for b in banks:
-        if not any(same_bank(b, x) for x in seen):
-            seen.append(b)
-    return labels + [f'PIX/débito {b}' for b in seen]
-
-
-def reset_from(user_id: int, date_from: date) -> int:
-    """Apaga as despesas cobertas pelo banco desde date_from e prepara a reimportação
-    (os lançamentos do banco desse período voltam do zero na próxima leitura)."""
-    gone = reset_candidates(user_id, date_from)
-    ids = {e.id for e in gone}
-    groups = {('i', e.installment_group_id) for e in gone if e.installment_group_id} | \
-             {('r', e.recurring_group_id) for e in gone if e.recurring_group_id}
-    for e in gone:
-        db.session.delete(e)
-    BankTransaction.query.filter(BankTransaction.user_id == user_id,
-                                 (BankTransaction.date >= date_from) | BankTransaction.expense_id.in_(ids or {0})
-                                 ).delete(synchronize_session=False)
-    db.session.flush()
-    for kind, gid in groups:  # grupo de parcelas/recorrência sem nenhuma despesa: some também
-        model, field = (InstallmentGroup, Expense.installment_group_id) if kind == 'i' else \
-                       (RecurringGroup, Expense.recurring_group_id)
-        if not Expense.query.filter(field == gid).count():
-            g = db.session.get(model, gid)
-            if g is not None:
-                db.session.delete(g)
-    for conn in BankConnection.query.filter_by(user_id=user_id).all():
-        conn.import_from, conn.tx_synced_at, conn.needs_sync = date_from, None, True
-    db.session.flush()
-    return len(gone)
 
 
 # ── leitura em segundo plano (disparada pelo webhook) ────────────────────────

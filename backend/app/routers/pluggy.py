@@ -18,7 +18,7 @@ import logging
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 
@@ -31,7 +31,6 @@ from app.models import BankAccount, Expense, BankConnection, BankTransaction, Cr
 from app.services import open_finance as of
 from app.services import pluggy as pg
 from app.services.expense_service import ExpenseError, tenant_banks, tenant_categories
-from app.services.export_service import expense_rows, to_xlsx
 from app.services.finance import BANKS
 
 log = logging.getLogger('finfam.pluggy')
@@ -274,54 +273,6 @@ def update_item(conn_id: int, body: ItemUpdateIn, ctx: Ctx = Depends(get_ctx_ses
             msg.append(f'{conn.label}: volta a passar pela revisão.')
     db.session.commit()
     return {'message': ' '.join(msg) or 'Nada mudou.', 'item': _conn_out(conn)}
-
-
-# ── Recomeçar pelo banco ─────────────────────────────────────────────────────
-
-def _reset_date(date_from: date) -> date:
-    today = date.today()
-    if date_from > today or date_from < of.months_back(today, 12):
-        raise HTTPException(status_code=422, detail='Data: escolha um dia dos últimos 12 meses.')
-    return date_from
-
-
-@router.get('/reset/preview', summary='Quantas despesas "recomeçar pelo banco" apagaria')
-def reset_preview(date_from: date, ctx: Ctx = Depends(get_ctx_session)):
-    _enabled_tenant(ctx)
-    rows = of.reset_candidates(ctx.user.id, _reset_date(date_from))
-    return {'count': len(rows), 'total': round(sum(float(e.amount) for e in rows), 2),
-            'connections': BankConnection.query.filter_by(user_id=ctx.user.id).count(),
-            'covers': of.coverage_labels(ctx.user.id)}
-
-
-@router.get('/reset/backup', summary='Backup (.xlsx) das despesas que seriam apagadas')
-def reset_backup(date_from: date, ctx: Ctx = Depends(get_ctx_session)):
-    _enabled_tenant(ctx)
-    rows = of.reset_candidates(ctx.user.id, _reset_date(date_from))
-    rows.sort(key=lambda e: (e.year, e.month, e.day, e.id))
-    return Response(to_xlsx(expense_rows(rows)),
-                    media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    headers={'Content-Disposition': f'attachment; filename=backup_finfam_{date_from.isoformat()}.xlsx'})
-
-
-class ResetIn(BaseModel):
-    date_from: date
-    password: str = Field(min_length=1, max_length=200, description='Sua senha do FinFam (confirmação)')
-
-
-@router.post('/reset', summary='Apaga as despesas cobertas pelo banco desde a data e reimporta do banco')
-def reset(body: ResetIn, ctx: Ctx = Depends(get_ctx_session)):
-    _enabled_tenant(ctx)
-    if not BankConnection.query.filter_by(user_id=ctx.user.id).count():
-        raise HTTPException(status_code=409, detail='Conecte um banco antes de recomeçar pelo banco.')
-    if not ctx.user.check_password(body.password):
-        raise HTTPException(status_code=403, detail='Senha incorreta.')
-    gone = of.reset_from(ctx.user.id, _reset_date(body.date_from))
-    db.session.commit()
-    new = of.sync_stale(ctx.user.id)
-    log.info('Recomeçar pelo banco: user %s apagou %s despesa(s) desde %s', ctx.user.id, gone, body.date_from)
-    return {'message': f'{gone} despesa(s) apagada(s). {new} lançamento(s) trazido(s) do banco.',
-            'deleted': gone, 'imported': new}
 
 
 class ItemIn(BaseModel):

@@ -6,6 +6,7 @@ import { dateBR } from '../../lib/format'
 import { useApi } from '../../lib/hooks'
 import { navigate } from '../../lib/router'
 import { useSession } from '../../lib/session'
+import { FamilyDataModal } from './FamilyData'
 import type { Tenant } from '../../lib/types'
 
 interface Member {
@@ -140,6 +141,7 @@ export function AdminPage() {
   const { toast } = useSession()
   const data = useApi(() => (tokens.admin() ? api.admin.get<AdminData>('/admin/dashboard') : Promise.reject(new Error('Faça login.'))), [])
   const [reset, setReset] = useState<Member | null>(null)
+  const [dataFor, setDataFor] = useState<{ id: number; name: string } | null>(null)
   const [newPwd, setNewPwd] = useState('')
 
   useEffect(() => { if (!tokens.admin()) navigate('/admin/login', { replace: true }) }, [])
@@ -195,6 +197,7 @@ export function AdminPage() {
                         <td>{t.expires_at ? <>{dateBR(t.expires_at)} {!t.active ? <Badge tone="danger">expirado</Badge> : t.days_left !== null && t.days_left <= 7 ? <Badge tone="warning">{t.days_left}d</Badge> : null}</> : <Badge tone="success">sem prazo</Badge>}</td>
                         <td><OpenFinanceCell t={t} run={run} /></td>
                         <td className="actions">
+                          <Button variant="ghost" icon="cloud-upload" onClick={() => setDataFor({ id: t.id, name: t.name })}>Dados</Button>
                           {(t.plan === 'anual' || t.plan === 'vitalicio') && <Button variant="ghost" onClick={() => run(() => api.admin.post(`/admin/tenants/${t.id}/extra-members`))}>+1 pessoa</Button>}
                           {t.extra_members > 0 && <Button variant="ghost" onClick={() => run(() => api.admin.del(`/admin/tenants/${t.id}/extra-members`))}>−1 pessoa</Button>}
                           <ConfirmButton label="Revogar acesso" icon="x-circle" confirmLabel="Revogar" onConfirm={() => run(() => api.admin.post(`/admin/tenants/${t.id}/revoke`))} />
@@ -207,6 +210,7 @@ export function AdminPage() {
           </>
         )}
       </div>
+      <FamilyDataModal tenant={dataFor} onClose={() => setDataFor(null)} onChanged={data.reload} />
       <Modal open={Boolean(reset)} onClose={() => setReset(null)} title={`Nova senha para ${reset?.name ?? ''}`}
         footer={<><Button variant="ghost" onClick={() => setReset(null)}>Cancelar</Button>
           <Button disabled={newPwd.length < 8} onClick={() => reset && run(() => api.admin.post(`/admin/users/${reset.id}/reset-password`, { new_password: newPwd })).then(() => setReset(null))}>Redefinir senha</Button></>}>

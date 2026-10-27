@@ -533,3 +533,5 @@ a.insight:hover { background: #e8edf1; }
 .bank-conn header { align-items: center; flex-wrap: wrap; }
 .bank-auto { display: flex; align-items: flex-start; gap: .65rem; padding: .55rem .7rem; border-radius: var(--radius-sm); background: var(--bg); }
 .bank-auto .switch { margin-top: .1rem; }
+.backup-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+.backup-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem .75rem; padding: .6rem .75rem; border: 1px solid var(--line); border-radius: var(--radius-sm); }

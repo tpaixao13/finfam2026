@@ -99,9 +99,9 @@ export const api = {
     put: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body, admin: true }),
     del: <T>(path: string) => request<T>(path, { method: 'DELETE', admin: true }),
   },
-  /** Baixa um arquivo (export xlsx/pdf) usando o token. */
-  async download(path: string, query: Query, fallbackName: string) {
-    const res = await request<Response>(path, { query, raw: true })
+  /** Baixa um arquivo (export xlsx/pdf) usando o token (admin: token do admin). */
+  async download(path: string, query: Query, fallbackName: string, admin = false) {
+    const res = await request<Response>(path, { query, raw: true, admin })
     const blob = await res.blob()
     const disposition = res.headers.get('Content-Disposition') ?? ''
     const name = /filename=([^;]+)/.exec(disposition)?.[1] ?? fallbackName

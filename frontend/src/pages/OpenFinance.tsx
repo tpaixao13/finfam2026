@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Modal, PageHeader, Panel, Segmented, Select, Spinner, Switch } from '../components/ui'
 import { api } from '../lib/api'
-import { brl, money } from '../lib/format'
+import { money } from '../lib/format'
 import { useApi } from '../lib/hooks'
 import { Link } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
@@ -272,74 +272,7 @@ function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => voi
           <button type="button" className="link-btn" onClick={() => setAsking('id')}>Usar o ID da conexão</button>.</>}
       </p>
     </Panel>
-    {!!list?.length && <ResetPanel onDone={reload} />}
     </>
-  )
-}
-
-function firstOfMonth(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
-}
-
-/** Recomeçar pelo banco: apaga as despesas (PIX, débito, crédito) desde uma data e importa do banco. */
-function ResetPanel({ onDone }: { onDone: () => void }) {
-  const act = useAction()
-  const [open, setOpen] = useState(false)
-  const [dateFrom, setDateFrom] = useState(firstOfMonth())
-  const [backup, setBackup] = useState(false)
-  const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState(false)
-  const preview = useApi(() => open && dateFrom
-    ? api.get<{ count: number; total: number; covers: string[] }>(`/pluggy/reset/preview?date_from=${dateFrom}`)
-    : Promise.resolve(null), [open, dateFrom])
-  const p = preview.data
-  async function run(e: React.FormEvent) {
-    e.preventDefault()
-    setBusy(true)
-    await act(() => api.post<{ message: string }>('/pluggy/reset', { date_from: dateFrom, password }),
-      () => { setOpen(false); setPassword(''); setBackup(false); onDone() })
-    setBusy(false)
-  }
-  return (
-    <Panel title="Recomeçar pelo banco">
-      {!open ? (
-        <div className="stack-sm">
-          <p className="muted">Apaga, a partir de uma data, as suas despesas que os bancos conectados trazem de volta
-            (compras dos cartões ligados e PIX/débito desses bancos) e importa tudo de novo do banco. Dinheiro, VR/VA,
-            outros cartões e bancos, as despesas das outras pessoas e o que está no futuro ficam.</p>
-          <div><Button variant="ghost" icon="arrow-repeat" onClick={() => setOpen(true)}>Recomeçar pelo banco…</Button></div>
-        </div>
-      ) : (
-        <form className="stack" onSubmit={run}>
-          <Field label="Apagar e reimportar a partir de" hint="Até 12 meses atrás.">
-            <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setBackup(false) }} required />
-          </Field>
-          {preview.error ? <p className="form-error" role="alert">{preview.error}</p> : !p ? <Spinner /> : (
-            <div className="stack-sm">
-              <p><b>{p.count}</b> despesa(s) suas serão apagadas ({brl(p.total)}) e trazidas de novo pelo banco.</p>
-              <p className="muted small">Só o que os bancos conectados trazem de volta: {p.covers.length ? p.covers.join(' · ')
-                : 'nada ainda — ligue os cartões e dê nome aos bancos'}. PIX sem banco, cartões e bancos não conectados ficam.</p>
-            </div>
-          )}
-          <div className="row gap">
-            <Button type="button" variant="ghost" icon="download" disabled={!p}
-              onClick={async () => { await api.download('/pluggy/reset/backup', { date_from: dateFrom }, 'backup_finfam.xlsx'); setBackup(true) }}>
-              Baixar backup (.xlsx)</Button>
-            {backup && <Badge tone="success">Backup baixado</Badge>}
-          </div>
-          <Field label="Sua senha do FinFam" hint="Para confirmar. Não dá para desfazer (só reimportando o backup).">
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
-          </Field>
-          <div className="row gap">
-            <Button type="submit" variant="danger" busy={busy} disabled={!backup || !password || !p}>
-              Apagar {p?.count ?? ''} e importar do banco</Button>
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button>
-          </div>
-          {!backup && <p className="muted small">Baixe o backup antes: o botão de apagar só libera depois.</p>}
-        </form>
-      )}
-    </Panel>
   )
 }
 

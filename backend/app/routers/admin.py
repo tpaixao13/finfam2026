@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.core.types import Email, utcnow
@@ -12,6 +13,8 @@ from app.core.db import db, get_or_404
 from app.core.deps import get_admin
 from app.core.security import create_access_token, decode_access_token, session_fingerprint
 from app.models import PluggyConfig, Tenant, User
+from app.services import family_backup as fb
+from app.services import open_finance as of
 from app.services import two_factor as tfa
 from app.services.serializers import iso, tenant_out
 
@@ -229,6 +232,85 @@ def set_open_finance(tenant_id: int, body: OpenFinanceIn, _: User = Depends(get_
     db.session.commit()
     state = 'liberado' if body.enabled else 'desligado (nada é apagado; só para de importar)'
     return {'message': f'Open Finance {state} para "{tenant.name}".', 'tenant': tenant_out(tenant)}
+
+
+# ── Backup, zerar e restaurar a família ──────────────────────────────────────
+
+def _gz(path) -> Response:
+    return Response(path.read_bytes(), media_type='application/gzip',
+                    headers={'Content-Disposition': f'attachment; filename={path.name}'})
+
+
+@router.get('/tenants/{tenant_id}/backups', summary='Backups guardados no servidor desta família')
+def list_backups(tenant_id: int, _: User = Depends(get_admin)):
+    tenant = get_or_404(Tenant.query.filter_by(id=tenant_id), 'Família não encontrada.')
+    return {'backups': fb.list_saved(tenant)}
+
+
+@router.post('/tenants/{tenant_id}/backups', summary='Faz agora o backup completo da família (desde o início)')
+def make_backup(tenant_id: int, _: User = Depends(get_admin)):
+    tenant = get_or_404(Tenant.query.filter_by(id=tenant_id), 'Família não encontrada.')
+    path = fb.save(tenant, 'manual')
+    return {'message': f'Backup de "{tenant.name}" feito.', 'name': path.name, 'backups': fb.list_saved(tenant)}
+
+
+@router.get('/tenants/{tenant_id}/backups/{name}', summary='Baixa um backup (.json.gz)')
+def download_backup(tenant_id: int, name: str, _: User = Depends(get_admin)):
+    tenant = get_or_404(Tenant.query.filter_by(id=tenant_id), 'Família não encontrada.')
+    try:
+        fb.load_saved(tenant, name)
+    except fb.BackupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return _gz(fb.BACKUP_DIR / name)
+
+
+class WipeIn(BaseModel):
+    confirm: str = Field(min_length=1, max_length=200, description='Nome da família, digitado para confirmar')
+    months: Literal[1, 3, 6, 12] | None = Field(None, description='Quanto os bancos conectados reimportam (vazio = nada)')
+
+
+def _confirm(tenant: Tenant, typed: str) -> None:
+    if typed.strip().casefold() != (tenant.name or '').strip().casefold():
+        raise HTTPException(status_code=422, detail='Confirmação: digite o nome da família exatamente.')
+
+
+@router.post('/tenants/{tenant_id}/wipe-expenses', summary='Zera as despesas da família (faz backup antes)')
+def wipe_expenses(tenant_id: int, body: WipeIn, _: User = Depends(get_admin)):
+    tenant = get_or_404(Tenant.query.filter_by(id=tenant_id), 'Família não encontrada.')
+    _confirm(tenant, body.confirm)
+    backup = fb.save(tenant, 'antes de zerar')
+    gone = fb.wipe_expenses(tenant)
+    start = of.months_back(datetime.utcnow().date(), body.months) if body.months else None
+    banks = fb.reimport_from(tenant, start)
+    db.session.commit()
+    brought = sum(of.sync_stale(uid) for uid in fb.member_ids(tenant)) if start and banks else 0
+    msg = f'{gone} despesa(s) de "{tenant.name}" apagada(s). Backup guardado: {backup.name}.'
+    if start and banks:
+        msg += f' {brought} lançamento(s) trazido(s) dos bancos desde {start:%d/%m/%Y}.'
+    return {'message': msg, 'deleted': gone, 'imported': brought, 'backup': backup.name,
+            'backups': fb.list_saved(tenant)}
+
+
+class RestoreIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    confirm: str = Field(min_length=1, max_length=200)
+
+
+@router.post('/tenants/{tenant_id}/restore', summary='Devolve as despesas do backup (troca as atuais; faz backup antes)')
+def restore(tenant_id: int, body: RestoreIn, _: User = Depends(get_admin)):
+    tenant = get_or_404(Tenant.query.filter_by(id=tenant_id), 'Família não encontrada.')
+    _confirm(tenant, body.confirm)
+    try:
+        data = fb.load_saved(tenant, body.name)
+    except fb.BackupError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    before = fb.save(tenant, 'antes de restaurar')
+    n = fb.restore_expenses(tenant, data)
+    fb.resync_later(tenant)  # a próxima leitura reclassifica o que veio do banco
+    db.session.commit()
+    return {'message': f'{n} despesa(s) de "{tenant.name}" restaurada(s) do backup. '
+                       f'O estado de antes ficou guardado em {before.name}.',
+            'restored': n, 'backups': fb.list_saved(tenant)}
 
 
 @router.post('/tenants/{tenant_id}/extra-members', summary='Concede +1 membro extra (Anual/Vitalício)')

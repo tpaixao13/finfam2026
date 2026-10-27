@@ -63,11 +63,15 @@ pelo bot ou importando extrato, como antes.
   "Lançados" para corrigir. Duplicados e ignorados continuam fora. Compra pendente que o banco troca pela
   lançada (id novo) não é lançada duas vezes.
 - O webhook dispara a leitura em segundo plano (avisos em rajada viram uma leitura só).
-- **Recomeçar pelo banco**: apaga, desde uma data (até 12 meses), só o que os bancos conectados trazem de volta —
-  compras dos cartões ligados (e virtuais/adicionais da mesma conta) e PIX/débito cujo banco é um dos conectados —
-  e reimporta. Exige baixar o backup (.xlsx) e a senha. (A 1ª versão apagava todo PIX/débito/crédito: corrigido.)
-- `python -m scripts.restore_expenses BACKUP.db.gz --email ... --desde ... [--aplicar]`: devolve do backup do
-  Telegram as despesas apagadas que não voltaram pelo banco, com cartão, fatura, parcelas e "pago".
+- **Admin › Dados da família** (substitui o "Recomeçar pelo banco", que saiu da tela das pessoas):
+  - *Fazer backup*: tudo da família desde o início (despesas, rendas, cartões, investimentos, metas,
+    bancos conectados), sem senhas nem chaves, em `.json.gz` guardado em `instance/backups` e baixável;
+  - *Zerar despesas*: apaga todas as despesas da família (com parcelas, recorrências e lançamentos
+    importados), faz backup antes, e os bancos conectados reimportam 1, 3, 6 ou 12 meses (ou nada);
+  - *Restaurar*: troca as despesas atuais pelas do backup, exatamente como estavam (backup antes também);
+  - confirmação digitando o nome da família.
+- `python -m scripts.restore_expenses BACKUP.db.gz --email ... --desde ... [--aplicar]`: devolve, do backup do
+  Telegram, despesas apagadas que não voltaram pelo banco (com cartão, fatura, parcelas e "pago").
 - Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
 
 **Próximas etapas**
