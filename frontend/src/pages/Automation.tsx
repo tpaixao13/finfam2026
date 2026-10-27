@@ -204,7 +204,7 @@ export function RulesPage() {
       <ApplyRulesModal open={applying} onClose={() => setApplying(false)} onDone={rules.reload} />
       <Panel>
         <form className="inline-form" onSubmit={save}>
-          <Field label="Palavra-chave" hint="Basta a descrição conter o trecho."><Input value={keyword} onChange={(e) => setKeyword(e.target.value)} required minLength={2} placeholder="Ex.: IFOOD" /></Field>
+          <Field label="Palavra-chave"><Input value={keyword} onChange={(e) => setKeyword(e.target.value)} required minLength={2} placeholder="Ex.: IFOOD" /></Field>
           <Field label="Categoria">
             <Input list="rule-cats" value={category} onChange={(e) => setCategory(e.target.value)} required />
             <datalist id="rule-cats">{(meta?.categories ?? []).map((c) => <option key={c} value={c} />)}</datalist>
@@ -212,7 +212,7 @@ export function RulesPage() {
           <Button type="submit" icon={editing ? 'check2' : 'plus'}>{editing ? 'Salvar regra' : 'Criar regra'}</Button>
           {editing && <Button variant="ghost" type="button" onClick={() => { setEditing(null); setKeyword(''); setCategory('') }}>Cancelar</Button>}
         </form>
-        <p className="muted small rule-note">Ao trocar a categoria sugerida em Revisar importados, a regra é criada sozinha.</p>
+        <p className="muted small rule-note">Basta a descrição conter o trecho. Ao trocar a categoria sugerida em Revisar importados, a regra é criada sozinha.</p>
       </Panel>
       <Panel flush>
         {rules.error ? <ErrorBox message={rules.error} /> : !rules.data ? <Spinner /> : rules.data.length === 0
