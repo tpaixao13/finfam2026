@@ -19,7 +19,7 @@ from app.models import BankAccount, BankBill, BankConnection, BankTransaction, C
 from app.services import pluggy as pg
 from app.services.categorizer import categorize
 from app.services.expense_service import ExpenseData, create_expense
-from app.services.finance import CATEGORIES, CREDIT, DEBIT
+from app.services.finance import CATEGORIES, CREDIT, DEBIT, brl
 
 log = logging.getLogger('finfam.pluggy')
 
@@ -737,7 +737,7 @@ def sync(conn: BankConnection, client: pg.PluggyClient, today: date | None = Non
     return count
 
 
-def sync_stale(user_id: int | None = None, max_age_hours: int | None = None) -> int:
+def sync_stale(user_id: int | None = None, max_age_hours: int | None = None, notify: bool = False) -> int:
     """Relê as conexões com novidade (webhook) — e, com max_age_hours, também as antigas.
     Falha de um banco não impede os outros. Devolve quantos lançamentos novos chegaram."""
     q = BankConnection.query
@@ -752,13 +752,55 @@ def sync_stale(user_id: int | None = None, max_age_hours: int | None = None) -> 
         client = client_for(conn.user_id)
         if client is None:
             continue
+        before = {i for (i,) in db.session.query(BankTransaction.id).join(BankAccount)
+                  .filter(BankAccount.connection_id == conn.id).all()}
         try:
             total += sync(conn, client)
             db.session.commit()
         except pg.PluggyError as exc:
             db.session.rollback()
             log.warning('Sincronização do item %s falhou: %s', conn.item_id, exc)
+            continue
+        if notify:
+            notify_new(conn, before)
     return total
+
+
+def notify_new(conn: BankConnection, before: set[int]) -> bool:
+    """Avisa no Telegram o que chegou do banco nesta leitura (para revisar ou já lançado).
+    Só nas leituras sozinhas (webhook/cron): quem está na página já vê."""
+    from app.core.config import settings
+    from app.services import telegram as tg
+    cfg = PluggyConfig.query.filter_by(user_id=conn.user_id).first()
+    if cfg is None or not cfg.notify or not settings.telegram_bot_token:
+        return False
+    new = (BankTransaction.query.join(BankAccount)
+           .filter(BankAccount.connection_id == conn.id, BankTransaction.status.in_(('pending', 'imported')),
+                   ~BankTransaction.id.in_(before or {0})).all())
+    if not new:
+        return False
+    chats = tg.linked_chats([conn.user_id])
+    if not chats:
+        return False
+    pending = [t for t in new if t.status == 'pending']
+    launched = [t for t in new if t.status == 'imported']
+    lines = [f'🏦 <b>{tg._h(conn.label)}</b>: {len(new)} lançamento(s) novo(s) do banco.']
+    if launched:
+        lines.append(f'✅ {len(launched)} lançado(s) automaticamente ({brl(sum(float(t.amount) for t in launched))}).')
+    if pending:
+        lines.append(f'📝 {len(pending)} para revisar ({brl(sum(float(t.amount) for t in pending))}):')
+        lines += [f'• {tg._h(t.description[:40])} — {brl(float(t.amount))}' for t in sorted(pending, key=lambda t: t.date)[-5:]]
+    base = settings.public_url
+    if base.startswith('https://'):
+        lines.append(f'{base}/bank/review')
+    text = '\n'.join(lines)
+    sent = False
+    for chat in chats:
+        ok, err = tg.send_message(settings.telegram_bot_token, chat, text)
+        sent = sent or ok
+        if not ok:
+            log.warning('Aviso do Open Finance não foi para o Telegram: %s', err)
+    return sent
 
 
 # ── revisão ──────────────────────────────────────────────────────────────────
@@ -912,7 +954,7 @@ def _bg_run(user_id: int) -> None:
         while True:
             time.sleep(DEBOUNCE_SECONDS)
             try:
-                sync_stale(user_id)
+                sync_stale(user_id, notify=True)
             except Exception:  # noqa: BLE001 — nunca derruba a API
                 log.exception('Leitura em segundo plano falhou (user %s)', user_id)
             finally:
@@ -927,3 +969,46 @@ def _bg_run(user_id: int) -> None:
         with _bg_lock:
             _bg_state.pop(user_id, None)
         raise
+
+
+# ── conferir fatura (FinFam × banco) ─────────────────────────────────────────
+
+def invoice_check(user_id: int, month: int, year: int) -> list[dict]:
+    """Para cada cartão do banco ligado: total da fatura no banco (a fatura que ele informa, ou a
+    soma dos lançamentos até agora) × total no FinFam, e o que está só de um lado."""
+    out = []
+    accs = (BankAccount.query.join(BankConnection)
+            .filter(BankConnection.user_id == user_id, BankAccount.type == 'CREDIT').all())
+    for acc in accs:
+        conn = acc.connection
+        label = f"{conn.label} •••• {last4(acc.number) or ''}".strip()
+        bill = next((b for b in acc.bills.all() if (b.due_date.year, b.due_date.month) == (year, month)), None)
+        txs = acc.transactions.filter(BankTransaction.bill_year == year, BankTransaction.bill_month == month,
+                                      BankTransaction.status != 'ignored').all()
+        items_total = round(sum(float(t.amount) for t in txs), 2)
+        knows_bills = bool((acc.close_day and acc.due_day) or acc.bills.count())
+        if bill is not None and bill.total:
+            bank_total, source = round(float(bill.total), 2), 'fatura'
+        elif knows_bills:
+            bank_total, source = items_total, 'lancamentos'
+        else:  # o banco não diz em que fatura cada compra está: não dá para comparar
+            bank_total, source = None, 'sem_fatura'
+        row = {'account_id': acc.id, 'label': label, 'linked': bool(acc.card_id), 'bank_total': bank_total,
+               'bank_source': source, 'bank_items_total': items_total, 'finfam_total': None, 'diff': None,
+               'only_bank': [], 'only_finfam': [],
+               'due_date': bill.due_date.isoformat() if bill is not None else None}
+        if acc.card_id:
+            cards = card_family(acc.card_id)
+            exps = Expense.query.filter(Expense.card_id.in_(cards), Expense.payment_method == CREDIT,
+                                        Expense.year == year, Expense.month == month).all()
+            linked = {i for (i,) in db.session.query(BankTransaction.expense_id)
+                      .filter(BankTransaction.expense_id.in_([e.id for e in exps] or [0])).all()}
+            row['finfam_total'] = round(sum(float(e.amount) for e in exps), 2)
+            row['diff'] = round(row['finfam_total'] - bank_total, 2) if bank_total is not None else None
+            row['only_finfam'] = [{'id': e.id, 'description': e.description, 'amount': float(e.amount),
+                                   'date': _expense_date(e).isoformat(), 'installment': e.installment_number}
+                                  for e in exps if e.id not in linked]
+        row['only_bank'] = [{'id': t.id, 'description': t.description, 'amount': float(t.amount),
+                             'date': t.date.isoformat(), 'status': t.status} for t in txs if t.status == 'pending']
+        out.append(row)
+    return out

@@ -113,8 +113,15 @@ pelo bot ou importando extrato, como antes.
   banco. Pagamento que já tinha sido lançado como despesa é desfeito (a fatura contava duas vezes).
 - Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
 
-**Próximas etapas**
-4. Conferência de fatura, aviso no bot e ferramenta no MCP.
+**Etapa 4 — conferir fatura, aviso no Telegram e MCP** ✅
+- "Conferir faturas com o banco" (Contas conectadas, por mês): para cada cartão conectado, total do banco
+  (a fatura que ele informa ou a soma dos lançamentos que chegaram) × FinFam, e o que está só no banco
+  (para revisar) ou só no FinFam (lançado à mão, parcela futura). `GET /pluggy/invoice-check`.
+- Aviso no Telegram (bot central) quando uma leitura sozinha (webhook ou cron) traz lançamentos: quantos
+  foram lançados automaticamente e quais estão para revisar, com o link. Liga/desliga por pessoa
+  (`pluggy_configs.notify`, `PUT /pluggy/notify`). Quem está na página não recebe aviso.
+- MCP: `importados_do_banco(situacao)` e `conferir_fatura_com_banco(mes, ano)` — leitura com token de API
+  (`GET /pluggy/summary` e `/pluggy/invoice-check`); aprovar continua só pelo site.
 
 ## 2026.1.0 — versão estável antes do Open Finance
 

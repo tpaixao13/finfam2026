@@ -216,7 +216,8 @@ class PluggyConfig(Base):
     client_secret = Column(Text, nullable=False)          # encrypt_field(...)
     hook_token = Column(String(48), nullable=False, unique=True)
     hook_secret = Column(Text, nullable=False)            # encrypt_field(...)
-    webhook_id = Column(String(64), nullable=True)        # id do webhook na conta Pluggy da pessoa
+    webhook_id = Column(String(64), nullable=True)
+    notify = Column(Boolean, default=True, nullable=False)  # avisar no Telegram quando chega algo do banco        # id do webhook na conta Pluggy da pessoa
     status = Column(String(20), nullable=False, default='ok')  # ok | error
     last_error = Column(Text, nullable=True)
     consent_at = Column(DateTime, nullable=False, default=utcnow)

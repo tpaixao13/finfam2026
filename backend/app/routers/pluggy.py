@@ -24,7 +24,7 @@ from sqlalchemy import func
 
 from app.core.config import settings
 from app.core.db import db
-from app.core.deps import Ctx, get_ctx_session
+from app.core.deps import Ctx, Period, get_ctx, get_ctx_session, get_period
 from app.core.security import decrypt_field, encrypt_field
 from app.core.types import utcnow
 from app.models import BankAccount, Expense, BankConnection, BankTransaction, CreditCard, PluggyConfig, Tenant, User
@@ -70,6 +70,7 @@ def _out(ctx: Ctx, cfg: PluggyConfig | None) -> dict:
         'include_sandbox': settings.pluggy_include_sandbox,
         'connections': BankConnection.query.filter_by(user_id=ctx.user.id).count() if cfg else 0,
         'to_review': BankTransaction.query.filter_by(user_id=ctx.user.id, status='pending').count() if cfg else 0,
+        'notify': bool(cfg.notify) if cfg else True,
     }
 
 
@@ -507,6 +508,49 @@ def restore_transactions(body: IdsIn, ctx: Ctx = Depends(get_ctx_session)):
             n += 1
     db.session.commit()
     return {'message': f'{n} lançamento(s) de volta para revisar.'}
+
+
+class NotifyIn(BaseModel):
+    notify: bool
+
+
+@router.put('/notify', summary='Liga/desliga o aviso no Telegram quando chega algo do banco')
+def set_notify(body: NotifyIn, ctx: Ctx = Depends(get_ctx_session)):
+    cfg = PluggyConfig.query.filter_by(user_id=ctx.user.id).first()
+    if cfg is None:
+        raise HTTPException(status_code=409, detail='Cadastre primeiro a sua chave Pluggy.')
+    cfg.notify = body.notify
+    db.session.commit()
+    return {'message': 'Aviso no Telegram ligado.' if body.notify else 'Aviso no Telegram desligado.',
+            'config': _out(ctx, cfg)}
+
+
+# ── Consultas (também para o MCP, com token de API: só leitura) ──────────────
+
+@router.get('/invoice-check', summary='Fatura do banco × FinFam, por cartão conectado, no mês')
+def invoice_check(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx)):
+    _enabled_tenant(ctx)
+    return {'month': period.month, 'year': period.year,
+            'cards': of.invoice_check(ctx.user.id, period.month, period.year)}
+
+
+@router.get('/summary', summary='Resumo do que chegou dos bancos (sem reler o banco)')
+def summary(status: Literal['pending', 'duplicate', 'ignored', 'imported'] = 'pending', limit: int = 50,
+            ctx: Ctx = Depends(get_ctx)):
+    _enabled_tenant(ctx)
+    counts = {s: 0 for s in STATUSES}
+    for st, n in (db.session.query(BankTransaction.status, func.count(BankTransaction.id))
+                  .filter(BankTransaction.user_id == ctx.user.id).group_by(BankTransaction.status)):
+        counts[st] = n
+    rows = (BankTransaction.query.filter_by(user_id=ctx.user.id, status=status)
+            .order_by(BankTransaction.date.desc()).limit(max(1, min(limit, 200))).all())
+    conns = BankConnection.query.filter_by(user_id=ctx.user.id).all()
+    return {'counts': counts,
+            'banks': [{'name': c.label, 'status': c.status, 'auto_import': bool(c.auto_import),
+                       'last_updated_at': c.last_updated_at.isoformat() + 'Z' if c.last_updated_at else None} for c in conns],
+            'items': [{'id': t.id, 'date': t.date.isoformat(), 'description': t.description, 'amount': float(t.amount),
+                       'bank': t.account.connection.label, 'account_type': t.account.type, 'reason': t.reason,
+                       'bill': f'{t.bill_month:02d}/{t.bill_year}' if t.bill_month else None} for t in rows]}
 
 
 # ── Webhook (chamado pela Pluggy) ────────────────────────────────────────────

@@ -29,7 +29,7 @@ def main(argv: list[str]) -> int:
     enabled = {t.id for t in Tenant.query.filter_by(open_finance_enabled=True).all()}
     users = {u.id for u in User.query.filter(User.tenant_id.in_(enabled)).all()} if enabled else set()
     for user_id in sorted(users):
-        total += of.sync_stale(user_id, max_age_hours=hours)
+        total += of.sync_stale(user_id, max_age_hours=hours, notify=True)
     session.remove()
     print(f'Open Finance: {total} lançamento(s) novo(s) para revisar.')
     return 0

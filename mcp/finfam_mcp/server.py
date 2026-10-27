@@ -22,6 +22,8 @@ INSTRUCTIONS = """Ferramentas do FinFam, o controle financeiro da família.
 - "Valor do cartão/fatura de novembro?" → `faturas_do_mes(mes=11)`; detalhe de um cartão → `fatura_do_cartao`.
 - "O que comprei dia X?" → `buscar_despesas(data=...)`. "Quanto gastei de X no mês?" → `buscar_despesas(categoria=...)`
   ou `gastos_por_categoria`. Para pagar, use `marcar_como_pago` com os IDs mostrados.
+- Bancos conectados (Open Finance): "chegou algo do banco?" → `importados_do_banco`; "a fatura bate com o
+  banco?" → `conferir_fatura_com_banco`.
 - Confirme com o usuário antes de excluir algo."""
 
 api = FinFamAPI()
@@ -280,6 +282,58 @@ def rendas_do_mes(mes: int | None = None, ano: int | None = None) -> str:
     lines += [f"• #{s['id']} {s['user_name']} — {s['company'] or s['income_type']}: {brl(s['amount'])} "
               f"({'recebida' if s['received'] else 'a receber'}{', previsto ' + dm(s['expected_date']) if s['expected_date'] else ''})"
               for s in rows]
+    return '\n'.join(lines)
+
+
+STATUS_PT = {'pending': 'para revisar', 'duplicate': 'já no FinFam', 'ignored': 'ignorados', 'imported': 'lançados'}
+_STATUS_IN = {_norm(v): k for k, v in STATUS_PT.items()} | {k: k for k in STATUS_PT} | {'revisar': 'pending', 'ignorado': 'ignored'}
+
+
+@mcp.tool()
+@_safe
+def importados_do_banco(situacao: str = 'para revisar', limite: int = 20) -> str:
+    """O que chegou dos bancos conectados (Open Finance/Pluggy): situação de cada banco e os lançamentos
+    "para revisar" (padrão), "lançados", "já no FinFam" ou "ignorados" (pagamento de fatura etc.).
+    Use para "chegou algo do banco?", "o que falta revisar?". Para aprovar, o usuário usa o site."""
+    status = _STATUS_IN.get(_norm(situacao), 'pending')
+    r = api.get('/pluggy/summary', status=status, limit=max(1, min(int(limite), 100)))
+    c = r['counts']
+    lines = [f"Bancos: {', '.join(b['name'] + (' (automático)' if b['auto_import'] else '') for b in r['banks']) or 'nenhum'}",
+             f"Para revisar {c['pending']} · lançados {c['imported']} · já no FinFam {c['duplicate']} · ignorados {c['ignored']}"]
+    if not r['items']:
+        return '\n'.join(lines + [f'Nada em "{STATUS_PT[status]}".'])
+    lines.append(f'{STATUS_PT[status].capitalize()}:')
+    for i in r['items']:
+        extra = f" · fatura {i['bill']}" if i['bill'] else ''
+        why = f" — {i['reason']}" if status == 'ignored' and i['reason'] else ''
+        lines.append(f"• {dm(i['date'])} {i['description']} {brl(i['amount'])} ({i['bank']}{extra}){why}")
+    return '\n'.join(lines)
+
+
+@mcp.tool()
+@_safe
+def conferir_fatura_com_banco(mes: int | None = None, ano: int | None = None) -> str:
+    """Compara, por cartão conectado ao banco, o total da fatura do banco com o do FinFam no mês e lista
+    o que está só de um lado. Use para "a fatura do C6 bate?", "por que o FinFam está diferente do banco?"."""
+    month, year = _period(mes, ano)
+    r = api.get('/pluggy/invoice-check', month=month, year=year)
+    if not r['cards']:
+        return 'Nenhum cartão conectado ao banco.'
+    lines = [f'Faturas de {month:02d}/{year} — banco × FinFam:']
+    for c in r['cards']:
+        src = 'fatura do banco' if c['bank_source'] == 'fatura' else 'lançamentos até agora'
+        if c['bank_source'] == 'sem_fatura':
+            lines.append(f"• {c['label']}: o banco não informa em que fatura cada compra está; FinFam {brl(c['finfam_total'] or 0)}")
+            continue
+        if not c['linked']:
+            lines.append(f"• {c['label']}: banco {brl(c['bank_total'])} ({src}) — cartão não ligado a um cartão do FinFam")
+            continue
+        status = 'bate ✅' if abs(c['diff']) < 0.01 else f"diferença {brl(c['diff'])}"
+        lines.append(f"• {c['label']}: banco {brl(c['bank_total'])} ({src}) · FinFam {brl(c['finfam_total'])} — {status}")
+        for i in c['only_bank'][:10]:
+            lines.append(f"   só no banco (para revisar): {dm(i['date'])} {i['description']} {brl(i['amount'])}")
+        for i in c['only_finfam'][:10]:
+            lines.append(f"   só no FinFam: {dm(i['date'])} {i['description']} {brl(i['amount'])}")
     return '\n'.join(lines)
 
 

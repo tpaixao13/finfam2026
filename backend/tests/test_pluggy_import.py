@@ -721,3 +721,68 @@ def test_issuer_in_description():
     assert not of._issuer_in(acc, 'PAGAMENTO BOLETO BCO BRADESCO S.A.')
     conn2 = BankConnection(bank_name='MeuPluggy', display_name='C6 Bank')
     assert of._issuer_in(BankAccount(name='BANDEIRADO 0982', connection=conn2), 'C6 BANK')
+
+
+def test_invoice_check_summary_and_telegram_notice(client, family, bank, txs, monkeypatch):  # noqa: F811
+    from app.models import TelegramLink
+    from app.services import telegram as tg
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    D = date(TODAY.year, TODAY.month, 12)
+    if D <= TODAY:
+        D = of.add_months(D, 1)
+    closed = of.add_months(D, -1)
+    bills = [{'id': 'b-c', 'dueDate': f'{closed.isoformat()}T03:00:00Z', 'totalAmount': 150.0}]
+    inner = pg._http
+    monkeypatch.setattr(pg, '_http', lambda m, p, b=None, k=None: {'results': bills} if p.startswith('/bills?')
+                        else inner(m, p, b, k))
+    d1 = closed - timedelta(days=20)
+    txs[cc] += [{'id': 'x1', 'type': 'DEBIT', 'amount': 100.0, 'date': f'{d1.isoformat()}T15:00:00Z', 'description': 'MERCADO',
+                 'creditCardMetadata': {'billId': 'b-c'}},
+                {'id': 'x2', 'type': 'DEBIT', 'amount': 50.0, 'date': f'{d1.isoformat()}T16:00:00Z', 'description': 'FARMACIA',
+                 'creditCardMetadata': {'billId': 'b-c'}}]
+    _post_item(family, months=3)
+    items = family.get('/pluggy/transactions').json()['items']
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': t['id'], 'category': 'Outros'} for t in items
+                                                                if t['description'] == 'MERCADO']})
+    family.post('/expenses', json={'description': 'Lançado à mão', 'amount': '30', 'category': 'Outros',
+                                   'payment_method': 'Cartão de Crédito', 'card_id': card['id'], 'date': d1.isoformat()})
+    e = Expense.query.filter_by(description='Lançado à mão').one()
+    e.year, e.month = closed.year, closed.month
+    session.commit()
+    session.remove()
+    r = family.get(f'/pluggy/invoice-check?month={closed.month}&year={closed.year}').json()
+    row = next(c for c in r['cards'] if c['linked'])
+    assert (row['bank_total'], row['bank_source'], row['finfam_total'], row['diff']) == (150.0, 'fatura', 130.0, -20.0)
+    assert [i['description'] for i in row['only_bank']] == ['FARMACIA']
+    assert [i['description'] for i in row['only_finfam']] == ['Lançado à mão']
+
+    # resumo e conferência também com token de API (MCP), só leitura
+    tok = family.post('/auth/tokens', json={'name': 'mcp'}).json()['token']
+    hdr = {'Authorization': f'Bearer {tok}'}
+    s = client.get(f'{API}/pluggy/summary', headers=hdr)
+    assert s.status_code == 200 and s.json()['counts']['pending'] == 1 and s.json()['items'][0]['description'] == 'FARMACIA'
+    assert client.get(f'{API}/pluggy/invoice-check', headers=hdr).status_code == 200
+    assert client.post(f'{API}/pluggy/transactions/approve', headers=hdr, json={'items': [{'id': 1, 'category': 'x'}]}).status_code == 403
+
+    # aviso no Telegram: só leitura sozinha (webhook/cron), com o que chegou de novo
+    sent = []
+    monkeypatch.setattr(tg, 'send_message', lambda token, chat, text: (sent.append((chat, text)), (True, ''))[1])
+    session.add(TelegramLink(user_id=family.user['id'], chat_id='777', username='tiago'))
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    session.remove()
+    txs[cc].append({'id': 'x3', 'type': 'DEBIT', 'amount': 42.0, 'date': f'{TODAY.isoformat()}T12:00:00Z', 'description': 'PADARIA NOVA'})
+    family.get('/pluggy/items')            # você na página: não avisa
+    assert sent == []
+    txs[cc].append({'id': 'x4', 'type': 'DEBIT', 'amount': 8.0, 'date': f'{TODAY.isoformat()}T13:00:00Z', 'description': 'CAFE'})
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    assert of.sync_stale(family.user['id'], notify=True) == 1
+    assert len(sent) == 1 and sent[0][0] == '777' and 'CAFE' in sent[0][1] and 'para revisar' in sent[0][1]
+    family.put('/pluggy/notify', json={'notify': False})
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    txs[cc].append({'id': 'x5', 'type': 'DEBIT', 'amount': 9.0, 'date': f'{TODAY.isoformat()}T14:00:00Z', 'description': 'SUCO'})
+    of.sync_stale(family.user['id'], notify=True)
+    assert len(sent) == 1  # desligado
+    session.remove()

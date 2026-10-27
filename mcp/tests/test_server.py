@@ -25,6 +25,19 @@ class FakeAPI:
             return {'members': MEMBERS}
         if path == '/expenses/suggest-category':
             return {'category': 'Alimentação'}
+        if path == '/pluggy/summary':
+            self.summary_q = q
+            return {'counts': {'pending': 1, 'imported': 3, 'duplicate': 0, 'ignored': 2},
+                    'banks': [{'name': 'C6 Bank', 'auto_import': True}],
+                    'items': [{'date': '2026-10-24', 'description': 'COOP', 'amount': 38.78, 'bank': 'C6 Bank',
+                               'bill': '11/2026', 'reason': None}]}
+        if path == '/pluggy/invoice-check':
+            return {'cards': [{'label': 'C6 Bank •••• 0982', 'linked': True, 'bank_total': 7264.41, 'bank_source': 'fatura',
+                               'finfam_total': 5865.6, 'diff': -1398.81,
+                               'only_bank': [{'date': '2026-10-25', 'description': 'MERCADO', 'amount': 100.0}],
+                               'only_finfam': []},
+                              {'label': 'Inter •••• 7770', 'linked': False, 'bank_total': 0, 'bank_source': 'lancamentos',
+                               'finfam_total': None, 'diff': None, 'only_bank': [], 'only_finfam': []}]}
         raise AssertionError(path)
 
     def post(self, path, body=None):
@@ -66,3 +79,13 @@ def test_lancar_despesa_infers_method_and_category(fake):
 
 def test_errors_become_text(fake):
     assert server.lancar_despesa('x', 1, cartao='inexistente').startswith('Erro:')
+
+
+def test_open_finance_tools(fake):
+    out = server.importados_do_banco('lançados')
+    assert fake.summary_q['status'] == 'imported' and 'C6 Bank (automático)' in out and 'COOP' in out
+    assert 'fatura 11/2026' in out
+    server.importados_do_banco()
+    assert fake.summary_q['status'] == 'pending'
+    out = server.conferir_fatura_com_banco(11, 2026)
+    assert 'diferença' in out and 'só no banco' in out and 'não ligado' in out

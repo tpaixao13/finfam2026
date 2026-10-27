@@ -1,9 +1,9 @@
 // Open Finance (Pluggy) — cada pessoa cadastra a chave da própria conta Pluggy (etapa 1)
 // e conecta os bancos pelo widget Pluggy Connect, vendo contas e cartões (etapa 2).
 import { useState } from 'react'
-import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Modal, PageHeader, Panel, Segmented, Select, Spinner, Switch } from '../components/ui'
+import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Modal, MonthNav, PageHeader, Panel, Segmented, Select, Spinner, Switch } from '../components/ui'
 import { api } from '../lib/api'
-import { money } from '../lib/format'
+import { brl, dayMonth, money } from '../lib/format'
 import { useApi } from '../lib/hooks'
 import { Link } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
@@ -12,7 +12,7 @@ import type { Card } from '../lib/types'
 interface PluggyConfig {
   available: boolean; max_items: number | null; configured: boolean; client_id_masked: string
   status: 'ok' | 'error' | null; last_error: string | null; webhook: boolean; public_url_ok: boolean
-  include_sandbox: boolean; connections: number; to_review: number
+  include_sandbox: boolean; connections: number; to_review: number; notify: boolean
 }
 type Saved = { message: string; config: PluggyConfig }
 
@@ -288,7 +288,81 @@ function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => voi
           <button type="button" className="link-btn" onClick={() => setAsking('id')}>Usar o ID da conexão</button>.</>}
       </p>
     </Panel>
+    {!!list?.length && <InvoiceCheck />}
     </>
+  )
+}
+
+interface CheckItem { id: number; description: string; amount: number; date: string; installment?: number | null }
+interface CheckRow {
+  account_id: number; label: string; linked: boolean; bank_total: number | null; bank_source: 'fatura' | 'lancamentos' | 'sem_fatura'
+  finfam_total: number | null; diff: number | null; due_date: string | null
+  only_bank: CheckItem[]; only_finfam: CheckItem[]
+}
+
+function CheckList({ title, items }: { title: string; items: CheckItem[] }) {
+  if (!items.length) return null
+  return (
+    <div className="stack-sm">
+      <b className="small">{title} ({items.length})</b>
+      <ul className="check-list">
+        {items.map((i) => (
+          <li key={i.id}><span className="muted">{dayMonth(i.date)}</span> {i.description}
+            {i.installment ? <span className="muted"> · parcela {i.installment}</span> : null}<b>{brl(i.amount)}</b></li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** Fatura do banco × FinFam, por cartão conectado, no mês escolhido. */
+function InvoiceCheck() {
+  const today = new Date()
+  const [period, setPeriod] = useState({ month: today.getMonth() + 1, year: today.getFullYear() })
+  const data = useApi(() => api.get<{ cards: CheckRow[] }>(`/pluggy/invoice-check?month=${period.month}&year=${period.year}`),
+    [period.month, period.year])
+  const [open, setOpen] = useState<number | null>(null)
+  return (
+    <Panel title="Conferir faturas com o banco" actions={
+      <MonthNav month={period.month} year={period.year} onChange={(month, year) => setPeriod({ month, year })} />}>
+      {data.error ? <ErrorBox message={data.error} onRetry={data.reload} /> : !data.data ? <Spinner /> : (
+        <ul className="check-rows">
+          {data.data.cards.map((c) => {
+            const ok = c.diff !== null && Math.abs(c.diff) < 0.01
+            return (
+              <li key={c.account_id}>
+                <div className="check-head">
+                  <b>{c.label}</b>
+                  {!c.linked ? <Badge tone="warning">ligue a um cartão do FinFam</Badge>
+                    : c.bank_source === 'sem_fatura' ? <Badge tone="info">banco não informa a fatura</Badge>
+                      : ok ? <Badge tone="success">bate</Badge> : <Badge tone="danger">diferença {brl(c.diff)}</Badge>}
+                </div>
+                <div className="muted small">
+                  {c.bank_total === null ? 'O banco não diz em que fatura cada compra está'
+                    : <>Banco {brl(c.bank_total)} ({c.bank_source === 'fatura' ? 'fatura do banco' : 'lançamentos até agora'})</>}
+                  {c.finfam_total !== null && <> · FinFam {brl(c.finfam_total)}</>}
+                  {c.due_date && <> · vence {dayMonth(c.due_date)}</>}
+                </div>
+                {(c.only_bank.length > 0 || c.only_finfam.length > 0) && (
+                  open === c.account_id ? (
+                    <div className="stack-sm">
+                      <CheckList title="Só no banco (para revisar)" items={c.only_bank} />
+                      <CheckList title="Só no FinFam (lançado à mão ou parcela futura)" items={c.only_finfam} />
+                      <div><button type="button" className="link-btn" onClick={() => setOpen(null)}>Esconder</button></div>
+                    </div>
+                  ) : (
+                    <div><button type="button" className="link-btn" onClick={() => setOpen(c.account_id)}>
+                      Ver diferenças ({c.only_bank.length + c.only_finfam.length})</button></div>
+                  )
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <p className="muted small">"Fatura do banco" é o total que o banco informa; sem ele, soma os lançamentos que já chegaram.
+        Estornos e créditos na fatura não entram no FinFam, então o banco pode ficar menor.</p>
+    </Panel>
   )
 }
 
@@ -368,6 +442,12 @@ export function OpenFinancePage() {
                     : cfg.public_url_ok ? 'Webhook ainda não configurado: salve a chave de novo.'
                       : 'Webhook pendente: o administrador precisa definir PUBLIC_URL (https) no servidor.'}
                 </p>
+                <div className="bank-auto">
+                  <Switch label="Avisar no Telegram quando chegar algo do banco" checked={cfg.notify}
+                    onChange={(v) => act(() => api.put<Saved>('/pluggy/notify', { notify: v }), done)} />
+                  <span className="small"><b>Avisar no Telegram</b>
+                    <span className="muted"> — quando chegar algo do banco (precisa ter o Telegram ligado em Telegram e IA).</span></span>
+                </div>
                 <div className="row gap">
                   <Button variant="ghost" onClick={() => setEditing(true)}>Trocar chave</Button>
                   <ConfirmButton label="Remover chave Pluggy" text="Remover chave"
