@@ -339,7 +339,7 @@ def test_card_bill_month_from_bank_and_bill_payment_reconciled(client, family, b
     assert (c['best_buy_day'], c['due_day']) == (3, 10)  # vencimento e melhor dia vêm do banco
     tx = family.get('/pluggy/transactions').json()['items'][0]
     family.post('/pluggy/transactions/approve', json={'items': [{'id': tx['id'], 'category': 'Outros'}]})
-    e = Expense.query.filter(Expense.description.like('CATIVA%')).one()
+    e = Expense.query.filter(Expense.description.like('CATIVA%'), Expense.installment_number == 9).one()
     assert (e.year, e.month) == of.bill_of(d, 3, 10)  # na fatura que o banco diz
     bill_y, bill_m = e.year, e.month
     session.remove()
@@ -349,7 +349,7 @@ def test_card_bill_month_from_bank_and_bill_payment_reconciled(client, family, b
     txs[acc].append({'id': 't-pag', 'type': 'DEBIT', 'amount': -1597.76, 'date': f'{min(pay, TODAY).isoformat()}T12:00:00Z',
                      'description': 'PAGAMENTO CARTAO CREDITO BCE CARTAO MASTER'})
     if pay > TODAY:  # fatura futura: o pagamento ainda não aconteceu; simula a fatura no mês corrente
-        session.query(Expense).filter(Expense.description.like('CATIVA%')).update(
+        session.query(Expense).filter(Expense.description.like('CATIVA%'), Expense.installment_number == 9).update(
             {'year': TODAY.year, 'month': TODAY.month}, synchronize_session=False)
         session.commit()
     session.query(BankConnection).update({'needs_sync': True})
@@ -358,7 +358,7 @@ def test_card_bill_month_from_bank_and_bill_payment_reconciled(client, family, b
     ign = family.get('/pluggy/transactions?status=ignored').json()['items']
     pag = next(t for t in ign if t['description'].startswith('PAGAMENTO CARTAO'))
     assert 'fatura marcada como paga' in pag['reason']
-    assert Expense.query.filter(Expense.description.like('CATIVA%')).one().paid is True
+    assert Expense.query.filter(Expense.description.like('CATIVA%'), Expense.installment_number == 9).one().paid is True
     assert Expense.query.filter(Expense.description.like('PAGAMENTO%')).count() == 0
     session.remove()
 
@@ -421,8 +421,9 @@ def test_meupluggy_case_bills_from_bank(client, family, bank, txs, monkeypatch):
                                  f'{nxt.month:02d}/{nxt.year}'])
     # lança as compras depois de o pagamento ter chegado: a conciliação é refeita
     family.post('/pluggy/transactions/approve', json={'items': [{'id': t['id'], 'category': 'Outros'} for t in pend]})
-    rows = {e.description: e for e in Expense.query.filter(Expense.description.like('CATIVA%')).all()}
-    assert {(e.month, e.paid) for e in rows.values()} == {(due1.month, True), (due2.month, True), (nxt.month, False)}
+    rows = {e.installment_number: (e.month, e.paid) for e in Expense.query.filter(Expense.description.like('CATIVA%')).all()}
+    assert rows == {7: (due1.month, True), 8: (due2.month, True), 9: (nxt.month, False),
+                    10: (of.add_months(nxt, 1).month, False)}  # a 7/10 cria a série; 8 e 9 já estavam
     ign = family.get('/pluggy/transactions?status=ignored').json()['items']
     assert all('fatura marcada como paga' in t['reason'] for t in ign) and len(ign) == 2
     session.remove()
@@ -447,7 +448,7 @@ def test_imported_expense_moves_to_bank_bill(client, family, bank, txs, monkeypa
     session.commit()
     session.remove()
     family.get('/pluggy/transactions?status=imported')
-    e = Expense.query.filter(Expense.description.like('CATIVA%')).one()
+    e = Expense.query.filter(Expense.description.like('CATIVA%'), Expense.installment_number == 9).one()
     nxt = of.add_months(of.add_months(d, -1), 1)
     while nxt < d + timedelta(days=7):
         nxt = of.add_months(nxt, 1)
@@ -483,19 +484,19 @@ def test_pending_goes_to_open_bill_and_moved_expense_is_unpaid(client, family, b
     assert {t['installment']['number']: t['bill'] for t in pend} == {
         8: f'{closed.month:02d}/{closed.year}', 9: f'{nxt.month:02d}/{nxt.year}'}
     family.post('/pluggy/transactions/approve', json={'items': [{'id': t['id'], 'category': 'Outros'} for t in pend]})
-    got = {e.description: (e.month, e.paid) for e in Expense.query.filter(Expense.description.like('CATIVA%')).all()}
-    assert got == {'CATIVA (8/10)': (closed.month, True), 'CATIVA (9/10)': (nxt.month, False)}
+    got = {e.installment_number: (e.month, e.paid) for e in Expense.query.filter(Expense.description.like('CATIVA%')).all()}
+    assert got == {8: (closed.month, True), 9: (nxt.month, False), 10: (of.add_months(nxt, 1).month, False)}
 
-    # despesa lançada na fatura errada (regra antiga) e marcada paga: volta para a certa, não paga
-    e9 = Expense.query.filter_by(description='CATIVA (9/10)').one()
-    e9.month, e9.year, e9.paid = closed.month, closed.year, True
+    # série lançada uma fatura antes (regra antiga) e paga: volta para a certa, não paga
+    for e in Expense.query.filter(Expense.description.like('CATIVA%')).all():
+        e.month, e.year = of.add_months(date(e.year, e.month, 1), -1).month, of.add_months(date(e.year, e.month, 1), -1).year
+        e.paid = True
     session.query(BankConnection).update({'needs_sync': True})
     session.commit()
     session.remove()
     family.get('/pluggy/transactions?status=imported')
-    e9 = Expense.query.filter_by(description='CATIVA (9/10)').one()
-    assert (e9.month, e9.paid) == (nxt.month, False)
-    assert Expense.query.filter_by(description='CATIVA (8/10)').one().paid is True
+    got = {e.installment_number: (e.month, e.paid) for e in Expense.query.filter(Expense.description.like('CATIVA%')).all()}
+    assert got[8] == (closed.month, True) and got[9] == (nxt.month, False) and got[10][1] is False
     session.remove()
 
 
@@ -535,5 +536,37 @@ def test_caixa_suggestions_and_boleto_pays_bill(client, family, bank, txs, monke
     # lançando a anuidade, a fatura dela fica paga
     an = items[('ANUIDADE NAC DIFERENCIADA', 17.25)]
     family.post('/pluggy/transactions/approve', json={'items': [{'id': an['id'], 'category': 'Outros'}]})
-    assert Expense.query.filter(Expense.description.like('ANUIDADE%')).one().paid is True
+    assert Expense.query.filter(Expense.description.like('ANUIDADE%'), Expense.installment_number == 7).one().paid is True
+    session.remove()
+
+
+
+def test_middle_installment_creates_rest_of_series(client, family, bank, txs):  # noqa: F811
+    """Anuidade 7/12 lançada → 8/12..12/12 aparecem nas faturas seguintes; quando o banco lançar
+    a 8/12, ela é reconhecida como já lançada."""
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    d = TODAY - timedelta(days=5)
+    txs[cc].append({'id': 'an7', 'type': 'DEBIT', 'amount': 17.25, 'date': f'{d.isoformat()}T15:00:00Z',
+                    'description': 'ANUIDADE NAC DIFERENCIADA',
+                    'creditCardMetadata': {'installmentNumber': 7, 'totalInstallments': 12}})
+    _post_item(family)
+    t = family.get('/pluggy/transactions').json()['items'][0]
+    r = family.post('/pluggy/transactions/approve', json={'items': [{'id': t['id'], 'category': 'Outros'}]})
+    assert r.json()['imported'] == 1
+    rows = Expense.query.filter(Expense.description.like('ANUIDADE%')).order_by(Expense.installment_number).all()
+    assert [e.installment_number for e in rows] == [7, 8, 9, 10, 11, 12]
+    months = [e.year * 12 + e.month for e in rows]
+    assert months == list(range(months[0], months[0] + 6))
+    assert rows[0].installment_group.num_installments == 12
+    session.remove()
+    nxt = of.add_months(d, 1)
+    txs[cc].append({'id': 'an8', 'type': 'DEBIT', 'amount': 17.25, 'date': f'{min(nxt, TODAY).isoformat()}T15:00:00Z',
+                    'description': 'ANUIDADE NAC DIFERENCIADA',
+                    'creditCardMetadata': {'installmentNumber': 8, 'totalInstallments': 12}})
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    session.remove()
+    dup = family.get('/pluggy/transactions?status=duplicate').json()['items']
+    assert [t['installment']['number'] for t in dup] == [8]
+    assert Expense.query.filter(Expense.description.like('ANUIDADE%')).count() == 6
     session.remove()

@@ -458,8 +458,9 @@ def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_session)):
     _enabled_tenant(ctx)
     rows = {t.id: t for t in _my_tx(ctx, [i.id for i in body.items])}
     allowed = tenant_categories(ctx.uids)
-    done = 0
-    for item in body.items:
+    done = known = 0
+    # mais antigos primeiro: a parcela 6/12 cria a série e a 7/12 do mesmo lote é reconhecida
+    for item in sorted(body.items, key=lambda i: (rows[i.id].date, rows[i.id].installment_number or 0)):
         tx = rows[item.id]
         if tx.status == 'imported':
             continue
@@ -468,10 +469,16 @@ def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_session)):
         except ExpenseError as exc:
             db.session.rollback()
             raise HTTPException(status_code=422, detail=f'{tx.description}: {exc}')
-        done += 1
+        if tx.status == 'imported':
+            done += 1
+        else:
+            known += 1
     of.reconcile_payments(ctx.user.id)  # pagamento de fatura que chegou antes das compras
     db.session.commit()
-    return {'message': f'{done} despesa(s) lançada(s) no FinFam.' if done else 'Nada para lançar.', 'imported': done}
+    msg = f'{done} despesa(s) lançada(s) no FinFam.' if done else 'Nada para lançar.'
+    if known:
+        msg += f' {known} já estava(m) no FinFam (outra parcela da mesma compra).'
+    return {'message': msg, 'imported': done, 'already': known}
 
 
 class IdsIn(BaseModel):

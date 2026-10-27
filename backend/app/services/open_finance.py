@@ -503,12 +503,18 @@ def _rebill(acc: BankAccount, tx: BankTransaction, by_bill: bool) -> None:
     bill = tx_bill(acc, tx) if by_bill else None
     tx.bill_year, tx.bill_month = bill if bill else (tx.bill_year, tx.bill_month)
     e = db.session.get(Expense, tx.expense_id) if tx.expense_id else None
-    if not bill or e is None or e.installment_group_id or e.payment_method != CREDIT \
-            or not e.description.startswith(tx.description[:40]):
+    if not bill or e is None or e.payment_method != CREDIT or not e.description.startswith(tx.description[:40]):
         return
-    if (e.year, e.month) != bill:
-        e.month, e.year = month_offset(bill[1], bill[0], 0)
-        e.paid = False  # mudou de fatura: a conciliação diz de novo se essa fatura foi paga
+    delta = (bill[0] * 12 + bill[1]) - (e.year * 12 + e.month)
+    if not delta:
+        return
+    rows = [e]
+    if e.installment_group_id:  # parcela de uma série: as seguintes andam junto
+        rows = (Expense.query.filter(Expense.installment_group_id == e.installment_group_id,
+                                     Expense.installment_number >= (e.installment_number or 0)).all())
+    for row in rows:
+        row.month, row.year = month_offset(row.month, row.year, delta)
+        row.paid = False  # mudou de fatura: a conciliação diz de novo se essa fatura foi paga
 
 
 def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date | None = None) -> int:
@@ -707,21 +713,27 @@ def suggestion(tx: BankTransaction, uids: list, tenant_id: int | None) -> dict:
 
 def approve(tx: BankTransaction, uids: list, category: str, description: str | None = None,
             payment_method: str | None = None) -> Expense:
-    """Lança a despesa (mesma regra do site: fatura, parcelas) e marca como importado."""
+    """Lança a despesa (mesma regra do site: fatura, parcelas) e marca como importado.
+    Parcela do meio (k/n, k>1) lança k..n: as que faltam aparecem nas faturas seguintes, como
+    numa compra parcelada lançada à mão. Se já existe (outra parcela lançada no mesmo lote
+    criou), vira "já no FinFam" em vez de duplicar."""
+    from app.models import InstallmentGroup
+    from app.services.finance import month_offset
     acc, conn = tx.account, tx.account.connection
+    credit = acc.type == 'CREDIT'
+    existing = find_existing(tx, acc.card_id)
+    if existing is not None:
+        tx.status, tx.expense_id, tx.reason, tx.reviewed_at = 'duplicate', existing.id, 'Já estava no FinFam.', utcnow()
+        return existing
     when = target_date(tx)
     desc = (description or tx.description).strip()[:200] or tx.description
     n, k = tx.total_installments or 0, tx.installment_number or 0
-    credit = acc.type == 'CREDIT'
     method = CREDIT if credit else (payment_method if payment_method in ('PIX', DEBIT) else suggested_method(tx))
     installments = None
     amount = Decimal(str(tx.amount))
-    if credit and n > 1:
-        if k <= 1:  # 1ª parcela: lança a compra inteira parcelada, como no site
-            installments = n
-            amount = Decimal(str(tx.total_amount)) if tx.total_amount else amount * n
-        else:       # parcela do meio sem a compra original: lança só esta parcela
-            desc = f'{desc} ({k}/{n})'
+    if credit and n > 1 and k <= 1:  # 1ª parcela: lança a compra inteira parcelada, como no site
+        installments = n
+        amount = Decimal(str(tx.total_amount)) if tx.total_amount else amount * n
     data = ExpenseData(user_id=tx.user_id, description=desc, amount=amount,
                        category=category if category else 'Outros', payment_method=method,
                        day=when.day, month=when.month, year=when.year,
@@ -730,11 +742,24 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
     result = create_expense(uids, data)
     first = result['expenses'][0]
     if credit and tx.bill_year and tx.bill_month:  # a fatura que o banco diz, não a calculada
-        from app.services.finance import month_offset
         delta = (tx.bill_year * 12 + tx.bill_month) - (first.year * 12 + first.month)
         if delta:
             for e in result['expenses']:
                 e.month, e.year = month_offset(e.month, e.year, delta)
+    if credit and n > 1 and k > 1:  # parcela do meio: completa a série k..n
+        group = InstallmentGroup(user_id=first.user_id, description=first.description, total_amount=amount * n,
+                                 num_installments=n, bank=first.bank or '')
+        db.session.add(group)
+        db.session.flush()
+        first.installment_group_id, first.installment_number = group.id, k
+        for j in range(k + 1, n + 1):
+            m, y = month_offset(first.month, first.year, j - k)
+            db.session.add(Expense(
+                user_id=first.user_id, description=first.description, amount=amount, category=first.category,
+                payment_method=CREDIT, bank=first.bank, year=y, month=m, day=first.day,
+                purchase_month=m, purchase_year=y, card_id=first.card_id, paid=False,
+                installment_group_id=group.id, installment_number=j))
+        db.session.flush()
     tx.status, tx.expense_id, tx.reason, tx.reviewed_at = 'imported', first.id, None, utcnow()
     return first
 

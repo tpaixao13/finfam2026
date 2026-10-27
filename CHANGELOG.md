@@ -89,6 +89,9 @@ pelo bot ou importando extrato, como antes.
   conciliação é refeita depois de lançar as compras. Despesa já lançada fora da fatura certa é movida
   (se a descrição não foi editada) e volta a ficar não paga, para a conciliação refazer.
 - Compra pendente sem billId vai para a fatura em aberto (não para a última fechada).
+- Parcela do meio (k/n) lançada cria também k+1..n nas faturas seguintes (como compra parcelada lançada à
+  mão); as parcelas que o banco lançar depois — ou outras do mesmo lote — viram "já no FinFam". Mudar de
+  fatura uma parcela de série leva as seguintes junto.
 - Boleto que tem o total de uma fatura do banco (vencimento até 10 dias) é o pagamento dela: conciliado,
   não vira despesa (ex.: boleto de R$ 17,25 da fatura só com a anuidade).
 - Sugestões: conta → PIX (boleto, débito automático, transferência) e Cartão de Débito só para compra no
