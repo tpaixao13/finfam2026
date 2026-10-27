@@ -18,7 +18,7 @@ import logging
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 
@@ -31,6 +31,7 @@ from app.models import BankAccount, Expense, BankConnection, BankTransaction, Cr
 from app.services import open_finance as of
 from app.services import pluggy as pg
 from app.services.expense_service import ExpenseError, tenant_banks, tenant_categories
+from app.services.export_service import expense_rows, to_xlsx
 from app.services.finance import BANKS
 
 log = logging.getLogger('finfam.pluggy')
@@ -206,7 +207,8 @@ def _account_out(acc: BankAccount) -> dict:
 
 def _conn_out(conn: BankConnection) -> dict:
     return {
-        'id': conn.id, 'item_id': conn.item_id, 'bank_name': conn.label, 'connector_name': conn.bank_name, 'bank_color': conn.bank_color,
+        'id': conn.id, 'item_id': conn.item_id, 'bank_name': conn.label, 'connector_name': conn.bank_name,
+        'auto_import': bool(conn.auto_import), 'bank_color': conn.bank_color,
         'status': conn.status, 'execution_status': conn.execution_status, 'error': conn.error_message,
         'last_updated_at': conn.last_updated_at.isoformat() + 'Z' if conn.last_updated_at else None,
         'accounts': [_account_out(a) for a in conn.accounts.order_by(BankAccount.type, BankAccount.id).all()],
@@ -247,17 +249,78 @@ def list_items(ctx: Ctx = Depends(get_ctx_session)):
             'banks': sorted(set(BANKS) | set(tenant_banks(ctx.uids)))}
 
 
-class RenameIn(BaseModel):
-    bank_name: str = Field(min_length=1, max_length=60, description='Nome do banco nas despesas lançadas (ex.: Caixa)')
+class ItemUpdateIn(BaseModel):
+    bank_name: str | None = Field(None, min_length=1, max_length=60,
+                                  description='Nome do banco nas despesas lançadas (ex.: Caixa)')
+    auto_import: bool | None = Field(None, description='Lançar sozinho o que chega deste banco')
 
 
-@router.put('/items/{conn_id}', summary='Dá nome ao banco (útil no Meu Pluggy, que vem como "MeuPluggy")')
-def rename_item(conn_id: int, body: RenameIn, ctx: Ctx = Depends(get_ctx_session)):
+@router.put('/items/{conn_id}', summary='Nome do banco e/ou lançamento automático')
+def update_item(conn_id: int, body: ItemUpdateIn, ctx: Ctx = Depends(get_ctx_session)):
     _enabled_tenant(ctx)
     conn = _conn(ctx, conn_id)
-    conn.display_name = body.bank_name.strip()
+    msg = []
+    if body.bank_name is not None:
+        conn.display_name = body.bank_name.strip()
+        msg.append(f'Banco renomeado para {conn.label}.')
+    launched = 0
+    if body.auto_import is not None:
+        conn.auto_import = body.auto_import
+        if body.auto_import:
+            launched = of.auto_approve(conn)  # o que já estava para revisar entra agora
+            msg.append(f'{conn.label}: lançamento automático ligado.'
+                       + (f' {launched} lançamento(s) lançado(s) agora.' if launched else ''))
+        else:
+            msg.append(f'{conn.label}: volta a passar pela revisão.')
     db.session.commit()
-    return {'message': f'Banco renomeado para {conn.label}.', 'item': _conn_out(conn)}
+    return {'message': ' '.join(msg) or 'Nada mudou.', 'item': _conn_out(conn)}
+
+
+# ── Recomeçar pelo banco ─────────────────────────────────────────────────────
+
+def _reset_date(date_from: date) -> date:
+    today = date.today()
+    if date_from > today or date_from < of.months_back(today, 12):
+        raise HTTPException(status_code=422, detail='Data: escolha um dia dos últimos 12 meses.')
+    return date_from
+
+
+@router.get('/reset/preview', summary='Quantas despesas "recomeçar pelo banco" apagaria')
+def reset_preview(date_from: date, ctx: Ctx = Depends(get_ctx_session)):
+    _enabled_tenant(ctx)
+    rows = of.reset_candidates(ctx.user.id, _reset_date(date_from))
+    return {'count': len(rows), 'total': round(sum(float(e.amount) for e in rows), 2),
+            'connections': BankConnection.query.filter_by(user_id=ctx.user.id).count()}
+
+
+@router.get('/reset/backup', summary='Backup (.xlsx) das despesas que seriam apagadas')
+def reset_backup(date_from: date, ctx: Ctx = Depends(get_ctx_session)):
+    _enabled_tenant(ctx)
+    rows = of.reset_candidates(ctx.user.id, _reset_date(date_from))
+    rows.sort(key=lambda e: (e.year, e.month, e.day, e.id))
+    return Response(to_xlsx(expense_rows(rows)),
+                    media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    headers={'Content-Disposition': f'attachment; filename=backup_finfam_{date_from.isoformat()}.xlsx'})
+
+
+class ResetIn(BaseModel):
+    date_from: date
+    password: str = Field(min_length=1, max_length=200, description='Sua senha do FinFam (confirmação)')
+
+
+@router.post('/reset', summary='Apaga as despesas cobertas pelo banco desde a data e reimporta do banco')
+def reset(body: ResetIn, ctx: Ctx = Depends(get_ctx_session)):
+    _enabled_tenant(ctx)
+    if not BankConnection.query.filter_by(user_id=ctx.user.id).count():
+        raise HTTPException(status_code=409, detail='Conecte um banco antes de recomeçar pelo banco.')
+    if not ctx.user.check_password(body.password):
+        raise HTTPException(status_code=403, detail='Senha incorreta.')
+    gone = of.reset_from(ctx.user.id, _reset_date(body.date_from))
+    db.session.commit()
+    new = of.sync_stale(ctx.user.id)
+    log.info('Recomeçar pelo banco: user %s apagou %s despesa(s) desde %s', ctx.user.id, gone, body.date_from)
+    return {'message': f'{gone} despesa(s) apagada(s). {new} lançamento(s) trazido(s) do banco.',
+            'deleted': gone, 'imported': new}
 
 
 class ItemIn(BaseModel):
@@ -496,7 +559,8 @@ async def webhook(hook_token: str, request: Request):
     if tenant is None or not tenant.open_finance_enabled:
         return {'ok': True, 'ignored': 'open_finance_disabled'}  # 2XX: a Pluggy não fica reenviando
     log.info('Webhook Pluggy de user %s: %s', cfg.user_id, str(event)[:60])
-    _item_event(cfg.user_id, str(event or ''), str(payload.get('itemId') or ''), payload.get('error'))
+    if _item_event(cfg.user_id, str(event or ''), str(payload.get('itemId') or ''), payload.get('error')):
+        of.schedule_sync(cfg.user_id)  # relê já (lança sozinho se a conexão estiver no automático)
     # etapa 3: enfileirar a importação dos lançamentos (transactions/*)
     return {'ok': True}
 
@@ -505,14 +569,14 @@ _EVENT_STATUS = {'item/error': 'LOGIN_ERROR', 'item/waiting_user_input': 'WAITIN
                  'item/waiting_user_action': 'WAITING_USER_ACTION', 'item/login_succeeded': 'UPDATING'}
 
 
-def _item_event(user_id: int, event: str, item_id: str, error) -> None:
-    """Só anota (sem chamar a Pluggy: o webhook tem de responder rápido). A próxima
-    listagem relê o banco quando há novidade."""
+def _item_event(user_id: int, event: str, item_id: str, error) -> bool:
+    """Só anota (sem chamar a Pluggy: o webhook tem de responder rápido). Devolve True
+    quando há novidade para reler (a leitura roda em segundo plano)."""
     if not (event.startswith('item/') or event.startswith('transactions/')) or not item_id:
-        return
+        return False
     conn = BankConnection.query.filter_by(item_id=item_id[:64], user_id=user_id).first()
     if conn is None:
-        return
+        return False
     if event.startswith('transactions/'):
         conn.needs_sync = True  # lançamentos novos/alterados: a próxima leitura traz
     elif event == 'item/deleted':
@@ -524,4 +588,6 @@ def _item_event(user_id: int, event: str, item_id: str, error) -> None:
         conn.status = _EVENT_STATUS[event]
         if isinstance(error, dict) and error.get('message'):
             conn.error_message = str(error['message'])[:300]
+    news = event != 'item/deleted' and bool(conn.needs_sync)
     db.session.commit()
+    return news

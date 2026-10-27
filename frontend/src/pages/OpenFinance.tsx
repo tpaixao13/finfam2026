@@ -1,9 +1,9 @@
 // Open Finance (Pluggy) — cada pessoa cadastra a chave da própria conta Pluggy (etapa 1)
 // e conecta os bancos pelo widget Pluggy Connect, vendo contas e cartões (etapa 2).
 import { useState } from 'react'
-import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Modal, PageHeader, Panel, Segmented, Select, Spinner } from '../components/ui'
+import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Modal, PageHeader, Panel, Segmented, Select, Spinner, Switch } from '../components/ui'
 import { api } from '../lib/api'
-import { money } from '../lib/format'
+import { brl, money } from '../lib/format'
 import { useApi } from '../lib/hooks'
 import { Link } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
@@ -21,7 +21,7 @@ interface BankAccount {
   currency: string; balance: number | null; credit_limit: number | null; card_id: number | null; card_label: string | null
 }
 interface Connection {
-  id: number; item_id: string; bank_name: string | null; connector_name: string | null; bank_color: string | null; status: string | null
+  id: number; item_id: string; bank_name: string | null; connector_name: string | null; auto_import: boolean; bank_color: string | null; status: string | null
   execution_status: string | null; error: string | null; last_updated_at: string | null; accounts: BankAccount[]
 }
 
@@ -155,6 +155,16 @@ function ConnectionCard({ conn, cards, banks, onChange }: { conn: Connection; ca
       </header>
       <p className="muted small">Última atualização do banco: {when(conn.last_updated_at)}</p>
       {conn.error && <p className="form-error" role="alert">{conn.error}</p>}
+      <div className="bank-auto">
+        <Switch label={`Lançar automaticamente o que chega de ${conn.bank_name ?? 'banco'}`} checked={conn.auto_import}
+          onChange={(v) => act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, { auto_import: v }), onChange)} />
+        <span className="small">
+          <b>Lançar automaticamente</b>
+          <span className="muted"> — {conn.auto_import
+            ? 'o que chega vira despesa com a categoria sugerida; corrija em Revisar importados › Lançados.'
+            : 'desligado: tudo passa por Revisar importados antes.'}</span>
+        </span>
+      </div>
       {conn.accounts.length ? (
         <ul className="bank-accs">{conn.accounts.map((a) => <AccountRow key={a.id} acc={a} cards={cards} onChange={onChange} />)}</ul>
       ) : <p className="muted">O banco ainda não devolveu contas.</p>}
@@ -231,6 +241,7 @@ function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => voi
   }
 
   return (
+    <>
     <Panel title="Bancos conectados" actions={
       <div className="row gap">
         {list && list.length > 0 && (
@@ -260,6 +271,70 @@ function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => voi
         {!full && <> Já conectou o banco pelo painel da Pluggy?{' '}
           <button type="button" className="link-btn" onClick={() => setAsking('id')}>Usar o ID da conexão</button>.</>}
       </p>
+    </Panel>
+    {!!list?.length && <ResetPanel onDone={reload} />}
+    </>
+  )
+}
+
+function firstOfMonth(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+/** Recomeçar pelo banco: apaga as despesas (PIX, débito, crédito) desde uma data e importa do banco. */
+function ResetPanel({ onDone }: { onDone: () => void }) {
+  const act = useAction()
+  const [open, setOpen] = useState(false)
+  const [dateFrom, setDateFrom] = useState(firstOfMonth())
+  const [backup, setBackup] = useState(false)
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const preview = useApi(() => open && dateFrom
+    ? api.get<{ count: number; total: number }>(`/pluggy/reset/preview?date_from=${dateFrom}`)
+    : Promise.resolve(null), [open, dateFrom])
+  const p = preview.data
+  async function run(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    await act(() => api.post<{ message: string }>('/pluggy/reset', { date_from: dateFrom, password }),
+      () => { setOpen(false); setPassword(''); setBackup(false); onDone() })
+    setBusy(false)
+  }
+  return (
+    <Panel title="Recomeçar pelo banco">
+      {!open ? (
+        <div className="stack-sm">
+          <p className="muted">Apaga as suas despesas de PIX, débito e crédito a partir de uma data e traz tudo de novo
+            dos bancos conectados. Dinheiro, VR/VA, as despesas das outras pessoas da família e o que está no futuro
+            (contas recorrentes, parcelas a vencer) ficam.</p>
+          <div><Button variant="ghost" icon="arrow-repeat" onClick={() => setOpen(true)}>Recomeçar pelo banco…</Button></div>
+        </div>
+      ) : (
+        <form className="stack" onSubmit={run}>
+          <Field label="Apagar e reimportar a partir de" hint="Até 12 meses atrás.">
+            <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setBackup(false) }} required />
+          </Field>
+          {preview.error ? <p className="form-error" role="alert">{preview.error}</p> : !p ? <Spinner /> : (
+            <p><b>{p.count}</b> despesa(s) suas serão apagadas ({brl(p.total)}).</p>
+          )}
+          <div className="row gap">
+            <Button type="button" variant="ghost" icon="download" disabled={!p}
+              onClick={async () => { await api.download('/pluggy/reset/backup', { date_from: dateFrom }, 'backup_finfam.xlsx'); setBackup(true) }}>
+              Baixar backup (.xlsx)</Button>
+            {backup && <Badge tone="success">Backup baixado</Badge>}
+          </div>
+          <Field label="Sua senha do FinFam" hint="Para confirmar. Não dá para desfazer (só reimportando o backup).">
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
+          </Field>
+          <div className="row gap">
+            <Button type="submit" variant="danger" busy={busy} disabled={!backup || !password || !p}>
+              Apagar {p?.count ?? ''} e importar do banco</Button>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button>
+          </div>
+          {!backup && <p className="muted small">Baixe o backup antes: o botão de apagar só libera depois.</p>}
+        </form>
+      )}
     </Panel>
   )
 }
@@ -318,7 +393,7 @@ export function OpenFinancePage() {
   return (
     <div className="page">
       <PageHeader title="Contas conectadas"
-        subtitle="Lançamentos e faturas chegando do banco via Open Finance (Pluggy). Nada é lançado sem você revisar." />
+        subtitle="Lançamentos e faturas chegando do banco via Open Finance (Pluggy). Em cada banco, você escolhe: revisar antes ou lançar automaticamente." />
       {data.error ? <ErrorBox message={data.error} onRetry={data.reload} /> : !cfg ? <Spinner /> : !cfg.available ? (
         <Panel title="Open Finance não liberado">
           <p className="muted">O administrador ainda não liberou o Open Finance para a sua família.</p>

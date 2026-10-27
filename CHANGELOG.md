@@ -59,6 +59,15 @@ pelo bot ou importando extrato, como antes.
     Ignorar, Revisar) fica como você deixou;
   - nome do banco por conexão (Meu Pluggy vem como "MeuPluggy"): vai nas despesas lançadas.
 
+- **Lançar automaticamente** (por banco): o que chega vira despesa com a categoria sugerida e aparece em
+  "Lançados" para corrigir. Duplicados e ignorados continuam fora. Compra pendente que o banco troca pela
+  lançada (id novo) não é lançada duas vezes.
+- O webhook dispara a leitura em segundo plano (avisos em rajada viram uma leitura só).
+- **Recomeçar pelo banco**: apaga as despesas da pessoa de PIX, débito e crédito desde uma data (até 12 meses)
+  e reimporta do banco. Dinheiro, VR/VA, outras pessoas e o que está no futuro ficam. Exige baixar o
+  backup (.xlsx) e a senha.
+- Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
+
 **Próximas etapas**
 4. Conferência de fatura, aviso no bot e ferramenta no MCP.
 

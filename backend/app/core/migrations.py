@@ -62,6 +62,7 @@ _ALTERS = [
     'ALTER TABLE bank_connections ADD COLUMN import_from DATE',
     'ALTER TABLE bank_connections ADD COLUMN tx_synced_at DATETIME',
     'ALTER TABLE bank_connections ADD COLUMN display_name TEXT',
+    'ALTER TABLE bank_connections ADD COLUMN auto_import INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE users ADD COLUMN totp_secret TEXT',
     'ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE users ADD COLUMN totp_failures INTEGER NOT NULL DEFAULT 0',

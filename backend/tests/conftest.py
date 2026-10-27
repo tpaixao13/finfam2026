@@ -75,3 +75,10 @@ def family(client):
 @pytest.fixture()
 def other_family(client):
     return Family(client, name='Outra', email='outra@test.com')
+
+
+@pytest.fixture(autouse=True)
+def _no_background_sync(monkeypatch):
+    """A leitura em segundo plano do Open Finance (thread) fica desligada nos testes."""
+    from app.services import open_finance
+    monkeypatch.setattr(open_finance, 'BACKGROUND', False)

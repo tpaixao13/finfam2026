@@ -7,17 +7,20 @@ lança — usando o mesmo `create_expense` do site e do bot.
 """
 import logging
 import re
+import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.core.db import db
 from app.core.security import decrypt_field
 from app.core.types import utcnow
-from app.models import BankAccount, BankConnection, BankTransaction, CreditCard, Expense, PluggyConfig
+from app.models import (BankAccount, BankConnection, BankTransaction, CreditCard, Expense, InstallmentGroup,
+                        PluggyConfig, RecurringGroup, User)
 from app.services import pluggy as pg
 from app.services.categorizer import categorize
 from app.services.expense_service import ExpenseData, create_expense
-from app.services.finance import CATEGORIES, CREDIT, DEBIT
+from app.services.finance import BANK_PAYMENTS, CATEGORIES, CREDIT, DEBIT
 
 log = logging.getLogger('finfam.pluggy')
 
@@ -189,8 +192,9 @@ def find_existing(tx: BankTransaction, card_id: int | None) -> Expense | None:
     for e in q.all():
         if e.id in used:
             continue
-        if (e.payment_method == CREDIT) != credit:
-            continue  # saída da conta nunca é compra no cartão, e vice-versa
+        allowed = (CREDIT,) if credit else ('PIX', DEBIT)
+        if e.payment_method not in allowed:
+            continue  # cartão só com crédito; conta só com PIX/débito (dinheiro e VR/VA não saem do banco)
         if card_id and e.card_id and e.card_id != card_id:
             continue
         if n and n > 1 and e.installment_number and e.installment_number != n:
@@ -237,9 +241,10 @@ def _is_expense(acc: BankAccount, raw: dict) -> bool:
 _NEXT = re.compile(r'\?[A-Za-z0-9=&%._:+\-]{1,1000}')
 
 
-def _fetch(client: pg.PluggyClient, account_id: str, since: date) -> list[dict]:
+def _fetch(client: pg.PluggyClient, account_id: str, since: date) -> tuple[list[dict], bool]:
     """GET /v2/transactions com cursor (o /transactions antigo foi desligado pela Pluggy).
-    `next` vem pronto ("?accountId=...&after=...") e é colado no caminho."""
+    `next` vem pronto ("?accountId=...&after=...") e é colado no caminho.
+    Devolve (lançamentos, completo?) — incompleto se bateu no limite de páginas."""
     out = []
     path = f'/v2/transactions?accountId={pg.safe_id(account_id)}&dateFrom={since.isoformat()}T00:00:00.000Z'
     for _ in range(MAX_PAGES):
@@ -247,9 +252,21 @@ def _fetch(client: pg.PluggyClient, account_id: str, since: date) -> list[dict]:
         out.extend(r.get('results') or [])
         nxt = r.get('next')
         if not nxt or not isinstance(nxt, str) or not _NEXT.fullmatch(nxt):
-            break
+            return out, True
         path = '/v2/transactions' + nxt
-    return out
+    return out, False
+
+
+def _drop_vanished(acc: BankAccount, since: date, seen: set[str]) -> None:
+    """O banco deixou de mandar (ex.: compra pendente que virou lançada com outro id).
+    Pendente some da revisão; já lançado/duplicado perde só o vínculo (a despesa fica e
+    pode casar com o lançamento novo, sem lançar duas vezes)."""
+    for tx in acc.transactions.filter(BankTransaction.date >= since).all():
+        if tx.pluggy_id in seen:
+            continue
+        if tx.status in ('pending', 'imported', 'duplicate'):
+            db.session.delete(tx)
+    db.session.flush()
 
 
 def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date | None = None) -> int:
@@ -259,12 +276,12 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
     since = start if conn.tx_synced_at is None else max(start, today - timedelta(days=RESYNC_DAYS))
     new_pending = 0
     for acc in conn.accounts.all():
-        seen = set()
-        for raw in _fetch(client, acc.pluggy_account_id, since):
-            pid = str(raw.get('id') or '')
-            if not _ID.fullmatch(pid) or not _is_expense(acc, raw):
-                continue
-            seen.add(pid)
+        raws, complete = _fetch(client, acc.pluggy_account_id, since)
+        raws = [r for r in raws if _ID.fullmatch(str(r.get('id') or '')) and _is_expense(acc, r)]
+        if complete:
+            _drop_vanished(acc, since, {str(r['id']) for r in raws})
+        for raw in raws:
+            pid = str(raw['id'])
             tx = BankTransaction.query.filter_by(pluggy_id=pid).first()
             if tx is not None and tx.account_id != acc.id:
                 continue
@@ -273,7 +290,7 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
                 tx = BankTransaction(account_id=acc.id, user_id=conn.user_id, pluggy_id=pid, status='pending')
                 db.session.add(tx)
             elif tx.reviewed_at is not None or tx.status == 'imported':
-                continue  # você já mexeu: não reclassifica
+                continue  # você já mexeu (ou já lançou): não reclassifica
             else:  # classificado sozinho antes: classifica de novo (regras podem ter melhorado)
                 tx.status, tx.reason, tx.expense_id = 'pending', None, None
             _apply_tx(tx, raw)
@@ -290,18 +307,48 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
                 tx.reason = 'Já estava no FinFam.'
             elif fresh:
                 new_pending += 1
-        # pendente que o banco deixou de mandar (ex.: compra pendente que virou outra) some da revisão
-        for tx in acc.transactions.filter(BankTransaction.status == 'pending', BankTransaction.date >= since).all():
-            if tx.pluggy_id not in seen:
-                db.session.delete(tx)
+            db.session.flush()
     conn.tx_synced_at = utcnow()
     db.session.flush()
     return new_pending
 
 
+def family_of(user_id: int) -> tuple[list[int], int | None]:
+    """(ids da família, tenant) de quem conectou o banco — para validar cartão e categoria."""
+    user = db.session.get(User, user_id)
+    if user is None or not user.tenant_id:
+        return [user_id], None
+    return [u.id for u in User.query.filter_by(tenant_id=user.tenant_id).all()], user.tenant_id
+
+
+def auto_approve(conn: BankConnection) -> int:
+    """Modo "lançar automaticamente": o que ficou para revisar vira despesa com a categoria
+    sugerida (aparece em Lançados para corrigir). Duplicados e ignorados ficam de fora."""
+    db.session.commit()  # o que a leitura trouxe fica salvo mesmo se um lançamento falhar
+    uids, tenant_id = family_of(conn.user_id)
+    done = 0
+    rows = (BankTransaction.query.join(BankAccount)
+            .filter(BankAccount.connection_id == conn.id, BankTransaction.status == 'pending',
+                    BankTransaction.reviewed_at.is_(None))
+            .order_by(BankTransaction.date, BankTransaction.id).all())
+    for tx in rows:
+        sug = suggestion(tx, uids, tenant_id)
+        try:
+            approve(tx, uids, sug['category'])
+        except ValueError as exc:  # ExpenseError: deixa para revisar à mão
+            db.session.rollback()
+            log.warning('Lançamento automático %s ficou para revisar: %s', tx.pluggy_id, exc)
+            continue
+        tx.reason = 'Lançado automaticamente.'
+        done += 1
+    db.session.flush()
+    return done
+
+
 def sync(conn: BankConnection, client: pg.PluggyClient, today: date | None = None) -> int:
     """Relê banco, contas e lançamentos. Se só os lançamentos falharem, banco e contas
-    ficam salvos e a próxima leitura tenta de novo (needs_sync continua ligado)."""
+    ficam salvos e a próxima leitura tenta de novo (needs_sync continua ligado).
+    Devolve quantos lançamentos novos chegaram (para revisar ou lançados sozinhos)."""
     sync_accounts(conn, client)
     try:
         with db.session.begin_nested():
@@ -311,6 +358,8 @@ def sync(conn: BankConnection, client: pg.PluggyClient, today: date | None = Non
         conn.needs_sync = True
         return 0
     conn.needs_sync = False
+    if conn.auto_import:
+        auto_approve(conn)
     return count
 
 
@@ -383,3 +432,83 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
 def valid_category(category: str | None, allowed: list[str]) -> str:
     category = (category or '').strip()[:60]
     return category if category in allowed or category in CATEGORIES else 'Outros'
+
+
+# ── recomeçar pelo banco ─────────────────────────────────────────────────────
+
+def reset_candidates(user_id: int, date_from: date, today: date | None = None) -> list[Expense]:
+    """Despesas da pessoa que o banco cobre (PIX, débito, crédito) com data entre date_from e hoje.
+    Dinheiro, VR/VA e o que está no futuro (recorrências, parcelas a vencer) ficam."""
+    today = today or date.today()
+    rows = (Expense.query.filter(Expense.user_id == user_id, Expense.payment_method.in_(BANK_PAYMENTS),
+                                 Expense.year >= date_from.year - 1).all())
+    return [e for e in rows if date_from <= _expense_date(e) <= today]
+
+
+def reset_from(user_id: int, date_from: date) -> int:
+    """Apaga as despesas cobertas pelo banco desde date_from e prepara a reimportação
+    (os lançamentos do banco desse período voltam do zero na próxima leitura)."""
+    gone = reset_candidates(user_id, date_from)
+    ids = {e.id for e in gone}
+    groups = {('i', e.installment_group_id) for e in gone if e.installment_group_id} | \
+             {('r', e.recurring_group_id) for e in gone if e.recurring_group_id}
+    for e in gone:
+        db.session.delete(e)
+    BankTransaction.query.filter(BankTransaction.user_id == user_id,
+                                 (BankTransaction.date >= date_from) | BankTransaction.expense_id.in_(ids or {0})
+                                 ).delete(synchronize_session=False)
+    db.session.flush()
+    for kind, gid in groups:  # grupo de parcelas/recorrência sem nenhuma despesa: some também
+        model, field = (InstallmentGroup, Expense.installment_group_id) if kind == 'i' else \
+                       (RecurringGroup, Expense.recurring_group_id)
+        if not Expense.query.filter(field == gid).count():
+            g = db.session.get(model, gid)
+            if g is not None:
+                db.session.delete(g)
+    for conn in BankConnection.query.filter_by(user_id=user_id).all():
+        conn.import_from, conn.tx_synced_at, conn.needs_sync = date_from, None, True
+    db.session.flush()
+    return len(gone)
+
+
+# ── leitura em segundo plano (disparada pelo webhook) ────────────────────────
+
+BACKGROUND = True        # os testes desligam
+DEBOUNCE_SECONDS = 5     # a Pluggy manda vários avisos seguidos: junta numa leitura só
+_bg_lock = threading.Lock()
+_bg_state: dict[int, str] = {}   # user_id → 'running' | 'again'
+
+
+def schedule_sync(user_id: int) -> None:
+    """Relê os bancos da pessoa numa thread (o webhook precisa responder em até 10 s)."""
+    if not BACKGROUND:
+        return
+    with _bg_lock:
+        if user_id in _bg_state:
+            _bg_state[user_id] = 'again'
+            return
+        _bg_state[user_id] = 'running'
+    threading.Thread(target=_bg_run, args=(user_id,), daemon=True, name=f'pluggy-sync-{user_id}').start()
+
+
+def _bg_run(user_id: int) -> None:
+    from app.core.db import session  # thread nova = sessão própria
+    try:
+        while True:
+            time.sleep(DEBOUNCE_SECONDS)
+            try:
+                sync_stale(user_id)
+            except Exception:  # noqa: BLE001 — nunca derruba a API
+                log.exception('Leitura em segundo plano falhou (user %s)', user_id)
+            finally:
+                session.remove()
+            with _bg_lock:
+                if _bg_state.get(user_id) == 'again':
+                    _bg_state[user_id] = 'running'
+                    continue
+                _bg_state.pop(user_id, None)
+                return
+    except BaseException:
+        with _bg_lock:
+            _bg_state.pop(user_id, None)
+        raise

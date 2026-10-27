@@ -258,3 +258,88 @@ def test_real_bank_cases(client, family, bank, txs):  # noqa: F811
     family.post('/pluggy/transactions/approve', json={'items': [{'id': boleto['id'], 'category': 'Outros'}]})
     assert Expense.query.filter_by(description='PAGAMENTO DE BOLETO').one().bank == 'Caixa'
     session.remove()
+
+
+def test_auto_import_launches_and_pending_to_posted_does_not_double(client, family, bank, txs):  # noqa: F811
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    txs[cc].append({'id': 'c-pend', 'type': 'DEBIT', 'amount': 80.0, 'date': day(1), 'description': 'IFOOD',
+                    'status': 'PENDING'})
+    txs[acc].append({'id': 't-fat', 'type': 'DEBIT', 'amount': -500.0, 'date': day(2), 'description': 'Pagamento de fatura'})
+    conn = _post_item(family)['item']
+    r = family.put(f"/pluggy/items/{conn['id']}", json={'auto_import': True})
+    assert r.status_code == 200 and r.json()['item']['auto_import'] is True
+    assert '1 lançamento(s) lançado(s) agora' in r.json()['message']
+    assert Expense.query.filter_by(description='IFOOD').count() == 1
+    assert Expense.query.filter_by(description='Pagamento de fatura').count() == 0  # ignorado continua fora
+    session.remove()
+    # o banco troca a compra pendente pela lançada (id novo) e chega uma nova: lança só a nova
+    txs[cc][:] = [{'id': 'c-post', 'type': 'DEBIT', 'amount': 80.0, 'date': day(1), 'description': 'IFOOD'},
+                  {'id': 'c-new', 'type': 'DEBIT', 'amount': 25.0, 'date': day(0), 'description': 'Padaria'}]
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    session.remove()
+    family.get('/pluggy/items')
+    assert Expense.query.filter_by(description='IFOOD').count() == 1
+    assert Expense.query.filter_by(description='Padaria').count() == 1
+    lancados = family.get('/pluggy/transactions?status=imported').json()['items']
+    assert {t['description'] for t in lancados} == {'Padaria'} | ({'IFOOD'} & {t['description'] for t in lancados})
+    assert family.get('/pluggy/transactions?status=duplicate').json()['counts']['duplicate'] == 1  # IFOOD lançado
+    session.remove()
+
+
+def test_reset_from_date(client, family, other_family, bank, txs):  # noqa: F811
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    d_old = (TODAY - timedelta(days=60)).isoformat()
+    d_in = (TODAY - timedelta(days=3)).isoformat()
+    d_future = (TODAY + timedelta(days=20)).isoformat()
+    for desc, when, method in (('Antigo', d_old, 'PIX'), ('Mercado', d_in, 'PIX'), ('Feira', d_in, 'Dinheiro'),
+                               ('Aluguel futuro', d_future, 'PIX')):
+        family.post('/expenses', json={'description': desc, 'amount': '50', 'category': 'Outros',
+                                       'payment_method': method, 'date': when})
+    other_family.post('/expenses', json={'description': 'De outra família', 'amount': '50', 'category': 'Outros',
+                                         'payment_method': 'PIX', 'date': d_in})
+    txs[acc].append({'id': 't-1', 'type': 'DEBIT', 'amount': -50.0, 'date': day(3), 'description': 'MERCADO DO ZE'})
+    _post_item(family)
+    since = (TODAY - timedelta(days=10)).isoformat()
+    prev = family.get(f'/pluggy/reset/preview?date_from={since}').json()
+    assert prev['count'] == 1 and prev['total'] == 50.0  # só o Mercado (PIX, no período, até hoje)
+    bk = family.get(f'/pluggy/reset/backup?date_from={since}')
+    assert bk.status_code == 200 and bk.content[:2] == b'PK'
+    assert family.post('/pluggy/reset', json={'date_from': since, 'password': 'errada'}).status_code == 403
+    too_old = (TODAY - timedelta(days=500)).isoformat()
+    assert family.get(f'/pluggy/reset/preview?date_from={too_old}').status_code == 422
+    r = family.post('/pluggy/reset', json={'date_from': since, 'password': 'senha-segura'})
+    assert r.status_code == 200, r.text
+    assert r.json()['deleted'] == 1
+    left = {e.description for e in Expense.query.all()}
+    assert left == {'Antigo', 'Feira', 'Aluguel futuro', 'De outra família'}
+    pend = family.get('/pluggy/transactions').json()['items']
+    assert [t['description'] for t in pend] == ['MERCADO DO ZE']  # antes era "já no FinFam"; agora volta do banco
+    assert BankConnection.query.one().import_from == TODAY - timedelta(days=10)
+    session.remove()
+
+
+def test_webhook_starts_background_sync(client, family, bank, txs, monkeypatch):  # noqa: F811
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    _post_item(family)
+    started = []
+    monkeypatch.setattr(of, 'BACKGROUND', True)
+    monkeypatch.setattr(of.threading, 'Thread', lambda target, args, **kw: type(
+        'T', (), {'start': lambda self: started.append(args)})())
+    cfg = PluggyConfig.query.first()
+    url, headers = f'{API}/pluggy/webhook/{cfg.hook_token}', {
+        'X-FinFam-Hook': decrypt_field(cfg.hook_secret), 'CF-Connecting-IP': '52.67.145.81'}
+    uid = cfg.user_id
+    session.remove()
+    client.post(url, headers=headers, json={'event': 'transactions/created', 'itemId': ITEM})
+    client.post(url, headers=headers, json={'event': 'transactions/created', 'itemId': ITEM})
+    assert started == [(uid,)]  # a rajada vira uma leitura só
+    assert of._bg_state[uid] == 'again'
+    of._bg_state.clear()
+    # a leitura em si (o que a thread roda)
+    txs[acc].append({'id': 't-bg', 'type': 'DEBIT', 'amount': -9.0, 'date': day(0), 'description': 'Café'})
+    monkeypatch.setattr(of, 'DEBOUNCE_SECONDS', 0)
+    of._bg_state[uid] = 'running'
+    of._bg_run(uid)
+    assert BankTransaction.query.filter_by(pluggy_id='t-bg').count() == 1 and uid not in of._bg_state
+    session.remove()
