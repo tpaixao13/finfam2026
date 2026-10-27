@@ -69,6 +69,7 @@ _ALTERS = [
     'ALTER TABLE bank_transactions ADD COLUMN bill_year INTEGER',
     'ALTER TABLE bank_transactions ADD COLUMN bill_month INTEGER',
     'ALTER TABLE bank_transactions ADD COLUMN bill_ref VARCHAR(64)',
+    'ALTER TABLE bank_transactions ADD COLUMN card_digits VARCHAR(4)',
     'ALTER TABLE users ADD COLUMN totp_secret TEXT',
     'ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE users ADD COLUMN totp_failures INTEGER NOT NULL DEFAULT 0',

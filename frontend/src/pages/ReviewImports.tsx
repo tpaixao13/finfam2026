@@ -12,7 +12,7 @@ interface BankTx {
   id: number; date: string; description: string; amount: number; status: Status; reason: string | null
   installment: { number: number; total: number } | null; bank_pending: boolean; bill: string | null
   bank_name: string | null; account_type: 'BANK' | 'CREDIT'; account_name: string | null
-  account_last_digits: string | null; card_id: number | null
+  account_last_digits: string | null; card_id: number | null; card_digits: string | null
   expense: { id: number; description: string; amount: number; date: string } | null
   category?: string; payment_method?: string
 }
@@ -35,7 +35,8 @@ function Source({ tx }: { tx: BankTx }) {
   const where = tx.account_type === 'CREDIT' ? 'Cartão' : 'Conta'
   return (
     <span className="muted small">
-      {dayMonth(tx.date)} · {tx.bank_name ?? 'Banco'} · {where}{tx.account_last_digits ? ` •••• ${tx.account_last_digits}` : ''}
+      {dayMonth(tx.date)} · {tx.bank_name ?? 'Banco'} · {where}
+      {(tx.card_digits || tx.account_last_digits) && ` •••• ${tx.card_digits || tx.account_last_digits}`}
       {tx.installment && ` · parcela ${tx.installment.number}/${tx.installment.total}`}
       {tx.bill && ` · fatura ${tx.bill}`}
       {tx.bank_pending && ' · ainda pendente no banco'}

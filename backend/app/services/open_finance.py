@@ -313,15 +313,36 @@ def target_date(tx: BankTransaction) -> date:
 
 
 def card_family(card_id: int | None) -> set[int]:
-    """O cartão e os que dividem a mesma conta de crédito (virtual/adicional do mesmo banco)."""
+    """O cartão e os que vêm junto no mesmo cartão do banco: os da mesma conta de crédito e os
+    de crédito da família no mesmo banco (adicional no nome de outra pessoa fica noutra conta)."""
     if not card_id:
         return set()
     card = db.session.get(CreditCard, card_id)
     if card is None:
         return {card_id}
-    if not card.account_id:
-        return {card.id}
-    return {c.id for c in CreditCard.query.filter_by(account_id=card.account_id).all()} | {card.id}
+    ids = {card.id}
+    if card.account_id:
+        ids |= {c.id for c in CreditCard.query.filter_by(account_id=card.account_id).all()}
+    if card.bank:
+        uids = family_of(card.user_id)[0]
+        ids |= {c.id for c in CreditCard.query.filter(CreditCard.user_id.in_(uids)).all()
+                if (c.card_type == 'credit' or c.supports_credit) and (c.bank or '').casefold() == card.bank.casefold()}
+    return ids
+
+
+def card_used(tx: BankTransaction) -> CreditCard | None:
+    """Cartão do FinFam usado na compra: o do final que o banco informa (virtual ou adicional
+    da mesma conta de crédito do cartão ligado); senão, o cartão ligado."""
+    acc = tx.account
+    if acc.type != 'CREDIT' or not acc.card_id:
+        return None
+    if tx.card_digits:
+        uids, _ = family_of(tx.user_id)
+        siblings = card_family(acc.card_id)
+        for c in CreditCard.query.filter(CreditCard.user_id.in_(uids), CreditCard.last_digits == tx.card_digits).all():
+            if c.id in siblings:
+                return c
+    return db.session.get(CreditCard, acc.card_id)
 
 
 def find_existing(tx: BankTransaction, card_id: int | None) -> Expense | None:
@@ -330,17 +351,22 @@ def find_existing(tx: BankTransaction, card_id: int | None) -> Expense | None:
     when = target_date(tx)
     n = tx.installment_number if tx.total_installments and tx.total_installments > 1 else None
     tolerance = 40 if n and n > 1 else 3
-    used = {row[0] for row in db.session.query(BankTransaction.expense_id)
-            .filter(BankTransaction.user_id == tx.user_id, BankTransaction.expense_id.isnot(None),
-                    BankTransaction.id != (tx.id or 0))}
-    q = Expense.query.filter(Expense.user_id == tx.user_id, Expense.amount == Decimal(str(tx.amount)),
-                             Expense.year.between(when.year - 1, when.year + 1))
-    credit = tx.account.type == 'CREDIT'
+    account = tx.account or db.session.get(BankAccount, tx.account_id)  # recém-criado ainda sem o vínculo
+    credit = account.type == 'CREDIT'
     siblings = card_family(card_id)
+    # no cartão, a compra pode estar no nome de outra pessoa da família (adicional/virtual da conta)
+    uids = family_of(tx.user_id)[0] if credit and siblings else [tx.user_id]
+    used = {row[0] for row in db.session.query(BankTransaction.expense_id)
+            .filter(BankTransaction.user_id.in_(uids), BankTransaction.expense_id.isnot(None),
+                    BankTransaction.id != (tx.id or 0))}
+    q = Expense.query.filter(Expense.user_id.in_(uids), Expense.amount == Decimal(str(tx.amount)),
+                             Expense.year.between(when.year - 1, when.year + 1))
     best = None
     for e in q.all():
         if e.id in used:
             continue
+        if e.user_id != tx.user_id and e.card_id not in siblings:
+            continue  # de outra pessoa só vale no mesmo cartão/conta
         allowed = (CREDIT,) if credit else ('PIX', DEBIT)
         if e.payment_method not in allowed:
             continue  # cartão só com crédito; conta só com PIX/débito (dinheiro e VR/VA não saem do banco)
@@ -455,6 +481,7 @@ def _apply_tx(tx: BankTransaction, raw: dict) -> None:
     tx.bank_status = str(raw.get('status') or '')[:12] or None
     ref = str(meta.get('billId') or '')
     tx.bill_ref = ref if _ID.fullmatch(ref) else None
+    tx.card_digits = last4(meta.get('cardNumber'))
 
 
 def _is_expense(acc: BankAccount, raw: dict) -> bool:
@@ -756,10 +783,12 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
     if credit and n > 1 and k <= 1:  # 1ª parcela: lança a compra inteira parcelada, como no site
         installments = n
         amount = Decimal(str(tx.total_amount)) if tx.total_amount else amount * n
-    data = ExpenseData(user_id=tx.user_id, description=desc, amount=amount,
+    card = card_used(tx) if credit else None
+    owner = card.user_id if card is not None and card.user_id in uids else tx.user_id  # adicional da Greyce → dela
+    data = ExpenseData(user_id=owner, description=desc, amount=amount,
                        category=category if category else 'Outros', payment_method=method,
                        day=when.day, month=when.month, year=when.year,
-                       bank=conn.label, card_id=acc.card_id if credit else None,
+                       bank=conn.label, card_id=card.id if card is not None else None,
                        paid=not credit, installments=installments)
     result = create_expense(uids, data)
     first = result['expenses'][0]

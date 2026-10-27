@@ -409,7 +409,7 @@ def _tx_out(tx: BankTransaction, ctx: Ctx) -> dict:
         'bill': f'{tx.bill_month:02d}/{tx.bill_year}' if tx.bill_month and tx.bill_year else None,
         'bank_name': acc.connection.label, 'account_type': acc.type,
         'account_name': acc.name, 'account_last_digits': of.last4(acc.number),
-        'card_id': acc.card_id,
+        'card_id': acc.card_id, 'card_digits': tx.card_digits,
         'expense': ({'id': match.id, 'description': match.description, 'amount': float(match.amount),
                      'date': of._expense_date(match).isoformat()} if match else None),
     }

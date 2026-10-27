@@ -102,6 +102,9 @@ pelo bot ou importando extrato, como antes.
   cartão de débito; categoria pela descrição e pela categoria do banco quando a família ainda não tem
   histórico/regras (prestação habitacional → Moradia, posto → Transporte, iFood → Alimentação...).
 - Revisar importados: a categoria aceita uma nova (digitada), como no lançamento do site.
+- Um cartão do banco com vários cartões (C6: físico, virtual e adicional chegam como um só): cada compra vai
+  para o cartão do final que o banco informa (`creditCardMetadata.cardNumber`), entre os cartões de crédito
+  da família do mesmo banco; compra no adicional fica no nome de quem tem o cartão.
 - Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
 
 **Próximas etapas**

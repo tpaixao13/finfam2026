@@ -5,7 +5,7 @@ import pytest
 
 from app.core.db import session
 from app.core.security import decrypt_field
-from app.models import BankConnection, BankTransaction, Expense, PluggyConfig
+from app.models import BankConnection, BankTransaction, Expense, PluggyConfig, Tenant, User
 from app.services import open_finance as of
 from app.services import pluggy as pg
 from conftest import API
@@ -613,4 +613,38 @@ def test_series_follows_bank_bills_with_skipped_month(client, family, bank, txs,
     family.get('/pluggy/items')
     got = {e.installment_number: (e.year, e.month) for e in Expense.query.filter(Expense.description == 'CATIVA').all()}
     assert got == want
+    session.remove()
+
+
+def test_c6_one_account_many_cards(client, family, bank, txs):  # noqa: F811
+    """C6: físico, virtual e adicional (da Greyce) chegam como UM cartão; o final de cada compra
+    (creditCardMetadata.cardNumber) põe no cartão certo — e a do adicional no nome dela."""
+    session.get(Tenant, family.tenant['id']).plan = 'anual'
+    session.commit()
+    session.remove()
+    family.post('/family/members', json={'name': 'Greyce', 'email': 'g@test.com', 'password': 'senha-greyce',
+                                         'confirm_password': 'senha-greyce'})
+    greyce_id = User.query.filter_by(email='g@test.com').one().id
+    session.remove()
+    acc, cc, fisico = _connect(client, family, bank, txs, card_digits='5162')
+    virtual = family.post('/cards', json={'supports_credit': True, 'last_digits': '6494', 'bank': 'Nubank',
+                                          'due_day': 10, 'best_buy_day': 3, 'is_virtual': True}).json()['card']
+    body = {'supports_credit': True, 'last_digits': '2907', 'bank': 'Nubank', 'due_day': 10, 'best_buy_day': 3,
+            'is_additional': True}
+    body['user_id'] = greyce_id
+    adicional = family.post('/cards', json=body).json()['card']
+    assert virtual['account_id'] == fisico['account_id']  # o adicional da Greyce fica na conta dela
+
+    def tx(i, digits, amount):
+        return {'id': f'c-{i}', 'type': 'DEBIT', 'amount': amount, 'date': f'{(TODAY - timedelta(days=i)).isoformat()}T15:00:00Z',
+                'description': f'COMPRA {i}', 'creditCardMetadata': {'cardNumber': digits}}
+    txs[cc] += [tx(1, '6494', 10.0), tx(2, '2907', 20.0), tx(3, None, 30.0), tx(4, '9999', 40.0)]
+    _post_item(family)
+    items = family.get('/pluggy/transactions').json()['items']
+    assert {t['description']: t['card_digits'] for t in items}['COMPRA 1'] == '6494'
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': t['id'], 'category': 'Outros'} for t in items]})
+    got = {e.description: (e.card_id, e.user_id) for e in Expense.query.all()}
+    assert got['COMPRA 1'][0] == virtual['id']
+    assert got['COMPRA 2'] == (adicional['id'], greyce_id)   # no nome de quem tem o adicional
+    assert got['COMPRA 3'][0] == fisico['id'] and got['COMPRA 4'][0] == fisico['id']  # sem final / desconhecido
     session.remove()
