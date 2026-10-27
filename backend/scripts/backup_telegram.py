@@ -8,7 +8,8 @@ Cron (todo dia às 07:00):
 
 Configuração no backend/.env:
     TELEGRAM_BOT_TOKEN=...   (o mesmo bot central; ou BACKUP_BOT_TOKEN para usar outro bot)
-    BACKUP_CHAT_ID=...       (o seu chat com o bot — NUNCA um grupo: o arquivo tem os dados de todas as famílias)
+    BACKUP_CHAT_ID=...       (o seu chat com o bot; o arquivo tem os dados de todas as famílias)
+    BACKUP_ALLOW_GROUP=1     (opcional: libera mandar para um grupo — só se o grupo tiver só você)
 
 Diferenças para o script antigo:
 - copia o banco com a API de backup do SQLite (cópia consistente mesmo com a API gravando);
@@ -79,8 +80,9 @@ def main() -> int:
     if not token or not chat_id:
         print(f'{ts} ERRO: defina TELEGRAM_BOT_TOKEN (ou BACKUP_BOT_TOKEN) e BACKUP_CHAT_ID no backend/.env.')
         return 1
-    if chat_id.startswith('-'):
-        print(f'{ts} ERRO: BACKUP_CHAT_ID é de um grupo. Use o seu chat privado com o bot.')
+    if chat_id.startswith('-') and _env('BACKUP_ALLOW_GROUP') not in ('1', 'true', 'sim'):
+        print(f'{ts} ERRO: BACKUP_CHAT_ID é de um grupo. Use o seu chat privado com o bot '
+              '(ou BACKUP_ALLOW_GROUP=1 se o grupo tiver só você).')
         return 1
     src = db_path()
     if not src.is_file():
