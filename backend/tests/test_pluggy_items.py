@@ -236,3 +236,24 @@ def test_register_item_connected_in_pluggy_dashboard(client, family, bank):
     assert family.post('/pluggy/items', json={'item_id': ITEM2}).status_code == 200
     assert BankConnection.query.count() == 2
     session.remove()
+
+
+def test_refresh_meupluggy_item_rereads_instead(client, family, bank, monkeypatch):
+    """Item do Meu Pluggy: PATCH dá 400; o FinFam relê contas (banco novo no Meu Pluggy aparece)."""
+    _ready(client, family)
+    bank['add'](ITEM)
+    conn = family.post('/pluggy/items', json={'item_id': ITEM}).json()['item']
+    inner = pg._http
+
+    def http(method, path, body=None, api_key=None):
+        if method == 'PATCH':
+            raise pg.PluggyError('A Pluggy respondeu 400: MeuPluggy item cant be updated', 400)
+        return inner(method, path, body, api_key)
+    monkeypatch.setattr(pg, '_http', http)
+    bank['accounts'][ITEM].append({'id': 'novo-banco-acc', 'type': 'BANK', 'name': 'Conta do banco novo',
+                                   'number': '9999', 'balance': 10, 'currencyCode': 'BRL'})
+    r = family.post(f"/pluggy/items/{conn['id']}/refresh")
+    assert r.status_code == 200, r.text
+    assert 'relido' in r.json()['message']
+    assert len(r.json()['item']['accounts']) == 3
+    session.remove()

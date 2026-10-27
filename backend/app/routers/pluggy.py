@@ -283,7 +283,18 @@ def add_item(body: ItemIn, ctx: Ctx = Depends(get_ctx_session)):
 def refresh_item(conn_id: int, ctx: Ctx = Depends(get_ctx_session)):
     _cfg, client = _client(ctx)
     conn = _conn(ctx, conn_id)
-    of.apply_item(conn, _pluggy(client.update_item, conn.item_id))
+    try:
+        item = client.update_item(conn.item_id)
+    except pg.PluggyError as exc:
+        if exc.status != 400:
+            raise HTTPException(status_code=502, detail=str(exc))
+        # Conexões do Meu Pluggy não aceitam pedido de atualização: a Pluggy atualiza sozinha.
+        # Então relê agora o que já está lá (contas novas do Meu Pluggy aparecem aqui).
+        count = _pluggy(of.sync, conn, client)
+        db.session.commit()
+        msg = f'{conn.bank_name} relido.' + (f' {count} lançamento(s) novo(s) para revisar.' if count else '')
+        return {'message': msg, 'item': _conn_out(conn)}
+    of.apply_item(conn, item)
     conn.needs_sync = True  # quando a Pluggy terminar, o webhook avisa (ou a próxima listagem relê)
     db.session.commit()
     return {'message': f'Atualização de {conn.bank_name} pedida. Pode levar alguns minutos.', 'item': _conn_out(conn)}

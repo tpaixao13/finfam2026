@@ -45,6 +45,8 @@ pelo bot ou importando extrato, como antes.
   (410) nas aplicações de produção. Se só os lançamentos falharem, o banco fica salvo e a leitura tenta de novo.
 
 - "Usar o ID da conexão": registra no FinFam um banco já conectado pelo painel da Pluggy.
+- Meu Pluggy: "Atualizar agora" relê contas e lançamentos (a Pluggy não aceita PATCH nesses itens;
+  bancos novos adicionados no Meu Pluggy aparecem na mesma conexão).
 
 **Próximas etapas**
 4. Conferência de fatura, aviso no bot e ferramenta no MCP.
