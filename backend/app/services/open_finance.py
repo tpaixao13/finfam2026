@@ -356,7 +356,7 @@ def find_existing(tx: BankTransaction, card_id: int | None) -> Expense | None:
     return best[1] if best else None
 
 
-def reconcile_bill_payment(tx: BankTransaction) -> str | None:
+def reconcile_bill_payment(tx: BankTransaction, bills_only: bool = False, max_gap: int = 20) -> str | None:
     """Pagamento de fatura saindo da conta: acha a fatura do FinFam com o mesmo total (mês do
     pagamento, o anterior ou o seguinte) e marca as compras dela como pagas. Devolve o motivo."""
     from app.services.finance import MONTH_NAMES_SHORT, month_offset
@@ -367,7 +367,7 @@ def reconcile_bill_payment(tx: BankTransaction) -> str | None:
     for b in (BankBill.query.join(BankAccount).join(BankConnection)
               .filter(BankConnection.user_id.in_(uids), BankBill.total.isnot(None)).all()):
         gap = abs((b.due_date - tx.date).days)
-        if abs(Decimal(str(b.total)) - amount) <= Decimal('0.05') and gap <= 20 and (best is None or gap < best[0]):
+        if abs(Decimal(str(b.total)) - amount) <= Decimal('0.05') and gap <= max_gap and (best is None or gap < best[0]):
             best = (gap, b)
     if best:
         bill, acc = best[1], best[1].account
@@ -380,6 +380,8 @@ def reconcile_bill_payment(tx: BankTransaction) -> str | None:
                               Expense.year == y, Expense.month == m)
          .update({'paid': True}, synchronize_session=False))
         return f'Pagamento da fatura {name} de {MONTH_NAMES_SHORT[m - 1]}/{y}: fatura marcada como paga.'
+    if bills_only:
+        return None
     # 2) sem faturas do banco: pela fatura do FinFam com o mesmo total
     for delta in (0, -1, 1):
         m, y = month_offset(tx.date.month, tx.date.year, delta)
@@ -402,6 +404,9 @@ def reconcile_bill_payment(tx: BankTransaction) -> str | None:
     return None
 
 
+_BILL_LIKE = re.compile(r'boleto|pagamento|pgto|pagto|fatura|cart[aã]o', re.I)
+
+
 def reconcile_payments(user_id: int) -> int:
     """Refaz a conciliação dos pagamentos de fatura classificados sozinhos (as compras do cartão
     podem ter sido lançadas depois do pagamento chegar). Só mexe no banco de dados do FinFam."""
@@ -415,6 +420,14 @@ def reconcile_payments(user_id: int) -> int:
         why = reconcile_bill_payment(tx)
         if why and why != tx.reason:
             tx.reason, n = why, n + 1
+    # boleto ainda "para revisar" que tem o total de uma fatura do banco (a fatura chegou depois)
+    for tx in (BankTransaction.query.join(BankAccount)
+               .filter(BankTransaction.user_id.in_(uids), BankTransaction.status == 'pending',
+                       BankTransaction.reviewed_at.is_(None), BankAccount.type == 'BANK').all()):
+        if _BILL_LIKE.search(tx.description):
+            why = reconcile_bill_payment(tx, bills_only=True, max_gap=10)
+            if why:
+                tx.status, tx.reason, n = 'ignored', why, n + 1
     db.session.flush()
     return n
 
@@ -543,9 +556,11 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
                     db.session.expunge(tx)
                 continue
             why = _skip_reason(tx.description, tx.pluggy_category)
-            match = None if why else find_existing(tx, acc.card_id)
             if why and acc.type == 'BANK' and why.startswith('Pagamento de fatura'):
                 why = reconcile_bill_payment(tx) or why
+            elif not why and acc.type == 'BANK' and _BILL_LIKE.search(tx.description):
+                why = reconcile_bill_payment(tx, bills_only=True, max_gap=10)  # boleto que paga fatura
+            match = None if why else find_existing(tx, acc.card_id)
             if why:
                 tx.status, tx.reason = 'ignored', why
             elif match:
@@ -604,9 +619,10 @@ def sync(conn: BankConnection, client: pg.PluggyClient, today: date | None = Non
         conn.needs_sync = True
         return 0
     conn.needs_sync = False
+    reconcile_payments(conn.user_id)  # antes do automático: boleto que paga fatura não vira despesa
     if conn.auto_import:
         auto_approve(conn)
-    reconcile_payments(conn.user_id)
+        reconcile_payments(conn.user_id)
     return count
 
 
@@ -636,15 +652,56 @@ def sync_stale(user_id: int | None = None, max_age_hours: int | None = None) -> 
 
 # ── revisão ──────────────────────────────────────────────────────────────────
 
+_DEBIT_CARD = re.compile(r'compra.{0,12}(cart|deb|elo|visa|master)|cart[aã]o de d[eé]bito|debito (visa|elo|master)'
+                         r'|\bdeb(ito)? (cart|visa|elo)|maestro|visa electron', re.I)
+
+
 def suggested_method(tx: BankTransaction) -> str:
+    """Cartão → crédito. Conta: compra com cartão de débito → débito; o resto (PIX, boleto, débito
+    automático, transferência) → PIX, que é como o FinFam registra conta paga pela conta."""
     if tx.account.type == 'CREDIT':
         return CREDIT
-    return 'PIX' if (tx.payment_hint or '').upper() == 'PIX' or 'PIX' in tx.description.upper() else DEBIT
+    hint = (tx.payment_hint or '').upper()
+    if hint == 'PIX' or 'PIX' in tx.description.upper():
+        return 'PIX'
+    return DEBIT if hint in ('DEBIT_CARD', 'DEBITO') or _DEBIT_CARD.search(tx.description) else 'PIX'
+
+
+# categoria pela descrição (português) e pela categoria que o banco manda (inglês, Pluggy)
+_CATEGORY_WORDS = (
+    ('Moradia', r'presta[cç][aã]o hab|habitac|aluguel|condom[ií]nio|\biptu\b|energia|\bluz\b|enel|cemig|copel|light\b|sabesp|'
+                r'[aá]gua e esgoto|\bg[aá]s\b|comgas|housing|rent|utilities|electricity|water'),
+    ('Alimentação', r'ifood|rappi|restaur|lanchon|padaria|panific|mercado|supermerc|atacad|assa[ií]|carrefour|'
+                    r'p[aã]o de a[cç]|hortifrut|a[cç]ougue|pizz|burger|mc ?donald|bk\b|groceries|food|eating out|restaurant'),
+    ('Transporte', r'\buber\b|\b99\s?(app|pop|taxi)|taxi|posto|shell|ipiranga|petrobras|br mania|combust|estacion|'
+                   r'ped[aá]gio|sem parar|veloe|conectcar|metr[oô]|\bcptm\b|bilhete [uú]nico|transport|gas station|parking|tolls'),
+    ('Saúde', r'farm[aá]cia|drogaria|droga ?raia|drogasil|pague menos|hospital|cl[ií]nica|laborat|m[eé]dic|odonto|'
+              r'unimed|amil|bradesco sa[uú]de|sulam[eé]rica|health|pharmacy|hospital'),
+    ('Telefone', r'\bvivo\b|\btim\b|\bclaro\b|\boi\b|telefon|celular|mobile|telecommunication'),
+    ('Internet', r'internet|fibra|net virtua|\bnet\b|provedor|broadband'),
+    ('Lazer', r'netflix|spotify|disney|hbo|\bmax\b|prime video|amazon prime|youtube|deezer|cinema|ingresso|'
+              r'steam|playstation|xbox|nintendo|nuuvem|entertainment|leisure|streaming|games?\b'),
+    ('Educação', r'escola|col[eé]gio|faculdade|universid|curso|udemy|alura|livraria|education|school|tuition'),
+    ('Beleza', r'sal[aã]o|barbear|barba\b|cabeleir|est[eé]tica|manicure|botic[aá]rio|natura\b|sephora|beauty|personal care'),
+)
+_CATEGORY_RX = [(name, re.compile(rx, re.I)) for name, rx in _CATEGORY_WORDS]
+
+
+def guess_category(tx: BankTransaction) -> str | None:
+    text = f'{tx.description} {tx.pluggy_category or ""}'
+    for name, rx in _CATEGORY_RX:
+        if rx.search(text):
+            return name
+    return None
 
 
 def suggestion(tx: BankTransaction, uids: list, tenant_id: int | None) -> dict:
-    """Categoria e forma de pagamento sugeridas para o lançamento."""
+    """Categoria e forma de pagamento sugeridas: regras e histórico da família primeiro; sem
+    nada, pela descrição e pela categoria que o banco manda."""
     category, source = categorize(tx.description, uids, tenant_id) if tenant_id else (None, None)
+    if not category:
+        category = guess_category(tx)
+        source = 'banco' if category else None
     return {'category': category or 'Outros', 'category_source': source, 'payment_method': suggested_method(tx)}
 
 

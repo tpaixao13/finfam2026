@@ -496,3 +496,43 @@ def test_pending_goes_to_open_bill_and_moved_expense_is_unpaid(client, family, b
     assert (e9.month, e9.paid) == (nxt.month, False)
     assert Expense.query.filter_by(description='CATIVA (8/10)').one().paid is True
     session.remove()
+
+
+def test_caixa_suggestions_and_boleto_pays_bill(client, family, bank, txs, monkeypatch):  # noqa: F811
+    """Caixa (Meu Pluggy): boleto/débito automático → PIX; categoria pela descrição; o boleto de
+    R$ 17,25 paga a fatura do cartão de R$ 17,25 (só a anuidade) e não vira despesa."""
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    due = TODAY - timedelta(days=17)
+    monkeypatch.setattr(pg, '_http', (lambda inner: lambda m, p, b=None, k=None: {'results': [
+        {'id': 'b-anuid', 'dueDate': f'{due.isoformat()}T03:00:00Z', 'totalAmount': 17.25}]}
+        if p.startswith('/bills?') else inner(m, p, b, k))(pg._http))
+
+    def iso(d):
+        return f'{d.isoformat()}T15:00:00Z'
+    txs[acc] += [
+        {'id': 'a1', 'type': 'DEBIT', 'amount': -1900.55, 'date': iso(TODAY - timedelta(days=5)), 'description': 'DEBITO PRESTACAO HAB'},
+        {'id': 'a2', 'type': 'DEBIT', 'amount': -35.94, 'date': iso(TODAY - timedelta(days=7)), 'description': 'MENSALIDADE CESTA SERVICO'},
+        {'id': 'a3', 'type': 'DEBIT', 'amount': -200.0, 'date': iso(TODAY - timedelta(days=14)), 'description': 'PAGAMENTO DE BOLETO'},
+        {'id': 'a4', 'type': 'DEBIT', 'amount': -17.25, 'date': iso(due - timedelta(days=1)), 'description': 'PAGAMENTO DE BOLETO'},
+        {'id': 'a5', 'type': 'DEBIT', 'amount': -89.0, 'date': iso(TODAY - timedelta(days=3)), 'description': 'COMPRA CARTAO DEB - POSTO SHELL'},
+        {'id': 'a6', 'type': 'DEBIT', 'amount': -29.9, 'date': iso(TODAY - timedelta(days=4)), 'description': 'DEB PIX QR COD DIN'},
+    ]
+    txs[cc].append({'id': 'c-an', 'type': 'DEBIT', 'amount': 17.25, 'date': iso(due - timedelta(days=20)),
+                    'description': 'ANUIDADE NAC DIFERENCIADA', 'creditCardMetadata': {'billId': 'b-anuid',
+                                                                                      'installmentNumber': 7, 'totalInstallments': 12}})
+    _post_item(family, months=3)
+    items = {(t['description'], t['amount']): t for t in family.get('/pluggy/transactions').json()['items']}
+    sug = {k: (t['payment_method'], t['category']) for k, t in items.items()}
+    assert sug[('DEBITO PRESTACAO HAB', 1900.55)] == ('PIX', 'Moradia')
+    assert sug[('MENSALIDADE CESTA SERVICO', 35.94)] == ('PIX', 'Outros')
+    assert sug[('PAGAMENTO DE BOLETO', 200.0)] == ('PIX', 'Outros')        # boleto comum: fica para revisar
+    assert sug[('COMPRA CARTAO DEB - POSTO SHELL', 89.0)] == ('Cartão de Débito', 'Transporte')
+    assert sug[('DEB PIX QR COD DIN', 29.9)][0] == 'PIX'
+    assert ('PAGAMENTO DE BOLETO', 17.25) not in items                    # pagou a fatura de 17,25
+    ign = family.get('/pluggy/transactions?status=ignored').json()['items']
+    assert any(t['amount'] == 17.25 and 'Pagamento da fatura' in t['reason'] for t in ign)
+    # lançando a anuidade, a fatura dela fica paga
+    an = items[('ANUIDADE NAC DIFERENCIADA', 17.25)]
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': an['id'], 'category': 'Outros'}]})
+    assert Expense.query.filter(Expense.description.like('ANUIDADE%')).one().paid is True
+    session.remove()
