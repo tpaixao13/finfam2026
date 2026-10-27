@@ -149,6 +149,9 @@ pelo bot ou importando extrato, como antes.
   máquina, limita tentativas erradas por IP e não grava o token no log de acesso; restauração do backup só
   aceita lançamentos de contas da própria família; backup sem código de convite/chat do Telegram e com
   permissão 0600; `POST /rules/learn` só pelo site; MCP trata descrição do banco como dado.
+- Tela de login: versão discreta no rodapé (`components/AppVersion.tsx`, lê `GET /health`).
+- 2ª revisão: `/rules/apply` com limite de chamadas; MCP encurta e trata como dado nomes vindos do banco;
+  "Saldo nas contas" em `pages/BankBalances.tsx`; prévia de regras com erro visível e valor no celular.
 - Revisão Unix das telas: `OpenFinance.tsx` dividido em `pages/open-finance/*`, `ReviewRows.tsx`,
   `BankInvestments.tsx`, `Allocation.tsx`; acessibilidade e celular (360 px sem rolagem lateral).
 - Regras de categoria passam a ser preenchidas: em Revisar importados, trocar a categoria sugerida cria

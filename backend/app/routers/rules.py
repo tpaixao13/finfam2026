@@ -1,7 +1,8 @@
 """Regras de categorização automática (palavra-chave → categoria)."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.core import ratelimit
 from app.core.db import db, get_or_404
 from app.core.deps import Ctx, get_ctx, get_ctx_session
 from app.models import CategoryRule
@@ -66,7 +67,8 @@ class ApplyIn(BaseModel):
 
 
 @router.post('/apply', summary='Aplica as regras às despesas já lançadas (com prévia)')
-def apply(body: ApplyIn, ctx: Ctx = Depends(get_ctx_session)):
+def apply(body: ApplyIn, request: Request, ctx: Ctx = Depends(get_ctx_session)):
+    ratelimit.check(request, 'rules-apply', str(ctx.user.id), limit=30, window=60)  # percorre todas as despesas
     changes = rule_changes(ctx.uids, _tid(ctx), body.only_others)
     sample = [{'id': e.id, 'description': e.description, 'date': f'{e.purchase_year or e.year}-{(e.purchase_month or e.month):02d}-{e.day:02d}',
                'amount': float(e.amount), 'from': e.category, 'to': cat, 'keyword': rule.keyword}

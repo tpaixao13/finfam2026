@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { AppVersion } from '../components/AppVersion'
 import { Button, Field, Input } from '../components/ui'
 import { api, type ApiError } from '../lib/api'
 import { Link, navigate } from '../lib/router'
@@ -21,6 +22,7 @@ function AuthShell({ title, lead, children, footer }: { title: string; lead: str
           {children}
           <p className="auth-foot">{footer}</p>
         </div>
+        <AppVersion />
       </div>
     </div>
   )
