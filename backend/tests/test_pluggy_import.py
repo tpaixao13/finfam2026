@@ -845,3 +845,19 @@ def test_installment_cents_merge_and_refund(client, family, bank, txs, monkeypat
     linked = {t.expense_id for t in BankTransaction.query.filter(BankTransaction.pluggy_id.in_(('t1', 't2'))).all()}
     assert linked <= {r.id for r in rows}                               # as que vieram do banco ficaram
     session.remove()
+
+
+def test_c6_debit_card_purchase_is_not_bill_payment(client, family, bank, txs):  # noqa: F811
+    """C6: "DÉBITO DE CARTÃO" na conta é compra no débito (a Pluggy diz "Credit card payment")."""
+    acc, cc, _ = _connect(client, family, bank, txs)
+    txs[acc] += [
+        {'id': 'd1', 'type': 'DEBIT', 'amount': -3.2, 'date': day(3), 'description': 'DÉBITO DE CARTÃO',
+         'category': 'Credit card payment'},
+        {'id': 'd2', 'type': 'DEBIT', 'amount': -900.0, 'date': day(4), 'description': 'PAGAMENTO DE FATURA',
+         'category': 'Credit card payment'},
+    ]
+    _post_item(family)
+    items = {t['amount']: t for t in family.get('/pluggy/transactions').json()['items']}
+    assert items[3.2]['payment_method'] == 'Cartão de Débito'
+    assert 900.0 not in items
+    session.remove()

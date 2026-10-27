@@ -530,7 +530,10 @@ def reconcile_payments(user_id: int) -> int:
 
 
 def _skip_reason(description: str, category: str | None) -> str | None:
+    debit_buy = bool(_DEBIT_CARD.search(description))  # C6 "DÉBITO DE CARTÃO": compra no débito, não fatura
     for rx, why in _SKIP:
+        if debit_buy and why.startswith('Pagamento de fatura') and not rx.search(description):
+            continue
         if rx.search(category or '') or rx.search(description):
             return why
     return None
@@ -889,6 +892,7 @@ def notify_new(conn: BankConnection, before: set[int]) -> bool:
 # ── revisão ──────────────────────────────────────────────────────────────────
 
 _DEBIT_CARD = re.compile(r'compra.{0,12}(cart|deb|elo|visa|master)|cart[aã]o de d[eé]bito|debito (visa|elo|master)'
+                         r'|d[eé]bito (de|no|em) cart[aã]o'
                          r'|\bdeb(ito)? (cart|visa|elo)|maestro|visa electron', re.I)
 
 

@@ -112,7 +112,7 @@ function DoneRow({ tx, onRestore }: { tx: BankTx; onRestore?: () => void }) {
         )}
         {tx.status === 'ignored' && tx.reason && <span className="small">{tx.reason}</span>}
       </div>
-      <b className="review-amount">{brl(tx.amount)}</b>
+      <b className="review-amount">{brl(tx.refund ? -tx.amount : tx.amount)}</b>
       {onRestore && <Button variant="ghost" onClick={onRestore}>Revisar</Button>}
     </li>
   )
@@ -120,11 +120,12 @@ function DoneRow({ tx, onRestore }: { tx: BankTx; onRestore?: () => void }) {
 
 export function ReviewImportsPage() {
   const [tab, setTab] = useState<Status>('pending')
-  const data = useApi(() => api.get<TxList>(`/pluggy/transactions?status=${tab}`), [tab])
+  const data = useApi(() => api.get<TxList>(`/pluggy/transactions?status=${tab}`).then((r) => ({ ...r, tab })), [tab])
   const act = useAction()
   const [drafts, setDrafts] = useState<Record<number, Draft>>({})
   const [busy, setBusy] = useState(false)
-  const list = data.data
+  // ao trocar de aba, a lista anterior não fica na tela enquanto a nova carrega
+  const list = data.data?.tab === tab ? data.data : null
 
   useEffect(() => {
     if (!list || tab !== 'pending') return
@@ -170,7 +171,7 @@ export function ReviewImportsPage() {
     return { message: `${ids.length} lançamento(s) ignorado(s).` }
   })
   const restore = (id: number) => run(() => api.post('/pluggy/transactions/restore', { ids: [id] }))
-  const total = picked.reduce((s, t) => s + t.amount, 0)
+  const total = picked.reduce((s, t) => s + (t.refund ? -t.amount : t.amount), 0)
 
   return (
     <div className="page">
