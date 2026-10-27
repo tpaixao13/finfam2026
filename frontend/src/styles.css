@@ -146,7 +146,7 @@ input[type='file'].input { padding: .35rem; }
 .of-row select.input { width: auto; min-height: 32px; padding-top: .2rem; padding-bottom: .2rem; font-size: .82rem; }
 @media (max-width: 700px) { .of-row select.input { min-height: 40px; } }
 .checks { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; }
-.segmented { display: inline-flex; background: var(--bg); border-radius: 9px; padding: 3px; gap: 2px; flex-wrap: wrap; }
+.segmented { display: inline-flex; max-width: 100%; background: var(--bg); border-radius: 9px; padding: 3px; gap: 2px; flex-wrap: wrap; }
 .segmented button { border: 0; background: none; padding: .4rem .85rem; border-radius: 7px; font: 600 .85rem var(--font); color: var(--ink-2); cursor: pointer; }
 .segmented button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(19, 41, 61, .15); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem 1rem; }
@@ -497,15 +497,29 @@ a.insight:hover { background: #e8edf1; }
 .tfa-secret { display: inline-block; margin-top: .25rem; font-size: .95rem; letter-spacing: .05em; word-break: break-all; }
 
 /* Open Finance: bancos conectados */
-.bank-conn { border: 1px solid var(--line); border-left: 4px solid var(--primary); border-radius: var(--radius); padding: .9rem 1rem; display: grid; gap: .6rem; }
-.bank-conn h3 { margin: 0; font-size: 1.05rem; }
+.bank-conn { border: 1px solid var(--line); border-left: 4px solid var(--primary); border-radius: var(--radius); padding: .9rem 1rem; display: grid; gap: .6rem; min-width: 0; }
+.bank-conn h3 { font-size: 1.05rem; }
 .bank-conn p { margin: 0; }
+.bank-conn header { align-items: center; flex-wrap: wrap; }
+.bank-name { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; min-width: 0; }
+.bank-name .input { flex: 1 1 12rem; min-width: 0; }
+.bank-auto { display: flex; align-items: flex-start; gap: .65rem; padding: .55rem .7rem; border-radius: var(--radius-sm); background: var(--bg); }
+.bank-auto .switch { margin-top: .1rem; }
 .bank-accs { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
 .bank-acc { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem .75rem; padding: .55rem 0; border-top: 1px solid var(--line); }
 .bank-acc-main { min-width: 0; flex: 1 1 14rem; overflow-wrap: anywhere; }
 .bank-acc-map { flex: 0 1 16rem; min-width: 0; max-width: 100%; display: grid; gap: .4rem; }
 .bank-close { display: flex; gap: .4rem; align-items: center; }
-.bank-close input { width: 7.5rem; }
+.bank-close input { width: 7.5rem; max-width: 100%; }
+.btn .badge { margin-left: .4rem; }
+
+/* Open Finance: conferência das faturas */
+.check-rows { list-style: none; margin: 0 0 .75rem; padding: 0; display: grid; gap: .6rem; }
+.check-rows > li { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .7rem .85rem; display: grid; gap: .35rem; min-width: 0; }
+.check-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem; }
+.check-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .2rem; font-size: .85rem; }
+.check-list li { display: flex; gap: .4rem; flex-wrap: wrap; overflow-wrap: anywhere; }
+.check-list li b { margin-left: auto; white-space: nowrap; }
 
 /* Open Finance: revisar importados */
 .review-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: .85rem 1.1rem; border-bottom: 1px solid var(--line); }
@@ -519,9 +533,10 @@ a.insight:hover { background: #e8edf1; }
 .review-main { display: grid; gap: .25rem; min-width: 0; overflow-wrap: anywhere; }
 .review-fields { display: grid; gap: .4rem; min-width: 0; }
 .review-method { padding: .2rem 0; }
-.review-amount { white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
+.review-amount { text-align: right; }
+.cat-new { display: flex; align-items: center; gap: .25rem; min-width: 0; }
+.cat-new .input { flex: 1; min-width: 0; }
 .warn-text { color: var(--warning); }
-.btn .badge { margin-left: .4rem; }
 @media (max-width: 700px) {
   .review-row { grid-template-columns: auto minmax(0, 1fr) auto; padding: .8rem 1rem; }
   .review-fields { grid-column: 2 / -1; }
@@ -530,23 +545,23 @@ a.insight:hover { background: #e8edf1; }
   .review-bar .row { width: 100%; }
   .review-bar .row .btn { flex: 1; justify-content: center; }
 }
-.bank-name { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; min-width: 0; }
-.bank-name .input { flex: 1 1 12rem; min-width: 0; }
-.bank-conn header { align-items: center; flex-wrap: wrap; }
-.bank-auto { display: flex; align-items: flex-start; gap: .65rem; padding: .55rem .7rem; border-radius: var(--radius-sm); background: var(--bg); }
-.bank-auto .switch { margin-top: .1rem; }
+
+/* Despesas: atalho das vencidas; Regras: nota sob o formulário */
+.late-shortcut { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .75rem; }
+.rule-note { margin-top: .75rem; }
+
+/* Admin: backups da família */
 .backup-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
 .backup-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem .75rem; padding: .6rem .75rem; border: 1px solid var(--line); border-radius: var(--radius-sm); }
-.cat-new { display: flex; align-items: center; gap: .25rem; min-width: 0; }
-.cat-new .input { flex: 1; min-width: 0; }
-.check-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
-.check-rows > li { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .7rem .85rem; display: grid; gap: .35rem; }
-.check-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem; }
-.check-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .2rem; font-size: .85rem; }
-.check-list li { display: flex; gap: .4rem; flex-wrap: wrap; }
-.check-list li b { margin-left: auto; white-space: nowrap; }
+
 /* Investimentos: distribuição por classe/instituição */
 .alloc { list-style: none; margin: 0; padding: 0; display: grid; gap: .85rem; }
-.alloc-head { display: flex; justify-content: space-between; gap: 1rem; font-size: .92rem; margin-bottom: .3rem; flex-wrap: wrap; }
+.alloc-head { display: flex; justify-content: space-between; gap: .25rem 1rem; font-size: .92rem; margin-bottom: .3rem; flex-wrap: wrap; }
 .alloc-bar { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
 .alloc-bar span { display: block; height: 100%; border-radius: 99px; }
+/* Rendas: saldo das contas do banco */
+.balance-list { list-style: none; margin: 0; padding: 0; }
+.balance-list li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .7rem 1.1rem; border-top: 1px solid var(--line); }
+.balance-list li:first-child { border-top: 0; }
+.balance-list .num { font-weight: 600; white-space: nowrap; }
+.nowrap { white-space: nowrap; }

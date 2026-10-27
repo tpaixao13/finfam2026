@@ -88,11 +88,11 @@ export function ExpensesPage() {
       </Panel>
 
       {selected.size === 0 && late.length > 0 && (
-        <p className="small muted">
+        <p className="small muted late-shortcut">
           <button type="button" className="link-btn" onClick={() => setSelected(new Set(late.map((e) => e.id)))}>
             Selecionar as {late.length} vencida(s) desta página
           </button>
-          {' '}· todas as atrasadas de uma vez: <Link to="/bills">Contas a pagar › Pagar todas</Link>
+          <span>Todas as atrasadas de uma vez: <Link to="/bills">Contas a pagar › Pagar todas</Link></span>
         </p>
       )}
       {selected.size > 0 && (

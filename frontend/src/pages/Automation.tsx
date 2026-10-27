@@ -194,11 +194,11 @@ export function RulesPage() {
   return (
     <div className="page">
       <PageHeader title="Regras de categoria"
-        subtitle="Se a descrição contém a palavra, a categoria é sugerida automaticamente — no lançamento, na importação e no Open Finance. Quando você troca a categoria sugerida em Revisar importados, a regra é criada sozinha."
+        subtitle="Se a descrição contém a palavra, o FinFam sugere a categoria no lançamento, na importação e no Open Finance."
         actions={<Button variant="ghost" icon="lightning" onClick={() => act(() => api.post<{ message: string }>('/rules/learn'), rules.reload)}>Criar pelo histórico</Button>} />
       <Panel>
         <form className="inline-form" onSubmit={save}>
-          <Field label="Palavra-chave"><Input value={keyword} onChange={(e) => setKeyword(e.target.value)} required minLength={2} placeholder="Ex.: IFOOD" /></Field>
+          <Field label="Palavra-chave" hint="Basta a descrição conter o trecho."><Input value={keyword} onChange={(e) => setKeyword(e.target.value)} required minLength={2} placeholder="Ex.: IFOOD" /></Field>
           <Field label="Categoria">
             <Input list="rule-cats" value={category} onChange={(e) => setCategory(e.target.value)} required />
             <datalist id="rule-cats">{(meta?.categories ?? []).map((c) => <option key={c} value={c} />)}</datalist>
@@ -206,13 +206,16 @@ export function RulesPage() {
           <Button type="submit" icon={editing ? 'check2' : 'plus'}>{editing ? 'Salvar regra' : 'Criar regra'}</Button>
           {editing && <Button variant="ghost" type="button" onClick={() => { setEditing(null); setKeyword(''); setCategory('') }}>Cancelar</Button>}
         </form>
+        <p className="muted small rule-note">Ao trocar a categoria sugerida em Revisar importados, a regra é criada sozinha.</p>
       </Panel>
       <Panel flush>
         {rules.error ? <ErrorBox message={rules.error} /> : !rules.data ? <Spinner /> : rules.data.length === 0
-          ? <Empty icon="tags" title="Nenhuma regra ainda." />
+          ? <Empty icon="tags" title="Nenhuma regra ainda">
+              Crie uma acima (ex.: IFOOD → Alimentação) ou toque em <b>Criar pelo histórico</b>.
+            </Empty>
           : (
             <Table>
-              <thead><tr><th>Palavra-chave</th><th>Categoria</th><th className="num">Usos</th><th /></tr></thead>
+              <thead><tr><th>Palavra-chave</th><th>Categoria</th><th className="num">Usos</th><th><span className="sr-only">Ações</span></th></tr></thead>
               <tbody>{rules.data.map((r) => (
                 <tr key={r.id}>
                   <td><code>{r.keyword}</code></td><td>{r.category}</td><td className="num">{r.match_count}</td>

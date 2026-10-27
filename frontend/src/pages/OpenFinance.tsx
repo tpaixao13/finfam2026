@@ -1,226 +1,19 @@
 // Open Finance (Pluggy) — cada pessoa cadastra a chave da própria conta Pluggy (etapa 1)
 // e conecta os bancos pelo widget Pluggy Connect, vendo contas e cartões (etapa 2).
+// As peças ficam em ./open-finance/.
 import { useState } from 'react'
-import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Modal, MonthNav, PageHeader, Panel, Segmented, Select, Spinner, Switch } from '../components/ui'
+import { Badge, Button, Empty, ErrorBox, Field, Input, Modal, PageHeader, Panel, Segmented, Spinner } from '../components/ui'
 import { api } from '../lib/api'
-import { brl, dayMonth, money } from '../lib/format'
 import { useApi } from '../lib/hooks'
 import { Link } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
 import type { Card } from '../lib/types'
-
-interface PluggyConfig {
-  available: boolean; max_items: number | null; configured: boolean; client_id_masked: string
-  status: 'ok' | 'error' | null; last_error: string | null; webhook: boolean; public_url_ok: boolean
-  include_sandbox: boolean; connections: number; to_review: number; notify: boolean
-}
-type Saved = { message: string; config: PluggyConfig }
-
-interface BankAccount {
-  id: number; type: 'BANK' | 'CREDIT'; subtype: string | null; name: string | null; last_digits: string | null
-  currency: string; balance: number | null; credit_limit: number | null; card_id: number | null; card_label: string | null
-  available_limit: number | null; close_day: number | null; due_day: number | null
-  close_source: 'bank' | 'manual' | 'inferred' | null; manual_close_day: number | null
-}
-interface Connection {
-  id: number; item_id: string; bank_name: string | null; connector_name: string | null; auto_import: boolean; bank_color: string | null; status: string | null
-  execution_status: string | null; error: string | null; last_updated_at: string | null; accounts: BankAccount[]
-}
-
-// ── Widget Pluggy Connect (carregado só quando a pessoa toca em "Conectar banco") ──
-const CONNECT_JS = 'https://cdn.pluggy.ai/pluggy-connect/v2.7.0/pluggy-connect.js'
-type ConnectOpts = {
-  connectToken: string; includeSandbox?: boolean; updateItem?: string
-  onSuccess: (d: { item: { id: string } }) => void; onError?: (e: { message?: string }) => void; onClose?: () => void
-}
-declare global { interface Window { PluggyConnect?: new (o: ConnectOpts) => { init: () => void } } }
-let loading: Promise<void> | null = null
-
-function loadConnect(): Promise<void> {
-  if (window.PluggyConnect) return Promise.resolve()
-  loading ??= new Promise((ok, fail) => {
-    const s = document.createElement('script')
-    s.src = CONNECT_JS
-    s.async = true
-    s.onload = () => ok()
-    s.onerror = () => { loading = null; fail(new Error('Não consegui abrir o Pluggy Connect. Confira a internet e tente de novo.')) }
-    document.head.appendChild(s)
-  })
-  return loading
-}
-
-/** Abre o Pluggy Connect; resolve com o id do item conectado (ou null se a pessoa fechou). */
-async function openConnect(connectionId?: number): Promise<string | null> {
-  const [tok] = await Promise.all([
-    api.post<{ connect_token: string; item_id: string | null; include_sandbox: boolean }>(
-      '/pluggy/connect-token', { connection_id: connectionId ?? null }),
-    loadConnect(),
-  ])
-  return new Promise((resolve, reject) => {
-    new window.PluggyConnect!({
-      connectToken: tok.connect_token,
-      includeSandbox: tok.include_sandbox,
-      ...(tok.item_id ? { updateItem: tok.item_id } : {}),
-      onSuccess: ({ item }) => resolve(item.id),
-      onError: (e) => reject(new Error(e?.message || 'O banco não conectou. Tente de novo.')),
-      onClose: () => resolve(null),
-    }).init()
-  })
-}
-
-const STATUS: Record<string, { label: string; tone: 'success' | 'info' | 'warning' | 'danger'; fix?: boolean }> = {
-  UPDATED: { label: 'Atualizado', tone: 'success' },
-  UPDATING: { label: 'Atualizando…', tone: 'info' },
-  OUTDATED: { label: 'Desatualizado', tone: 'warning' },
-  LOGIN_ERROR: { label: 'Senha do banco recusada', tone: 'danger', fix: true },
-  WAITING_USER_INPUT: { label: 'Precisa de você', tone: 'warning', fix: true },
-  WAITING_USER_ACTION: { label: 'Precisa de você', tone: 'warning', fix: true },
-}
-
-function when(iso: string | null) {
-  return iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : 'nunca'
-}
-
-const SOURCE = { bank: 'do banco', manual: 'digitado por você', inferred: 'calculado pelas compras' } as const
-
-/** Fechamento digitado: vale enquanto o banco não informa o dele (vazio = o FinFam calcula). */
-function CloseDayField({ acc, onChange }: { acc: BankAccount; onChange: () => void }) {
-  const act = useAction()
-  const [day, setDay] = useState(acc.manual_close_day ? String(acc.manual_close_day) : '')
-  const [busy, setBusy] = useState(false)
-  const changed = day !== (acc.manual_close_day ? String(acc.manual_close_day) : '')
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setBusy(true)
-    await act(() => api.put<{ message: string }>(`/pluggy/accounts/${acc.id}/close-day`, { close_day: day ? Number(day) : null }), onChange)
-    setBusy(false)
-  }
-  return (
-    <form className="bank-close" onSubmit={save} title="O banco não informa o fechamento. O que você digitar vale até ele passar a informar.">
-      <Input type="number" min={1} max={31} inputMode="numeric" aria-label="Dia de fechamento da fatura" placeholder="Fecha dia"
-        value={day} onChange={(e) => setDay(e.target.value)} />
-      {changed && <Button type="submit" variant="ghost" icon="check2" busy={busy}>Salvar</Button>}
-    </form>
-  )
-}
-
-function AccountRow({ acc, cards, onChange }: { acc: BankAccount; cards: Card[]; onChange: () => void }) {
-  const act = useAction()
-  const [busy, setBusy] = useState(false)
-  const credit = acc.type === 'CREDIT'
-  const label = acc.name || (credit ? 'Cartão de crédito' : 'Conta')
-  return (
-    <li className="bank-acc">
-      <div className="bank-acc-main">
-        <b>{label}</b>{acc.last_digits && <span className="muted"> •••• {acc.last_digits}</span>}
-        <div className="muted small">
-          {credit ? <>
-            Fatura atual {money(acc.balance == null ? null : Math.abs(acc.balance), acc.currency)}
-            {acc.credit_limit ? <> · limite {money(acc.credit_limit, acc.currency)}</> : null}
-            {acc.available_limit != null ? <> · disponível {money(acc.available_limit, acc.currency)}</> : null}
-            {acc.close_day && acc.due_day ? <> · fecha dia {acc.close_day} ({SOURCE[acc.close_source ?? 'inferred']}), vence dia {acc.due_day}</> : null}
-          </> : `Saldo ${money(acc.balance, acc.currency)}`}
-        </div>
-        {credit && acc.card_id && acc.credit_limit ? <div className="small">Limite do cartão no FinFam vem do banco.</div> : null}
-      </div>
-      {credit && (
-        <div className="bank-acc-map">
-          <Select aria-label={`Cartão do FinFam para ${label}`} value={acc.card_id ?? ''}
-            placeholder="Ligar a um cartão…"
-            options={cards.map((c) => ({ value: c.id, label: c.label }))}
-            onChange={(e) => act(() => api.put<{ message: string }>(`/pluggy/accounts/${acc.id}`,
-              { card_id: e.target.value ? Number(e.target.value) : null }), onChange)} />
-          {acc.close_source !== 'bank' && <CloseDayField acc={acc} onChange={onChange} />}
-          {!acc.card_id && acc.last_digits && (
-            <Button variant="ghost" icon="plus" busy={busy} onClick={async () => {
-              setBusy(true)
-              await act(() => api.post<{ message: string }>(`/pluggy/accounts/${acc.id}/card`), onChange)
-              setBusy(false)
-            }}>Criar cartão</Button>
-          )}
-        </div>
-      )}
-    </li>
-  )
-}
-
-/** Nome do banco (o Meu Pluggy vem como "MeuPluggy"): vai nas despesas lançadas. */
-function BankName({ conn, banks, onChange }: { conn: Connection; banks: string[]; onChange: () => void }) {
-  const act = useAction()
-  const [editing, setEditing] = useState(false)
-  const [name, setName] = useState(conn.bank_name ?? '')
-  const listId = `banks-${conn.id}`
-  if (!editing) {
-    return (
-      <div className="bank-name">
-        <h3>{conn.bank_name ?? 'Banco'}</h3>
-        {conn.connector_name && conn.connector_name !== conn.bank_name && <span className="muted small">via {conn.connector_name}</span>}
-        <IconButton icon="pencil" label={`Renomear ${conn.bank_name ?? 'banco'}`} onClick={() => setEditing(true)} />
-      </div>
-    )
-  }
-  async function save(e: React.FormEvent) {
-    e.preventDefault()
-    await act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, { bank_name: name.trim() }),
-      () => { setEditing(false); onChange() })
-  }
-  return (
-    <form className="bank-name" onSubmit={save}>
-      <Input value={name} onChange={(e) => setName(e.target.value)} list={listId} maxLength={60} required autoFocus
-        aria-label="Nome do banco" />
-      <datalist id={listId}>{banks.map((b) => <option key={b} value={b} />)}</datalist>
-      <Button type="submit">Salvar</Button>
-      <Button type="button" variant="ghost" onClick={() => setEditing(false)}>Cancelar</Button>
-    </form>
-  )
-}
-
-function ConnectionCard({ conn, cards, banks, onChange }: { conn: Connection; cards: Card[]; banks: string[]; onChange: () => void }) {
-  const act = useAction()
-  const { toast } = useSession()
-  const [busy, setBusy] = useState(false)
-  const st = STATUS[conn.status ?? ''] ?? { label: conn.status ?? '—', tone: 'info' as const }
-  async function reconnect() {
-    setBusy(true)
-    try {
-      const id = await openConnect(conn.id)
-      if (id) await act(() => api.post<{ message: string }>('/pluggy/items', { item_id: id }), onChange)
-    } catch (e) { toast((e as Error).message, 'danger') }
-    setBusy(false)
-  }
-  return (
-    <article className="bank-conn" style={{ borderLeftColor: conn.bank_color ?? undefined }}>
-      <header className="row-between">
-        <BankName conn={conn} banks={banks} onChange={onChange} />
-        <Badge tone={st.tone}>{st.label}</Badge>
-      </header>
-      <p className="muted small">Última atualização do banco: {when(conn.last_updated_at)}</p>
-      {conn.error && <p className="form-error" role="alert">{conn.error}</p>}
-      <div className="bank-auto">
-        <Switch label={`Lançar automaticamente o que chega de ${conn.bank_name ?? 'banco'}`} checked={conn.auto_import}
-          onChange={(v) => act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, { auto_import: v }), onChange)} />
-        <span className="small">
-          <b>Lançar automaticamente</b>
-          <span className="muted"> — {conn.auto_import
-            ? 'o que chega vira despesa com a categoria sugerida; corrija em Revisar importados › Lançados.'
-            : 'desligado: tudo passa por Revisar importados antes.'}</span>
-        </span>
-      </div>
-      {conn.accounts.length ? (
-        <ul className="bank-accs">{conn.accounts.map((a) => <AccountRow key={a.id} acc={a} cards={cards} onChange={onChange} />)}</ul>
-      ) : <p className="muted">O banco ainda não devolveu contas.</p>}
-      <div className="row gap">
-        {st.fix
-          ? <Button icon="key" busy={busy} onClick={reconnect}>Reconectar</Button>
-          : <Button variant="ghost" icon="arrow-repeat" busy={busy}
-              onClick={async () => { setBusy(true); await act(() => api.post<{ message: string }>(`/pluggy/items/${conn.id}/refresh`), onChange); setBusy(false) }}>
-              Atualizar agora</Button>}
-        <ConfirmButton label={`Desconectar ${conn.bank_name ?? 'banco'}`} text="Desconectar" confirmLabel="Confirmar"
-          onConfirm={() => act(() => api.del<{ message: string }>(`/pluggy/items/${conn.id}`), onChange)} />
-      </div>
-    </article>
-  )
-}
+import { openConnect } from './open-finance/connect'
+import { ConnectionCard } from './open-finance/ConnectionCard'
+import { InvoiceCheck } from './open-finance/InvoiceCheck'
+import { HowTo, KeyPanel } from './open-finance/KeyPanel'
+import type { Connection, PluggyConfig } from './open-finance/types'
+import { useBusy } from './open-finance/useBusy'
 
 type Months = '1' | '3' | '6' | '12'
 const WINDOWS: { value: Months; label: string }[] = [
@@ -248,8 +41,10 @@ function WindowModal({ open, withId, onClose, onGo }:
               autoComplete="off" spellCheck={false} />
           </Field>
         )}
-        <p>Quanto do passado trazer deste banco?</p>
-        <Segmented ariaLabel="Período a trazer" value={months} onChange={setMonths} options={WINDOWS} />
+        <div className="field">
+          <span className="field-label">Quanto do passado trazer deste banco?</span>
+          <Segmented ariaLabel="Período a trazer" value={months} onChange={setMonths} options={WINDOWS} />
+        </div>
         <p className="muted small">
           Os lançamentos desse período chegam em <b>Revisar importados</b>. Nada vira despesa sem você aprovar,
           e o que você já lançou à mão ou pelo bot é reconhecido para não duplicar.
@@ -264,191 +59,62 @@ function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => voi
   const cards = useApi(() => api.get<{ cards: Card[] }>('/cards?light=true'), [])
   const act = useAction()
   const { toast } = useSession()
-  const [busy, setBusy] = useState(false)
+  const [busy, run] = useBusy()
   const [asking, setAsking] = useState<null | 'connect' | 'id'>(null)
   const list = items.data?.items
   const creditCards = (cards.data?.cards ?? []).filter((c) => c.card_type === 'credit' || c.supports_credit)
   const full = !!cfg.max_items && (list?.length ?? 0) >= cfg.max_items
   const reload = () => { items.reload(); onChange() }
 
-  async function connect(months: number, itemId?: string) {
+  const connect = (months: number, itemId?: string) => {
     setAsking(null)
-    setBusy(true)
-    try {
-      const id = itemId ?? await openConnect()
-      if (id) await act(() => api.post<{ message: string }>('/pluggy/items', { item_id: id, months }), reload)
-    } catch (e) { toast((e as Error).message, 'danger') }
-    setBusy(false)
+    return run(async () => {
+      try {
+        const id = itemId ?? await openConnect()
+        if (id) await act(() => api.post<{ message: string }>('/pluggy/items', { item_id: id, months }), reload)
+      } catch (e) { toast((e as Error).message, 'danger') }
+    })
   }
 
   return (
     <>
-    <Panel title="Bancos conectados" actions={
-      <div className="row gap">
-        {list && list.length > 0 && (
-          <Link to="/bank/review" className="btn btn-ghost">
-            Revisar importados{cfg.to_review ? <Badge tone="warning">{cfg.to_review}</Badge> : null}
-          </Link>
+      <Panel title="Bancos conectados" actions={
+        <div className="row gap">
+          {list && list.length > 0 && (
+            <Link to="/bank/review" className="btn btn-ghost">
+              Revisar importados{cfg.to_review ? <Badge tone="warning">{cfg.to_review}</Badge> : null}
+            </Link>
+          )}
+          <Button icon="plus" busy={busy} disabled={full} title={full ? 'Limite de bancos da sua família' : undefined}
+            onClick={() => setAsking('connect')}>Conectar banco</Button>
+        </div>}>
+        <WindowModal key={asking ?? 'closed'} open={asking !== null} withId={asking === 'id'}
+          onClose={() => setAsking(null)} onGo={connect} />
+        {items.error ? <ErrorBox message={items.error} onRetry={items.reload} /> : !list ? <Spinner /> : !list.length ? (
+          <Empty icon="bank" title="Nenhum banco conectado">
+            Toque em <b>Conectar banco</b>: a janela da Pluggy abre aqui, você escolhe o banco e entra com a senha dele.
+            A senha vai direto para a Pluggy, o FinFam nunca vê.
+          </Empty>
+        ) : (
+          <div className="stack">
+            {list.map((c) => <ConnectionCard key={c.id} conn={c} cards={creditCards} banks={items.data?.banks ?? []} onChange={reload} />)}
+          </div>
         )}
-        <Button icon="plus" busy={busy} disabled={full} title={full ? 'Limite de bancos da sua família' : undefined}
-          onClick={() => setAsking('connect')}>Conectar banco</Button>
-      </div>}>
-      <WindowModal key={asking ?? 'closed'} open={asking !== null} withId={asking === 'id'}
-        onClose={() => setAsking(null)} onGo={connect} />
-      {items.error ? <ErrorBox message={items.error} onRetry={items.reload} /> : !list ? <Spinner /> : !list.length ? (
-        <Empty icon="bank" title="Nenhum banco conectado">
-          Toque em <b>Conectar banco</b>: a janela da Pluggy abre aqui, você escolhe o banco e entra com a senha dele.
-          A senha vai direto para a Pluggy, o FinFam nunca vê.
-        </Empty>
-      ) : (
-        <div className="stack">
-          {list.map((c) => <ConnectionCard key={c.id} conn={c} cards={creditCards} banks={items.data?.banks ?? []} onChange={reload} />)}
-        </div>
-      )}
-      <p className="muted small">
-        {cfg.max_items ? `Limite da sua família: ${cfg.max_items} banco(s) por pessoa. ` : ''}
-        Ligue cada cartão do banco ao cartão do FinFam: as compras caem na fatura certa e a fatura pode ser conferida.
-        Desconectar apaga os dados vindos do banco; as despesas que você aprovou continuam.
-        {!full && <> Já conectou o banco pelo painel da Pluggy?{' '}
-          <button type="button" className="link-btn" onClick={() => setAsking('id')}>Usar o ID da conexão</button>.</>}
-      </p>
-    </Panel>
-    {!!list?.length && <InvoiceCheck />}
+        <p className="muted small">
+          {cfg.max_items ? `Limite da sua família: ${cfg.max_items} banco(s) por pessoa. ` : ''}
+          Ligue cada cartão do banco ao cartão do FinFam: as compras caem na fatura certa e a fatura pode ser conferida.
+          Desconectar apaga os dados vindos do banco; as despesas que você aprovou continuam.
+          {!full && <> Já conectou o banco pelo painel da Pluggy?{' '}
+            <button type="button" className="link-btn" onClick={() => setAsking('id')}>Usar o ID da conexão</button>.</>}
+        </p>
+      </Panel>
+      {!!list?.length && <InvoiceCheck />}
     </>
-  )
-}
-
-interface CheckItem { id: number; description: string; amount: number; date: string; installment?: number | null }
-interface CheckRow {
-  account_id: number; label: string; linked: boolean; bank_total: number | null; bank_source: 'fatura' | 'lancamentos' | 'sem_fatura'
-  finfam_total: number | null; diff: number | null; due_date: string | null
-  bank_items_total: number; items_match: boolean
-  only_bank: CheckItem[]; only_finfam: CheckItem[]
-}
-
-function CheckList({ title, items }: { title: string; items: CheckItem[] }) {
-  if (!items.length) return null
-  return (
-    <div className="stack-sm">
-      <b className="small">{title} ({items.length})</b>
-      <ul className="check-list">
-        {items.map((i) => (
-          <li key={i.id}><span className="muted">{dayMonth(i.date)}</span> {i.description}
-            {i.installment ? <span className="muted"> · parcela {i.installment}</span> : null}<b>{brl(i.amount)}</b></li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-/** Fatura do banco × FinFam, por cartão conectado, no mês escolhido. */
-function InvoiceCheck() {
-  const today = new Date()
-  const [period, setPeriod] = useState({ month: today.getMonth() + 1, year: today.getFullYear() })
-  const data = useApi(() => api.get<{ cards: CheckRow[] }>(`/pluggy/invoice-check?month=${period.month}&year=${period.year}`),
-    [period.month, period.year])
-  const [open, setOpen] = useState<number | null>(null)
-  return (
-    <Panel title="Conferir faturas com o banco" actions={
-      <MonthNav month={period.month} year={period.year} onChange={(month, year) => setPeriod({ month, year })} />}>
-      {data.error ? <ErrorBox message={data.error} onRetry={data.reload} /> : !data.data ? <Spinner /> : (
-        <ul className="check-rows">
-          {data.data.cards.map((c) => {
-            const ok = c.diff !== null && Math.abs(c.diff) < 0.01
-            const adjust = !ok && c.diff !== null && c.items_match  // compras batem; o total do banco tem crédito/ajuste
-            return (
-              <li key={c.account_id}>
-                <div className="check-head">
-                  <b>{c.label}</b>
-                  {!c.linked ? <Badge tone="warning">ligue a um cartão do FinFam</Badge>
-                    : c.bank_source === 'sem_fatura' ? <Badge tone="info">banco não informa a fatura</Badge>
-                      : ok ? <Badge tone="success">bate</Badge>
-                        : adjust ? <Badge tone="success">compras batem</Badge>
-                          : <Badge tone="danger">diferença {brl(c.diff)}</Badge>}
-                </div>
-                <div className="muted small">
-                  {c.bank_total === null ? 'O banco não diz em que fatura cada compra está'
-                    : <>Banco {brl(c.bank_total)} ({c.bank_source === 'fatura' ? 'fatura do banco' : 'lançamentos até agora'})</>}
-                  {c.finfam_total !== null && <> · FinFam {brl(c.finfam_total)}</>}
-                  {c.due_date && <> · vence {dayMonth(c.due_date)}</>}
-                </div>
-                {adjust && (
-                  <div className="small">
-                    As compras que o banco mandou para esta fatura somam {brl(c.bank_items_total)}, igual ao FinFam.
-                    O total que o banco cobra é {brl(Math.abs(c.diff!))} {c.diff! > 0 ? 'menor' : 'maior'}: é crédito ou ajuste
-                    da fatura (ex.: pagamento a mais no mês anterior), não compra faltando.
-                  </div>
-                )}
-                {(c.only_bank.length > 0 || c.only_finfam.length > 0) && (
-                  open === c.account_id ? (
-                    <div className="stack-sm">
-                      <CheckList title="Só no banco (para revisar)" items={c.only_bank} />
-                      <CheckList title="Só no FinFam (lançado à mão ou parcela futura)" items={c.only_finfam} />
-                      <div><button type="button" className="link-btn" onClick={() => setOpen(null)}>Esconder</button></div>
-                    </div>
-                  ) : (
-                    <div><button type="button" className="link-btn" onClick={() => setOpen(c.account_id)}>
-                      Ver diferenças ({c.only_bank.length + c.only_finfam.length})</button></div>
-                  )
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      <p className="muted small">"Fatura do banco" é o total que o banco informa; sem ele, soma os lançamentos que já chegaram.
-        "Compras batem" quer dizer que cada compra do banco está no FinFam e só o total do banco tem um crédito ou ajuste à parte.</p>
-    </Panel>
-  )
-}
-
-function KeyForm({ cfg, onSaved, onCancel }: { cfg: PluggyConfig; onSaved: () => void; onCancel?: () => void }) {
-  const act = useAction()
-  const [f, setF] = useState({ client_id: '', client_secret: '', consent: false })
-  const [busy, setBusy] = useState(false)
-  async function submit(e: React.FormEvent) {
-    e.preventDefault()
-    setBusy(true)
-    await act(() => api.put<Saved>('/pluggy/config', f), onSaved)
-    setBusy(false)
-  }
-  return (
-    <form className="stack" onSubmit={submit}>
-      <Field label="Client ID" hint={cfg.configured ? `Atual: ${cfg.client_id_masked}` : 'Formato: 9f3c1a2e-7b44-4d0e-…'}>
-        <Input value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value.trim() })} required
-          autoComplete="off" spellCheck={false} />
-      </Field>
-      <Field label="Client Secret" hint="Fica guardado criptografado e nunca volta para a tela.">
-        <Input type="password" value={f.client_secret} onChange={(e) => setF({ ...f, client_secret: e.target.value })}
-          required autoComplete="off" />
-      </Field>
-      <Check checked={f.consent} onChange={(v) => setF({ ...f, consent: v })}
-        label="Concordo que o FinFam guarde os extratos e faturas importados dos bancos que eu conectar, e que apague tudo ao desconectar." />
-      <div className="row gap">
-        <Button type="submit" busy={busy} disabled={!f.consent}>Salvar e testar</Button>
-        {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancelar</Button>}
-      </div>
-    </form>
-  )
-}
-
-function HowTo() {
-  return (
-    <Panel title="Como obter a chave">
-      <ol className="plain-list">
-        <li>Crie uma conta no painel da Pluggy: <a href="https://dashboard.pluggy.ai" target="_blank" rel="noreferrer">dashboard.pluggy.ai</a>.</li>
-        <li>Crie uma <b>aplicação</b> e copie o <b>Client ID</b> e o <b>Client Secret</b>.</li>
-        <li>Cole os dois aqui e toque em <b>Salvar e testar</b>.</li>
-        <li>Depois, toque em <b>Conectar banco</b> e escolha o seu banco.</li>
-      </ol>
-      <p className="muted">A chave é <b>sua</b>: cada pessoa da família usa a própria conta Pluggy, e a cobrança (se houver) é feita pela Pluggy na sua conta. O FinFam nunca vê a senha do seu banco.</p>
-    </Panel>
   )
 }
 
 export function OpenFinancePage() {
   const data = useApi(() => api.get<PluggyConfig>('/pluggy/config'), [])
-  const act = useAction()
   const [editing, setEditing] = useState(false)
   const cfg = data.data
   const done = () => { setEditing(false); data.reload() }
@@ -465,35 +131,8 @@ export function OpenFinancePage() {
         <div className="stack">
           {cfg.configured && !editing && <Connections cfg={cfg} onChange={data.reload} />}
           <div className="grid-2">
-          <Panel title="Sua chave Pluggy">
-            {!cfg.configured || editing ? <KeyForm cfg={cfg} onSaved={done} onCancel={editing ? () => setEditing(false) : undefined} /> : (
-              <div className="stack">
-                <p>
-                  {cfg.status === 'ok' ? <Badge tone="success">Chave aceita</Badge> : <Badge tone="danger">Com problema</Badge>}
-                  {' '}<span className="muted">Client ID {cfg.client_id_masked}</span>
-                </p>
-                {cfg.last_error && <p className="form-error" role="alert">{cfg.last_error}</p>}
-                <p className="muted">
-                  {cfg.webhook ? 'Aviso de novidades (webhook) configurado na sua conta Pluggy.'
-                    : cfg.public_url_ok ? 'Webhook ainda não configurado: salve a chave de novo.'
-                      : 'Webhook pendente: o administrador precisa definir PUBLIC_URL (https) no servidor.'}
-                </p>
-                <div className="bank-auto">
-                  <Switch label="Avisar no Telegram quando chegar algo do banco" checked={cfg.notify}
-                    onChange={(v) => act(() => api.put<Saved>('/pluggy/notify', { notify: v }), done)} />
-                  <span className="small"><b>Avisar no Telegram</b>
-                    <span className="muted"> — quando chegar algo do banco (precisa ter o Telegram ligado em Telegram e IA).</span></span>
-                </div>
-                <div className="row gap">
-                  <Button variant="ghost" onClick={() => setEditing(true)}>Trocar chave</Button>
-                  <ConfirmButton label="Remover chave Pluggy" text="Remover chave"
-                    confirmLabel={cfg.connections ? `Remover e desconectar ${cfg.connections} banco(s)` : 'Confirmar remoção'}
-                    onConfirm={() => act(() => api.del<Saved>('/pluggy/config'), done)} />
-                </div>
-              </div>
-            )}
-          </Panel>
-          <HowTo />
+            <KeyPanel cfg={cfg} editing={editing} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} onChanged={done} />
+            <HowTo />
           </div>
         </div>
       )}

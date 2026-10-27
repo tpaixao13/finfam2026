@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.db import db, get_or_404
-from app.core.deps import Ctx, get_ctx
+from app.core.deps import Ctx, get_ctx, get_ctx_session
 from app.models import CategoryRule
 from app.services.categorizer import learn_from_history
 from app.services.serializers import iso
@@ -53,7 +53,7 @@ def create(body: RuleIn, ctx: Ctx = Depends(get_ctx)):
 
 
 @router.post('/learn', summary='Cria regras a partir das despesas já lançadas pela família')
-def learn(ctx: Ctx = Depends(get_ctx)):
+def learn(ctx: Ctx = Depends(get_ctx_session)):
     created = learn_from_history(ctx.uids, _tid(ctx))
     db.session.commit()
     return {'created': created, 'message': f'{created} regra(s) criada(s) pelo histórico.' if created

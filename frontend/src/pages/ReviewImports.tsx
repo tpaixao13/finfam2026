@@ -1,23 +1,12 @@
 // Open Finance — etapa 3: o que chegou do banco espera aqui. Só vira despesa o que a pessoa aprovar.
 import { useEffect, useMemo, useState } from 'react'
-import { Badge, Button, Empty, ErrorBox, IconButton, Input, PageHeader, Panel, Segmented, Select, Spinner } from '../components/ui'
+import { Badge, Button, Check, Empty, ErrorBox, PageHeader, Panel, Segmented, Spinner } from '../components/ui'
 import { api } from '../lib/api'
-import { brl, dayMonth } from '../lib/format'
+import { brl } from '../lib/format'
 import { useApi } from '../lib/hooks'
 import { Link } from '../lib/router'
 import { useAction } from '../lib/session'
-
-type Status = 'pending' | 'duplicate' | 'ignored' | 'imported'
-interface BankTx {
-  id: number; date: string; description: string; amount: number; refund?: boolean; status: Status; reason: string | null
-  installment: { number: number; total: number } | null; bank_pending: boolean; bill: string | null
-  bank_name: string | null; account_type: 'BANK' | 'CREDIT'; account_name: string | null
-  account_last_digits: string | null; card_id: number | null; card_digits: string | null
-  expense: { id: number; description: string; amount: number; date: string } | null
-  category?: string; payment_method?: string
-}
-interface TxList { counts: Record<Status, number>; categories: string[]; items: BankTx[] }
-interface Draft { selected: boolean; category: string; description: string; payment_method: string }
+import { DoneRow, PendingRow, type Draft, type Status, type TxList } from './ReviewRows'
 
 const TABS: { value: Status; label: string }[] = [
   { value: 'pending', label: 'Para revisar' }, { value: 'duplicate', label: 'Já no FinFam' },
@@ -28,94 +17,6 @@ const EMPTY: Record<Status, string> = {
   duplicate: 'Nenhum lançamento repetido',
   ignored: 'Nenhum lançamento ignorado',
   imported: 'Nenhum lançamento aprovado ainda',
-}
-
-/** Linha de origem: data · banco · conta/cartão · parcela. */
-function Source({ tx }: { tx: BankTx }) {
-  const where = tx.account_type === 'CREDIT' ? 'Cartão' : 'Conta'
-  return (
-    <span className="muted small">
-      {dayMonth(tx.date)} · {tx.bank_name ?? 'Banco'} · {where}
-      {(tx.card_digits || tx.account_last_digits) && ` •••• ${tx.card_digits || tx.account_last_digits}`}
-      {tx.installment && ` · parcela ${tx.installment.number}/${tx.installment.total}`}
-      {tx.bill && ` · fatura ${tx.bill}`}
-      {tx.refund && ' · estorno (abate a fatura)'}
-      {tx.bank_pending && ' · ainda pendente no banco'}
-    </span>
-  )
-}
-
-const NEW_CATEGORY = '__nova__'
-
-/** Categoria: lista completa (sempre abre inteira) + "Nova categoria…" para digitar uma. */
-function CategoryField({ value, categories, onChange }:
-  { value: string; categories: string[]; onChange: (v: string) => void }) {
-  const [typing, setTyping] = useState(false)
-  const [text, setText] = useState('')
-  const options = !value || categories.includes(value) ? categories : [...categories, value]
-  if (typing) {
-    const done = () => { if (text.trim()) onChange(text.trim().slice(0, 50)); setTyping(false) }
-    return (
-      <div className="cat-new">
-        <Input autoFocus aria-label="Nova categoria" placeholder="Nova categoria" maxLength={50} value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); done() } else if (e.key === 'Escape') setTyping(false) }} />
-        <IconButton icon="check2" label="Usar esta categoria" onClick={done} />
-        <IconButton icon="x" label="Cancelar" onClick={() => setTyping(false)} />
-      </div>
-    )
-  }
-  return (
-    <Select aria-label="Categoria" value={value}
-      options={[...options.map((c) => ({ value: c, label: c })), { value: NEW_CATEGORY, label: '+ Nova categoria…' }]}
-      onChange={(e) => {
-        if (e.target.value === NEW_CATEGORY) { setText(''); setTyping(true) } else onChange(e.target.value)
-      }} />
-  )
-}
-
-function PendingRow({ tx, draft, categories, onChange }:
-  { tx: BankTx; draft: Draft; categories: string[]; onChange: (d: Partial<Draft>) => void }) {
-  const credit = tx.account_type === 'CREDIT'
-  const parcelado = credit && tx.installment && tx.installment.number <= 1
-  return (
-    <li className={`review-row ${draft.selected ? 'on' : ''}`}>
-      <input type="checkbox" className="review-pick" checked={draft.selected} aria-label={`Selecionar ${tx.description}`}
-        onChange={(e) => onChange({ selected: e.target.checked })} />
-      <div className="review-main">
-        <Input value={draft.description} aria-label="Descrição" maxLength={200}
-          onChange={(e) => onChange({ description: e.target.value })} />
-        <Source tx={tx} />
-        {parcelado && <span className="small">Vai lançar as {tx.installment!.total} parcelas, como no site.</span>}
-        {credit && !tx.card_id && <span className="small warn-text">Cartão do banco não ligado: vai sem cartão do FinFam.</span>}
-      </div>
-      <div className="review-fields">
-        <CategoryField value={draft.category} categories={categories} onChange={(category) => onChange({ category })} />
-        {credit ? <span className="muted small review-method">Cartão de Crédito</span> : (
-          <Select aria-label="Forma de pagamento" value={draft.payment_method} options={['PIX', 'Cartão de Débito']}
-            onChange={(e) => onChange({ payment_method: e.target.value })} />
-        )}
-      </div>
-      <b className="review-amount">{brl(tx.refund ? -tx.amount : tx.amount)}</b>
-    </li>
-  )
-}
-
-function DoneRow({ tx, onRestore }: { tx: BankTx; onRestore?: () => void }) {
-  return (
-    <li className="review-row done">
-      <div className="review-main">
-        <span>{tx.description}</span>
-        <Source tx={tx} />
-        {tx.status === 'duplicate' && tx.expense && (
-          <span className="small">Igual a <b>{tx.expense.description}</b> de {dayMonth(tx.expense.date)} ({brl(tx.expense.amount)})</span>
-        )}
-        {tx.status === 'ignored' && tx.reason && <span className="small">{tx.reason}</span>}
-      </div>
-      <b className="review-amount">{brl(tx.refund ? -tx.amount : tx.amount)}</b>
-      {onRestore && <Button variant="ghost" onClick={onRestore}>Revisar</Button>}
-    </li>
-  )
 }
 
 export function ReviewImportsPage() {
@@ -187,11 +88,8 @@ export function ReviewImportsPage() {
       ) : tab === 'pending' ? (
         <Panel flush>
           <div className="review-bar">
-            <label className="check">
-              <input type="checkbox" checked={all}
-                onChange={(e) => setDrafts((s) => Object.fromEntries(Object.entries(s).map(([k, d]) => [k, { ...d, selected: e.target.checked }])))} />
-              <span>{picked.length} de {list.items.length} · {brl(total)}</span>
-            </label>
+            <Check checked={all} label={`${picked.length} de ${list.items.length} · ${brl(total)}`}
+              onChange={(v) => setDrafts((s) => Object.fromEntries(Object.entries(s).map(([k, d]) => [k, { ...d, selected: v }])))} />
             <div className="row gap">
               <Button variant="ghost" icon="x" disabled={!picked.length || busy} onClick={ignore}>Ignorar</Button>
               <Button icon="check2" busy={busy} disabled={!picked.length} onClick={approve}>{progress ? `Lançando ${progress}…` : `Lançar ${picked.length || ''}`}</Button>

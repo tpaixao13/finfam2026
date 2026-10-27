@@ -20,6 +20,19 @@ from app.routers import (admin, ai, auth, cards, dashboard, expenses, family, go
 
 log = logging.getLogger('finfam')
 
+
+class _HideHookToken(logging.Filter):
+    """O log de acesso do uvicorn não grava o token do webhook da Pluggy (fica /pluggy/webhook/***)."""
+    _rx = __import__('re').compile(r'(/pluggy/webhook/)[^\s"?]+')
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and any('/pluggy/webhook/' in str(a) for a in record.args):
+            record.args = tuple(self._rx.sub(r'\1***', a) if isinstance(a, str) else a for a in record.args)
+        return True
+
+
+logging.getLogger('uvicorn.access').addFilter(_HideHookToken())
+
 VERSION = '2026.2.0-dev'  # ramo pluggy: Open Finance em construção
 
 _FIELD_LABELS = {

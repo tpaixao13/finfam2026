@@ -106,3 +106,33 @@ def test_wipe_reimports_from_connected_banks(client, family, bank, txs):  # noqa
 
 from test_pluggy_import import txs  # noqa: E402,F401  (fixtures)
 from test_pluggy_items import bank  # noqa: E402,F401
+
+
+def test_backup_leaves_out_invite_code_and_chat(client, family):
+    from app.models import Tenant
+    tenant = session.get(Tenant, family.user['tenant_id']) if 'tenant_id' in family.user else Tenant.query.first()
+    data = fb.dump(tenant)
+    row = data['tables']['tenants'][0]
+    assert 'code' not in row and 'telegram_chat_id' not in row and 'name' in row
+    session.remove()
+
+
+def test_restore_skips_bank_rows_of_accounts_outside_family(client, family, other_family):
+    from app.models import BankAccount, BankConnection, Tenant, User
+    other_uid = other_family.user['id']
+    conn = BankConnection(user_id=other_uid, item_id='11111111-2222-3333-4444-555555555555')
+    session.add(conn)
+    session.flush()
+    acc = BankAccount(connection_id=conn.id, pluggy_account_id='acc-outra', type='CREDIT')
+    session.add(acc)
+    session.commit()
+    me = session.get(User, family.user['id'])
+    tenant = session.get(Tenant, me.tenant_id)
+    forged = {'format': fb.FORMAT, 'version': fb.VERSION, 'tables': {'bank_transactions': [
+        {'id': 999, 'account_id': acc.id, 'user_id': me.id, 'pluggy_id': 'forjado', 'date': '2026-10-01',
+         'description': 'x', 'amount': '1.00', 'status': 'pending', 'kind': 'expense'}]}}
+    fb.restore_expenses(tenant, forged)
+    session.commit()
+    from app.models import BankTransaction
+    assert BankTransaction.query.filter_by(pluggy_id='forjado').first() is None
+    session.remove()

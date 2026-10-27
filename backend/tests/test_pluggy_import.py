@@ -991,3 +991,13 @@ def test_invoice_check_items_match_when_bank_total_has_credit(client, family, ba
              if r['bank_source'] == 'fatura']
     assert (row['diff'], row['items_match'], row['bank_items_total']) == (42.49, True, 100.0)
     session.remove()
+
+
+def test_bank_balances_only_owner(client, family, other_family, bank, txs):  # noqa: F811
+    _connect(client, family, bank, txs)
+    _post_item(family)
+    r = family.get('/pluggy/balances').json()
+    assert r['enabled'] and r['total'] == 1520.35
+    assert [(i['bank'], i['last_digits'], i['subtype']) for i in r['items']] == [('Nubank', '3456', 'CHECKING_ACCOUNT')]
+    assert other_family.get('/pluggy/balances').json()['items'] == []
+    session.remove()

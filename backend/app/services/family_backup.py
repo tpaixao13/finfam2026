@@ -8,6 +8,7 @@
 - Restaurar: devolve as despesas exatamente como estavam no backup (troca as atuais).
 """
 import gzip
+import os
 import json
 import re
 import time
@@ -20,7 +21,7 @@ from sqlalchemy import Date, DateTime, Numeric, insert, select
 from app.core.config import INSTANCE_DIR
 from app.core.db import Base, db
 from app.core.types import utcnow
-from app.models import (BankConnection, BankTransaction, CreditCard, Expense, InstallmentGroup, RecurringGroup,
+from app.models import (BankAccount, BankConnection, BankTransaction, CreditCard, Expense, InstallmentGroup, RecurringGroup,
                         Tenant, User)
 
 FORMAT = 'finfam-family-backup'
@@ -31,6 +32,8 @@ NAME = re.compile(r'familia_(\d+)_\d{8}_\d{6}\.json\.gz')
 # nunca vão para o backup
 SKIP_TABLES = {'api_tokens', 'ai_configs', 'pluggy_configs', 'telegram_links', 'telegram_link_codes'}
 SECRET_COLUMN = re.compile(r'password|secret|totp|token|api_key', re.I)
+# dados de acesso da família que não precisam estar num arquivo que circula (código de convite, chat)
+PRIVATE_COLUMNS = {('tenants', 'code'), ('tenants', 'telegram_chat_id')}
 # o que zerar apaga e restaurar devolve (nesta ordem de inserção)
 RESTORE_TABLES = ('installment_groups', 'recurring_groups', 'expenses', 'bank_transactions')
 
@@ -64,7 +67,7 @@ def _rows_of(table, tenant: Tenant, uids: list[int], conn_ids: list[int]):
         cond = cols.connection_id.in_(conn_ids or [0])
     else:
         return []  # tabela sem dono (ex.: admins, cotações): não é da família
-    keep = [c for c in cols if not SECRET_COLUMN.search(c.name)]
+    keep = [c for c in cols if not SECRET_COLUMN.search(c.name) and (table.name, c.name) not in PRIVATE_COLUMNS]
     return [{c.name: _plain(v) for c, v in zip(keep, row)}
             for row in db.session.execute(select(*keep).where(cond)).all()]
 
@@ -94,6 +97,11 @@ def save(tenant: Tenant, reason: str = 'manual') -> Path:
         time.sleep(0.2)
         path = BACKUP_DIR / f'familia_{tenant.id}_{utcnow():%Y%m%d_%H%M%S}.json.gz'
     path.write_bytes(gzip.compress(json.dumps(payload, ensure_ascii=False).encode()))
+    try:  # só o usuário do serviço lê (tem os dados da família)
+        os.chmod(BACKUP_DIR, 0o700)
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
     return path
 
 
@@ -181,7 +189,10 @@ def restore_expenses(tenant: Tenant, data: dict) -> int:
     wipe_expenses(tenant)
     remap: dict[str, dict[int, int]] = {name: {} for name in RESTORE_TABLES}
     cards = {c.id for c in CreditCard.query.filter(CreditCard.user_id.in_(uids or {0})).all()}
-    accounts = {a for (a,) in db.session.execute(select(tables['bank_accounts'].c.id)).all()}
+    # só contas de bancos conectados por alguém da família, e o lançamento volta para o dono da conta
+    owner_of = {a.id: c.user_id for a, c in db.session.query(BankAccount, BankConnection)
+                .join(BankConnection, BankAccount.connection_id == BankConnection.id)
+                .filter(BankConnection.user_id.in_(uids or {0})).all()}
     restored = 0
     for name in RESTORE_TABLES:
         table = tables[name]
@@ -196,7 +207,7 @@ def restore_expenses(tenant: Tenant, data: dict) -> int:
                 if row.get('card_id') not in cards:
                     row['card_id'] = None  # cartão apagado depois do backup
             if name == 'bank_transactions':
-                if row.get('account_id') not in accounts or \
+                if owner_of.get(row.get('account_id')) != row.get('user_id') or \
                         BankTransaction.query.filter_by(pluggy_id=row.get('pluggy_id')).first():
                     continue  # banco desconectado ou o lançamento já voltou
                 if row.get('expense_id') is not None:

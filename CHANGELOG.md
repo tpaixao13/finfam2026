@@ -138,6 +138,15 @@ pelo bot ou importando extrato, como antes.
   classe (Renda Fixa, Ações, Fundos...) ou por instituição, com a % de cada uma (`lib/allocation.ts`).
 - C6: "DÉBITO DE CARTÃO" na conta é compra no débito (a Pluggy marca como pagamento de cartão).
 - Despesas: atalho para selecionar as vencidas da página e marcar como pagas.
+- Rendas: "Saldo nas contas" — saldo das contas correntes/poupança conectadas (`GET /pluggy/balances`, só consulta).
+- Conferir faturas: "compras batem" quando as compras do banco para a fatura somam igual ao FinFam e só o
+  total do banco tem crédito/ajuste (`items_match`).
+- Revisão de segurança: webhook recusa segredo vazio, só confia no CF-Connecting-IP vindo da própria
+  máquina, limita tentativas erradas por IP e não grava o token no log de acesso; restauração do backup só
+  aceita lançamentos de contas da própria família; backup sem código de convite/chat do Telegram e com
+  permissão 0600; `POST /rules/learn` só pelo site; MCP trata descrição do banco como dado.
+- Revisão Unix das telas: `OpenFinance.tsx` dividido em `pages/open-finance/*`, `ReviewRows.tsx`,
+  `BankInvestments.tsx`, `Allocation.tsx`; acessibilidade e celular (360 px sem rolagem lateral).
 - Regras de categoria passam a ser preenchidas: em Revisar importados, trocar a categoria sugerida cria
   (ou corrige) a regra da palavra principal (`categorizer.keyword_of`, sem prefixos como DL/IFD/cidade);
   botão "Criar pelo histórico" (`POST /rules/learn`: palavra em 3+ despesas, 80%+ na mesma categoria);

@@ -56,9 +56,10 @@ export function FamilyDataModal({ tenant, onClose, onChanged }:
           <p><b>Zerar despesas</b>: apaga todas as despesas da família desde o início (com parcelas e recorrências)
             e os lançamentos já importados do banco. Rendas, cartões, investimentos, metas, pessoas e bancos
             conectados ficam. Um backup completo é feito antes, automaticamente.</p>
-          <Field label="Depois de zerar, os bancos conectados trazem de novo">
+          <div className="field">
+            <span className="field-label">Depois de zerar, os bancos conectados trazem de novo</span>
             <Segmented ariaLabel="Período a reimportar" value={months} onChange={setMonths} options={WINDOWS} />
-          </Field>
+          </div>
           <p className="muted small">O que chegar do banco vai para "Revisar importados" (ou é lançado sozinho nos bancos
             com "Lançar automaticamente" ligado).</p>
           <Confirm family={tenant.name} value={typed} onChange={setTyped} />
@@ -101,8 +102,8 @@ export function FamilyDataModal({ tenant, onClose, onChanged }:
                     <div className="muted small">{b.expenses} despesa(s) · {(b.size / 1024).toFixed(0)} KB</div>
                   </div>
                   <div className="row gap">
-                    <Button variant="ghost" icon="download" onClick={() => download(b)}>Baixar</Button>
-                    <Button variant="ghost" icon="arrow-repeat" onClick={() => setMode(b)}>Restaurar…</Button>
+                    <Button variant="ghost" icon="download" aria-label={`Baixar backup de ${when(b.created_at)}`} onClick={() => download(b)}>Baixar</Button>
+                    <Button variant="ghost" icon="arrow-repeat" aria-label={`Restaurar backup de ${when(b.created_at)}`} onClick={() => setMode(b)}>Restaurar…</Button>
                   </div>
                 </li>
               ))}

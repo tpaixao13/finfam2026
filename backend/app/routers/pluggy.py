@@ -22,7 +22,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 
+from app.core import ratelimit
 from app.core.config import settings
+from app.core.deps import _LOCAL_HOSTS
 from app.core.db import db
 from app.core.deps import Ctx, Period, get_ctx, get_ctx_session, get_period
 from app.core.security import decrypt_field, encrypt_field
@@ -579,6 +581,22 @@ def invoice_check(period: Period = Depends(get_period), ctx: Ctx = Depends(get_c
             'cards': of.invoice_check(ctx.user.id, period.month, period.year)}
 
 
+@router.get('/balances', summary='Saldo das minhas contas correntes/poupança conectadas (só consulta)')
+def bank_balances(ctx: Ctx = Depends(get_ctx)):
+    """Saldo como o banco informou na última leitura. Sem Open Finance liberado: lista vazia."""
+    if ctx.tenant is None or not ctx.tenant.open_finance_enabled:
+        return {'enabled': False, 'items': [], 'total': 0}
+    rows = (BankAccount.query.join(BankConnection)
+            .filter(BankConnection.user_id == ctx.user.id, BankAccount.type == 'BANK', BankAccount.balance.isnot(None))
+            .order_by(BankConnection.id, BankAccount.id).all())
+    items = [{'id': a.id, 'bank': a.connection.label, 'name': a.name, 'subtype': a.subtype,
+              'last_digits': of.last4(a.number), 'balance': float(a.balance), 'currency': a.currency or 'BRL',
+              'updated_at': (a.connection.last_updated_at.isoformat() + 'Z') if a.connection.last_updated_at else None}
+             for a in rows]
+    return {'enabled': True, 'items': items,
+            'total': round(sum(i['balance'] for i in items if i['currency'] == 'BRL'), 2)}
+
+
 @router.get('/investments', summary='Investimentos que os meus bancos informam (só consulta)')
 def bank_investments(ctx: Ctx = Depends(get_ctx)):
     """Saldo como o banco informa na última leitura. Sem Open Finance liberado: lista vazia."""
@@ -622,8 +640,18 @@ def summary(status: Literal['pending', 'duplicate', 'ignored', 'imported'] = 'pe
 # ── Webhook (chamado pela Pluggy) ────────────────────────────────────────────
 
 def _caller_ip(request: Request) -> str:
-    # atrás do cloudflared o IP real vem no CF-Connecting-IP
-    return (request.headers.get('cf-connecting-ip') or (request.client.host if request.client else '')).strip()
+    """Atrás do cloudflared (na mesma máquina) o IP real vem no CF-Connecting-IP. Só vale quando
+    o pedido chega pela própria máquina: quem acessa a porta direto não escolhe o IP que tem."""
+    host = request.client.host if request.client else ''
+    if host in _LOCAL_HOSTS:
+        return (request.headers.get('cf-connecting-ip') or host).strip()
+    return host
+
+
+def _hook_refused(request: Request) -> JSONResponse:
+    """404 (a Pluggy não reenvia) e conta a tentativa: muitas erradas do mesmo IP → 429."""
+    ratelimit.check(request, 'pluggy-hook', _caller_ip(request), limit=30, window=600)
+    return JSONResponse(status_code=404, content={'detail': 'Não encontrado.'})
 
 
 @router.post('/webhook/{hook_token}', include_in_schema=False)
@@ -632,11 +660,12 @@ async def webhook(hook_token: str, request: Request):
     por isso é a resposta para token/segredo/IP inválidos."""
     allowed = settings.pluggy_webhook_ips
     if allowed and _caller_ip(request) not in allowed:
-        return JSONResponse(status_code=404, content={'detail': 'Não encontrado.'})
+        return _hook_refused(request)
     cfg = PluggyConfig.query.filter_by(hook_token=hook_token).first() if len(hook_token) <= 48 else None
     given = request.headers.get('x-finfam-hook', '')
-    if cfg is None or not hmac.compare_digest(given.encode(), (decrypt_field(cfg.hook_secret) or '').encode()):
-        return JSONResponse(status_code=404, content={'detail': 'Não encontrado.'})
+    secret = (decrypt_field(cfg.hook_secret) or '') if cfg is not None else ''
+    if not secret or not given or not hmac.compare_digest(given.encode(), secret.encode()):
+        return _hook_refused(request)
     raw = await request.body()
     if len(raw) > 256 * 1024:
         return JSONResponse(status_code=413, content={'detail': 'Grande demais.'})
