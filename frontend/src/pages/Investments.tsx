@@ -72,6 +72,18 @@ interface BankInvestment {
 }
 interface BankInvestments { enabled: boolean; items: BankInvestment[]; total: number }
 
+const SUBTYPES: Record<string, string> = {
+  STOCK: 'Ação/ETF', ETF: 'ETF', REAL_ESTATE_FUND: 'Fundo imobiliário', BDR: 'BDR', TREASURY: 'Tesouro Direto',
+  INVESTMENT_FUND: 'Fundo', MULTIMARKET_FUND: 'Fundo multimercado', FIXED_INCOME_FUND: 'Fundo de renda fixa',
+  STOCK_FUND: 'Fundo de ações', PENSION: 'Previdência', SAVINGS: 'Poupança',
+}
+/** Linha de baixo: tipo traduzido e emissor (sem repetir o que já está no nome). */
+function bankDetail(i: BankInvestment): string {
+  const kind = i.subtype ? SUBTYPES[i.subtype] ?? i.subtype : null
+  const issuer = i.issuer && !i.name.toUpperCase().includes(i.issuer.toUpperCase()) ? i.issuer : null
+  return [kind, issuer].filter(Boolean).join(' · ')
+}
+
 /** "110% do CDI", "IPCA + 6%", "12,5% a.a." — como o banco descreve a taxa. */
 function bankRate(i: BankInvestment): string {
   const kind = (i.rate_type ?? '').toUpperCase()
@@ -95,7 +107,7 @@ function BankInvestmentsPanel({ data }: { data: BankInvestments }) {
           const gain = i.amount_invested != null ? i.balance - i.amount_invested : null
           return (
             <tr key={i.id}>
-              <td><b>{i.name}</b>{(i.subtype || i.issuer) && <small className="muted block">{[i.subtype, i.issuer].filter(Boolean).join(' · ')}</small>}
+              <td><b>{i.name}</b>{bankDetail(i) && <small className="muted block">{bankDetail(i)}</small>}
                 <small className="muted block only-sm">{i.bank} · {bankRate(i)}{i.due_date ? ` · vence ${dateBR(i.due_date)}` : ''}</small></td>
               <td className="hide-sm">{i.bank}</td>
               <td className="num hide-sm">{bankRate(i)}</td>
