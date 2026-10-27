@@ -38,6 +38,18 @@ class FakeAPI:
                                'only_finfam': []},
                               {'label': 'Inter •••• 7770', 'linked': False, 'bank_total': 0, 'bank_source': 'lancamentos',
                                'finfam_total': None, 'diff': None, 'only_bank': [], 'only_finfam': []}]}
+        if path == '/investments':
+            return {'fixed': [{'investment_type': 'CDB', 'description': 'CDB liquidez', 'amount': 1000, 'value_brl': 1000}],
+                    'crypto': [], 'fixed_total': 1000, 'crypto_total': 0}
+        if path == '/pluggy/investments':
+            return {'enabled': True, 'total': 1529.56, 'items': [
+                {'name': 'CDB - BANCO C6 S.A.', 'bank': 'C6 Bank', 'type': 'FIXED_INCOME', 'subtype': 'CDB', 'balance': 1201.24,
+                 'currency': 'BRL', 'rate': 101.5, 'rate_type': 'CDI', 'due_date': '2029-10-16'},
+                {'name': 'HASH11', 'bank': 'C6 Bank', 'type': 'EQUITY', 'subtype': 'STOCK', 'balance': 328.32,
+                 'currency': 'BRL', 'rate': None, 'rate_type': None, 'due_date': None}]}
+        if path == '/pluggy/balances':
+            return {'enabled': True, 'total': 1832.44, 'items': [
+                {'bank': 'C6 Bank', 'last_digits': '5665', 'balance': 1832.44, 'updated_at': '2026-10-27T15:00:00Z'}]}
         raise AssertionError(path)
 
     def post(self, path, body=None):
@@ -89,3 +101,11 @@ def test_open_finance_tools(fake):
     assert fake.summary_q['status'] == 'pending'
     out = server.conferir_fatura_com_banco(11, 2026)
     assert 'diferença' in out and 'só no banco' in out and 'não ligado' in out
+
+
+def test_investments_and_balances(fake):
+    out = server.investimentos()
+    assert 'Total investido: R$ 2.529,56' in out
+    assert 'Renda Fixa (2): R$ 2.201,24 · 87,0%' in out and 'Ações (1): R$ 328,32 · 13,0%' in out
+    assert 'C6 Bank (2)' in out and '101,5% do CDI' in out and 'vence 16/10/2029' in out
+    assert 'C6 Bank •••• 5665: R$ 1.832,44' in server.saldo_das_contas()

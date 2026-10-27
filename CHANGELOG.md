@@ -138,6 +138,7 @@ pelo bot ou importando extrato, como antes.
   classe (Renda Fixa, Ações, Fundos...) ou por instituição, com a % de cada uma (`lib/allocation.ts`).
 - C6: "DÉBITO DE CARTÃO" na conta é compra no débito (a Pluggy marca como pagamento de cartão).
 - Despesas: atalho para selecionar as vencidas da página e marcar como pagas.
+- MCP: `investimentos()` (carteira + cripto + bancos, % por classe e por instituição) e `saldo_das_contas()`.
 - Rendas: "Saldo nas contas" — saldo das contas correntes/poupança conectadas (`GET /pluggy/balances`, só consulta).
 - Conferir faturas: "compras batem" quando as compras do banco para a fatura somam igual ao FinFam e só o
   total do banco tem crédito/ajuste (`items_match`).
