@@ -47,6 +47,8 @@ pelo bot ou importando extrato, como antes.
 - "Usar o ID da conexão": registra no FinFam um banco já conectado pelo painel da Pluggy.
 - Meu Pluggy: "Atualizar agora" relê contas e lançamentos (a Pluggy não aceita PATCH nesses itens;
   bancos novos adicionados no Meu Pluggy aparecem na mesma conexão).
+- Meu Pluggy compartilha um banco por autorização: o FinFam não pede mais `avoidDuplicates`
+  (a Pluggy recusava o 2º banco). Duplicata de verdade (mesmas contas) é recusada pelo FinFam.
 
 **Próximas etapas**
 4. Conferência de fatura, aviso no bot e ferramenta no MCP.

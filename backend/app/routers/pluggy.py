@@ -271,6 +271,15 @@ def add_item(body: ItemIn, ctx: Ctx = Depends(get_ctx_session)):
         db.session.add(conn)
         db.session.flush()
     of.apply_item(conn, item)
+    if created:
+        _pluggy(of.sync_accounts, conn, client)
+        if of.same_accounts_elsewhere(conn):  # o mesmo banco de novo: desfaz aqui e na Pluggy
+            db.session.rollback()
+            try:
+                client.delete_item(body.item_id)
+            except pg.PluggyError as exc:
+                log.warning('Não consegui apagar o item duplicado %s: %s', body.item_id, exc)
+            raise HTTPException(status_code=409, detail='Esse banco já está conectado no FinFam.')
     count = _pluggy(of.sync, conn, client)
     db.session.commit()
     msg = f'{conn.bank_name} conectado!' if created else f'{conn.bank_name} atualizado.'

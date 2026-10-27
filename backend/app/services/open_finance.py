@@ -142,6 +142,21 @@ def sync_accounts(conn: BankConnection, client: pg.PluggyClient) -> None:
     db.session.flush()
 
 
+def _account_key(acc: BankAccount) -> tuple | None:
+    digits = last4(acc.number)
+    return (acc.type, digits, (acc.name or '').strip().lower()) if digits else None
+
+
+def same_accounts_elsewhere(conn: BankConnection) -> bool:
+    """A conexão nova traz as mesmas contas de outra conexão da pessoa (mesmo banco duas vezes)?"""
+    mine = {k for k in (_account_key(a) for a in conn.accounts.all()) if k}
+    if not mine:
+        return False
+    others = (BankAccount.query.join(BankConnection)
+              .filter(BankConnection.user_id == conn.user_id, BankConnection.id != conn.id).all())
+    return any(_account_key(a) in mine for a in others)
+
+
 # ── lançamentos ──────────────────────────────────────────────────────────────
 
 def _expense_date(e: Expense) -> date:

@@ -115,7 +115,9 @@ class PluggyClient:
     # ── Connect e bancos conectados ("items") ──
     def connect_token(self, client_user_id: str, webhook_url: str | None = None, item_id: str | None = None) -> str:
         """Token de 30 min para o widget Pluggy Connect (seguro para o navegador)."""
-        options = {'clientUserId': client_user_id, 'avoidDuplicates': True}
+        # sem avoidDuplicates: no Meu Pluggy cada banco é uma conexão e a Pluggy recusava a 2ª.
+        # O FinFam confere duplicata de verdade pelas contas (open_finance.same_accounts_elsewhere).
+        options = {'clientUserId': client_user_id}
         if webhook_url:
             options['webhookUrl'] = webhook_url
         body = {'options': options, **({'itemId': safe_id(item_id)} if item_id else {})}

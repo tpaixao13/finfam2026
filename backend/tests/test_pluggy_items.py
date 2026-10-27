@@ -232,7 +232,8 @@ def test_register_item_connected_in_pluggy_dashboard(client, family, bank):
     _ready(client, family)
     bank['add'](ITEM, owner='painel-pluggy')
     assert family.post('/pluggy/items', json={'item_id': ITEM, 'months': 3}).status_code == 200
-    bank['add'](ITEM2, owner=None)
+    bank['add'](ITEM2, owner=None, accounts=[{'id': 'inter-acc', 'type': 'BANK', 'name': 'Conta Inter',
+                                              'number': '7777', 'balance': 5, 'currencyCode': 'BRL'}])
     assert family.post('/pluggy/items', json={'item_id': ITEM2}).status_code == 200
     assert BankConnection.query.count() == 2
     session.remove()
@@ -256,4 +257,24 @@ def test_refresh_meupluggy_item_rereads_instead(client, family, bank, monkeypatc
     assert r.status_code == 200, r.text
     assert 'relido' in r.json()['message']
     assert len(r.json()['item']['accounts']) == 3
+    session.remove()
+
+
+def test_same_bank_twice_is_refused_but_two_meupluggy_banks_are_ok(client, family, bank):
+    _ready(client, family)
+    bank['add'](ITEM)
+    assert family.post('/pluggy/items', json={'item_id': ITEM}).status_code == 200
+    assert family.post('/pluggy/connect-token', json={}).status_code == 200
+    opts = [c for c in bank['calls'] if c[1] == '/connect_token'][-1][2]['options']
+    assert 'avoidDuplicates' not in opts
+    # o mesmo banco conectado de novo (contas iguais, item novo): recusado e apagado na Pluggy
+    bank['add'](ITEM2, accounts=[dict(a, id=a['id'] + '-2') for a in bank['accounts'][ITEM]])
+    r = family.post('/pluggy/items', json={'item_id': ITEM2})
+    assert r.status_code == 409 and 'já está conectado' in r.json()['detail']
+    assert ITEM2 not in bank['items'] and BankConnection.query.count() == 1
+    # outro banco (Meu Pluggy: uma conexão por banco) entra normalmente
+    bank['add'](ITEM2, accounts=[{'id': 'outro-acc', 'type': 'BANK', 'name': 'Conta Inter', 'number': '7777',
+                                  'balance': 5, 'currencyCode': 'BRL'}])
+    assert family.post('/pluggy/items', json={'item_id': ITEM2}).status_code == 200
+    assert BankConnection.query.count() == 2
     session.remove()
