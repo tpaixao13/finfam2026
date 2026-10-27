@@ -225,3 +225,14 @@ def test_changing_pluggy_app_drops_old_banks(client, family, bank):
     assert _save(family, cid=CID2).status_code == 200  # outra app: os bancos eram da antiga
     assert BankConnection.query.count() == 0
     session.remove()
+
+
+def test_register_item_connected_in_pluggy_dashboard(client, family, bank):
+    """Conexão feita no painel da Pluggy (clientUserId vazio ou texto livre) pode ser registrada pelo ID."""
+    _ready(client, family)
+    bank['add'](ITEM, owner='painel-pluggy')
+    assert family.post('/pluggy/items', json={'item_id': ITEM, 'months': 3}).status_code == 200
+    bank['add'](ITEM2, owner=None)
+    assert family.post('/pluggy/items', json={'item_id': ITEM2}).status_code == 200
+    assert BankConnection.query.count() == 2
+    session.remove()

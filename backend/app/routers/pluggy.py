@@ -257,8 +257,11 @@ def add_item(body: ItemIn, ctx: Ctx = Depends(get_ctx_session)):
     if conn is not None and conn.user_id != ctx.user.id:
         raise HTTPException(status_code=404, detail='Banco não encontrado na sua conta Pluggy.')
     item = _pluggy(client.item, body.item_id)  # só existe se for da conta Pluggy desta pessoa
-    owner = item.get('clientUserId')
-    if owner and str(owner) != str(ctx.user.id):
+    # A chave é da própria pessoa, então o item é da conta Pluggy dela. Conexões feitas pelo
+    # painel da Pluggy vêm sem clientUserId (ou com outro texto); só recusa se foi aberta pelo
+    # FinFam para outra pessoa (mesma aplicação Pluggy colada por duas pessoas).
+    owner = str(item.get('clientUserId') or '')
+    if owner.isdigit() and owner != str(ctx.user.id):
         raise HTTPException(status_code=404, detail='Banco não encontrado na sua conta Pluggy.')
     created = conn is None
     if created:

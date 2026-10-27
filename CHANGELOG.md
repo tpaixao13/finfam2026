@@ -44,6 +44,8 @@ pelo bot ou importando extrato, como antes.
 - Lançamentos lidos pelo `GET /v2/transactions` (cursor): a Pluggy desligou o `/transactions` antigo
   (410) nas aplicações de produção. Se só os lançamentos falharem, o banco fica salvo e a leitura tenta de novo.
 
+- "Usar o ID da conexão": registra no FinFam um banco já conectado pelo painel da Pluggy.
+
 **Próximas etapas**
 4. Conferência de fatura, aviso no bot e ferramenta no MCP.
 

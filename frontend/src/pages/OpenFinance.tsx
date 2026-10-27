@@ -145,15 +145,27 @@ const WINDOWS: { value: Months; label: string }[] = [
   { value: '1', label: '1 mês' }, { value: '3', label: '3 meses' }, { value: '6', label: '6 meses' }, { value: '12', label: '12 meses' },
 ]
 
-/** Antes de abrir a Pluggy: quanto do passado trazer para revisar. */
-function WindowModal({ open, onClose, onGo }: { open: boolean; onClose: () => void; onGo: (m: number) => void }) {
+/** Antes de abrir a Pluggy: quanto do passado trazer. Com `withId`, registra uma conexão
+ *  já feita no painel da Pluggy (cola o ID dela) em vez de abrir a janela. */
+function WindowModal({ open, withId, onClose, onGo }:
+  { open: boolean; withId: boolean; onClose: () => void; onGo: (m: number, itemId?: string) => void }) {
   const [months, setMonths] = useState<Months>('1')
+  const [itemId, setItemId] = useState('')
+  const okId = /^[0-9a-fA-F-]{36}$/.test(itemId.trim())
   return (
-    <Modal open={open} title="Conectar banco" onClose={onClose} footer={<>
+    <Modal open={open} title={withId ? 'Usar conexão do painel da Pluggy' : 'Conectar banco'} onClose={onClose} footer={<>
       <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-      <Button icon="bank" onClick={() => onGo(Number(months))}>Escolher o banco</Button>
+      {withId
+        ? <Button icon="check2" disabled={!okId} onClick={() => onGo(Number(months), itemId.trim())}>Usar esta conexão</Button>
+        : <Button icon="bank" onClick={() => onGo(Number(months))}>Escolher o banco</Button>}
     </>}>
       <div className="stack">
+        {withId && (
+          <Field label="ID da conexão (item ID)" hint="No painel da Pluggy, abra a conexão: é o código acima do nome do banco.">
+            <Input value={itemId} onChange={(e) => setItemId(e.target.value)} placeholder="add16b55-70fb-4d2d-…"
+              autoComplete="off" spellCheck={false} />
+          </Field>
+        )}
         <p>Quanto do passado trazer deste banco?</p>
         <Segmented ariaLabel="Período a trazer" value={months} onChange={setMonths} options={WINDOWS} />
         <p className="muted small">
@@ -171,17 +183,17 @@ function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => voi
   const act = useAction()
   const { toast } = useSession()
   const [busy, setBusy] = useState(false)
-  const [asking, setAsking] = useState(false)
+  const [asking, setAsking] = useState<null | 'connect' | 'id'>(null)
   const list = items.data?.items
   const creditCards = (cards.data?.cards ?? []).filter((c) => c.card_type === 'credit' || c.supports_credit)
   const full = !!cfg.max_items && (list?.length ?? 0) >= cfg.max_items
   const reload = () => { items.reload(); onChange() }
 
-  async function connect(months: number) {
-    setAsking(false)
+  async function connect(months: number, itemId?: string) {
+    setAsking(null)
     setBusy(true)
     try {
-      const id = await openConnect()
+      const id = itemId ?? await openConnect()
       if (id) await act(() => api.post<{ message: string }>('/pluggy/items', { item_id: id, months }), reload)
     } catch (e) { toast((e as Error).message, 'danger') }
     setBusy(false)
@@ -196,9 +208,10 @@ function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => voi
           </Link>
         )}
         <Button icon="plus" busy={busy} disabled={full} title={full ? 'Limite de bancos da sua família' : undefined}
-          onClick={() => setAsking(true)}>Conectar banco</Button>
+          onClick={() => setAsking('connect')}>Conectar banco</Button>
       </div>}>
-      <WindowModal open={asking} onClose={() => setAsking(false)} onGo={connect} />
+      <WindowModal key={asking ?? 'closed'} open={asking !== null} withId={asking === 'id'}
+        onClose={() => setAsking(null)} onGo={connect} />
       {items.error ? <ErrorBox message={items.error} onRetry={items.reload} /> : !list ? <Spinner /> : !list.length ? (
         <Empty icon="bank" title="Nenhum banco conectado">
           Toque em <b>Conectar banco</b>: a janela da Pluggy abre aqui, você escolhe o banco e entra com a senha dele.
@@ -213,6 +226,8 @@ function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => voi
         {cfg.max_items ? `Limite da sua família: ${cfg.max_items} banco(s) por pessoa. ` : ''}
         Ligue cada cartão do banco ao cartão do FinFam: as compras caem na fatura certa e a fatura pode ser conferida.
         Desconectar apaga os dados vindos do banco; as despesas que você aprovou continuam.
+        {!full && <> Já conectou o banco pelo painel da Pluggy?{' '}
+          <button type="button" className="link-btn" onClick={() => setAsking('id')}>Usar o ID da conexão</button>.</>}
       </p>
     </Panel>
   )
