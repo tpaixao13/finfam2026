@@ -43,8 +43,8 @@ function Source({ tx }: { tx: BankTx }) {
   )
 }
 
-function PendingRow({ tx, draft, categories, onChange }:
-  { tx: BankTx; draft: Draft; categories: string[]; onChange: (d: Partial<Draft>) => void }) {
+function PendingRow({ tx, draft, onChange }:
+  { tx: BankTx; draft: Draft; onChange: (d: Partial<Draft>) => void }) {
   const credit = tx.account_type === 'CREDIT'
   const parcelado = credit && tx.installment && tx.installment.number <= 1
   return (
@@ -59,7 +59,8 @@ function PendingRow({ tx, draft, categories, onChange }:
         {credit && !tx.card_id && <span className="small warn-text">Cartão do banco não ligado: vai sem cartão do FinFam.</span>}
       </div>
       <div className="review-fields">
-        <Select aria-label="Categoria" value={draft.category} options={categories}
+        <Input aria-label="Categoria" list="review-cats" value={draft.category} maxLength={50} required
+          placeholder="Categoria" title="Escolha da lista ou digite uma categoria nova"
           onChange={(e) => onChange({ category: e.target.value })} />
         {credit ? <span className="muted small review-method">Cartão de Crédito</span> : (
           <Select aria-label="Forma de pagamento" value={draft.payment_method} options={['PIX', 'Cartão de Débito']}
@@ -111,7 +112,7 @@ export function ReviewImportsPage() {
   const approve = () => run(() => api.post('/pluggy/transactions/approve', {
     items: picked.map((t) => {
       const d = drafts[t.id]
-      return { id: t.id, category: d.category, description: d.description.trim() || t.description,
+      return { id: t.id, category: d.category.trim() || 'Outros', description: d.description.trim() || t.description,
         ...(t.account_type === 'BANK' ? { payment_method: d.payment_method } : {}) }
     }),
   }))
@@ -143,9 +144,10 @@ export function ReviewImportsPage() {
               <Button icon="check2" busy={busy} disabled={!picked.length} onClick={approve}>Lançar {picked.length || ''}</Button>
             </div>
           </div>
+          <datalist id="review-cats">{list.categories.map((c) => <option key={c} value={c} />)}</datalist>
           <ul className="review-list">
             {list.items.map((t) => drafts[t.id] && (
-              <PendingRow key={t.id} tx={t} draft={drafts[t.id]} categories={list.categories} onChange={(d) => edit(t.id, d)} />
+              <PendingRow key={t.id} tx={t} draft={drafts[t.id]} onChange={(d) => edit(t.id, d)} />
             ))}
           </ul>
         </Panel>

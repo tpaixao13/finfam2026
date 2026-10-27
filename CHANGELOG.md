@@ -94,6 +94,7 @@ pelo bot ou importando extrato, como antes.
 - Sugestões: conta → PIX (boleto, débito automático, transferência) e Cartão de Débito só para compra no
   cartão de débito; categoria pela descrição e pela categoria do banco quando a família ainda não tem
   histórico/regras (prestação habitacional → Moradia, posto → Transporte, iFood → Alimentação...).
+- Revisar importados: a categoria aceita uma nova (digitada), como no lançamento do site.
 - Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
 
 **Próximas etapas**

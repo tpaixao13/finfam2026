@@ -740,8 +740,13 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
 
 
 def valid_category(category: str | None, allowed: list[str]) -> str:
-    category = (category or '').strip()[:60]
-    return category if category in allowed or category in CATEGORIES else 'Outros'
+    """Categoria escolhida na revisão: uma da lista ou uma nova (como no lançamento do site).
+    Reaproveita a grafia de uma existente ("moradia" → "Moradia")."""
+    category = re.sub(r'\s+', ' ', category or '').strip()[:50]
+    if not category or any(ord(ch) < 32 for ch in category):
+        return 'Outros'
+    known = {c.casefold(): c for c in [*CATEGORIES, *allowed]}
+    return known.get(category.casefold(), category)
 
 
 # ── leitura em segundo plano (disparada pelo webhook) ────────────────────────

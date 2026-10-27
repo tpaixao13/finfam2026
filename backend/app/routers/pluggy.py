@@ -444,7 +444,7 @@ def list_transactions(status: Literal['pending', 'duplicate', 'ignored', 'import
 
 class ApproveItem(BaseModel):
     id: int
-    category: str = Field(min_length=1, max_length=60)
+    category: str = Field(min_length=1, max_length=50, description='Da lista ou uma nova')
     description: str | None = Field(None, max_length=200)
     payment_method: Literal['PIX', 'Cartão de Débito'] | None = None
 

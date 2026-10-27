@@ -118,15 +118,16 @@ def test_approve_creates_expenses_like_the_site(client, family, other_family, ba
     other = other_family.post('/pluggy/transactions/approve', json={'items': [{'id': pix['id'], 'category': 'Lazer'}]})
     assert other.status_code in (403, 404)
     r = family.post('/pluggy/transactions/approve', json={'items': [
-        {'id': pix['id'], 'category': 'Alimentação', 'description': 'Feira da Maria'},
-        {'id': tv['id'], 'category': 'Categoria Inventada'}]})
+        {'id': pix['id'], 'category': 'alimentação', 'description': 'Feira da Maria'},
+        {'id': tv['id'], 'category': '  Eletrônicos  '}]})
     assert r.status_code == 200, r.text
     assert r.json()['imported'] == 2
     feira = Expense.query.filter_by(description='Feira da Maria').one()
     assert feira.payment_method == 'PIX' and feira.paid is True and feira.bank == 'Nubank'
     parcelas = Expense.query.filter_by(description='LOJA TV').order_by(Expense.installment_number).all()
     assert [float(p.amount) for p in parcelas] == [300.0, 300.0, 300.0]
-    assert all(p.card_id == card['id'] and p.category == 'Outros' and not p.paid for p in parcelas)
+    assert all(p.card_id == card['id'] and p.category == 'Eletrônicos' and not p.paid for p in parcelas)  # nova
+    assert Expense.query.filter_by(description='Feira da Maria').one().category == 'Alimentação'  # grafia da lista
     parcela_ids = [p.id for p in parcelas]
     counts = family.get('/pluggy/transactions').json()['counts']
     assert counts['pending'] == 0 and counts['imported'] == 2
