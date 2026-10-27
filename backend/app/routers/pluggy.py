@@ -406,6 +406,7 @@ def _tx_out(tx: BankTransaction, ctx: Ctx) -> dict:
         'installment': ({'number': tx.installment_number, 'total': tx.total_installments}
                         if tx.total_installments and tx.total_installments > 1 else None),
         'status': tx.status, 'reason': tx.reason, 'bank_pending': tx.bank_status == 'PENDING',
+        'bill': f'{tx.bill_month:02d}/{tx.bill_year}' if tx.bill_month and tx.bill_year else None,
         'bank_name': acc.connection.label, 'account_type': acc.type,
         'account_name': acc.name, 'account_last_digits': of.last4(acc.number),
         'card_id': acc.card_id,

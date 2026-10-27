@@ -311,3 +311,72 @@ def test_webhook_starts_background_sync(client, family, bank, txs, monkeypatch):
     of._bg_run(uid)
     assert BankTransaction.query.filter_by(pluggy_id='t-bg').count() == 1 and uid not in of._bg_state
     session.remove()
+
+
+def test_bill_of():
+    assert of.bill_of(date(2026, 10, 5), 3, 10) == (2026, 11)   # depois do fechamento → próxima
+    assert of.bill_of(date(2026, 10, 2), 3, 10) == (2026, 10)
+    assert of.bill_of(date(2026, 10, 5), 28, 5) == (2026, 11)   # fecha 28/10, vence 05/11
+    assert of.bill_of(date(2026, 10, 30), 28, 5) == (2026, 12)
+    assert of.bill_of(date(2026, 12, 20), 10, 17) == (2027, 1)
+
+
+def test_card_bill_month_from_bank_and_bill_payment_reconciled(client, family, bank, txs):  # noqa: F811
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    # o banco fecha dia 3 e vence dia 10; o cartão no FinFam estava com melhor dia 3/vence 10 do teste,
+    # mude para algo errado para ver o banco corrigir
+    family.put(f"/cards/{card['id']}", json={'supports_credit': True, 'last_digits': '5162', 'bank': 'Nubank',
+                                              'due_day': 25, 'best_buy_day': 20})
+    bank['accounts'][ITEM][1]['creditData'] = {'creditLimit': 5000, 'balanceCloseDate': '2026-11-03T03:00:00Z',
+                                               'balanceDueDate': '2026-11-10T03:00:00Z'}
+    d = TODAY - timedelta(days=2)
+    iso = f'{d.isoformat()}T15:00:00.000Z'
+    txs[cc].append({'id': 'c-cativa', 'type': 'DEBIT', 'amount': 1597.76, 'date': iso, 'description': 'CATIVA',
+                    'status': 'PENDING', 'creditCardMetadata': {'installmentNumber': 9, 'totalInstallments': 10}})
+    _post_item(family)
+    c = next(c for c in family.get('/cards?light=true').json()['cards'] if c['id'] == card['id'])
+    assert (c['best_buy_day'], c['due_day']) == (3, 10)  # vencimento e melhor dia vêm do banco
+    tx = family.get('/pluggy/transactions').json()['items'][0]
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': tx['id'], 'category': 'Outros'}]})
+    e = Expense.query.filter(Expense.description.like('CATIVA%')).one()
+    assert (e.year, e.month) == of.bill_of(d, 3, 10)  # na fatura que o banco diz
+    bill_y, bill_m = e.year, e.month
+    session.remove()
+
+    # a conta paga essa fatura: o FinFam reconhece e marca a fatura como paga
+    pay = date(bill_y, bill_m, 9)
+    txs[acc].append({'id': 't-pag', 'type': 'DEBIT', 'amount': -1597.76, 'date': f'{min(pay, TODAY).isoformat()}T12:00:00Z',
+                     'description': 'PAGAMENTO CARTAO CREDITO BCE CARTAO MASTER'})
+    if pay > TODAY:  # fatura futura: o pagamento ainda não aconteceu; simula a fatura no mês corrente
+        session.query(Expense).filter(Expense.description.like('CATIVA%')).update(
+            {'year': TODAY.year, 'month': TODAY.month}, synchronize_session=False)
+        session.commit()
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    session.remove()
+    ign = family.get('/pluggy/transactions?status=ignored').json()['items']
+    pag = next(t for t in ign if t['description'].startswith('PAGAMENTO CARTAO'))
+    assert 'fatura marcada como paga' in pag['reason']
+    assert Expense.query.filter(Expense.description.like('CATIVA%')).one().paid is True
+    assert Expense.query.filter(Expense.description.like('PAGAMENTO%')).count() == 0
+    session.remove()
+
+
+def test_card_window_counts_by_bill(client, family, bank, txs):  # noqa: F811
+    """'1 mês' no cartão: compra de antes do início que vence numa fatura do período entra."""
+    acc, cc, _ = _connect(client, family, bank, txs, card_digits='5162')
+    bank['accounts'][ITEM][1]['creditData'] = {'creditLimit': 5000, 'balanceCloseDate': '2026-11-03T03:00:00Z',
+                                               'balanceDueDate': '2026-11-10T03:00:00Z'}
+    start = of.months_back(TODAY, 1)
+    # uma compra 10 dias antes do início (a fatura dela pode vencer depois do início) e uma bem antiga
+    inside = start - timedelta(days=10)
+    old = start - timedelta(days=50)
+    txs[cc] += [{'id': 'c-in', 'type': 'DEBIT', 'amount': 30.0, 'date': f'{inside.isoformat()}T15:00:00Z', 'description': 'Antes mas na fatura'},
+                {'id': 'c-old', 'type': 'DEBIT', 'amount': 40.0, 'date': f'{old.isoformat()}T15:00:00Z', 'description': 'Fatura velha'}]
+    _post_item(family, months=1)
+    got = {t['description']: t['bill'] for t in family.get('/pluggy/transactions').json()['items']}
+    by, bm = of.bill_of(inside, 3, 10)
+    keep = date(by, bm, 10) >= start
+    assert ('Antes mas na fatura' in got) == keep
+    assert 'Fatura velha' not in got
+    session.remove()

@@ -76,6 +76,13 @@ pelo bot ou importando extrato, como antes.
   (na conta de crédito, quando o limite é compartilhado). Mostra também limite disponível e os dias de
   fechamento e vencimento.
 - "Criar cartão" a partir do cartão do banco: final, banco, limite, vencimento e melhor dia vêm da Pluggy.
+- Fatura certa pelo banco: cada compra do cartão vai para a fatura calculada com os dias de fechamento e
+  vencimento do banco (inclusive fecha num mês/vence no outro); o cartão ligado recebe do banco o
+  vencimento e o melhor dia (= fechamento). Revisar importados mostra a fatura de cada compra.
+- No cartão, o período escolhido conta por fatura: entram as compras das faturas que vencem a partir do
+  início (a parcela de setembro que vence em outubro entra em "1 mês").
+- Pagamento de fatura saindo da conta é conciliado: o FinFam acha a fatura de mesmo total (mês do
+  pagamento, anterior ou seguinte) e a marca como paga; o pagamento não vira despesa.
 - Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
 
 **Próximas etapas**

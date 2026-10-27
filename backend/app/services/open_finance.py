@@ -118,21 +118,41 @@ def _auto_card(conn: BankConnection, acc: BankAccount) -> None:
 
 
 def apply_card_limit(acc: BankAccount) -> bool:
-    """Cartão do FinFam ligado ao do banco: o limite vem do banco (na conta de crédito, que é
-    o limite compartilhado, quando o cartão tem uma). Devolve True se mudou."""
-    if acc.type != 'CREDIT' or not acc.card_id or not acc.credit_limit:
+    """Cartão do FinFam ligado ao do banco: limite, vencimento e melhor dia (= fechamento) vêm do
+    banco. O limite vai na conta de crédito quando o cartão divide limite. Devolve True se mudou."""
+    if acc.type != 'CREDIT' or not acc.card_id:
         return False
     card = db.session.get(CreditCard, acc.card_id)
     if card is None:
         return False
+    changed = False
+    # o FinFam guarda "melhor dia < vencimento" no mesmo mês; fecha 28/vence 5 fica só pelo mês da fatura
+    if acc.close_day and acc.due_day and acc.close_day < acc.due_day and \
+            (card.best_buy_day, card.due_day) != (acc.close_day, acc.due_day):
+        card.best_buy_day, card.due_day = acc.close_day, acc.due_day
+        changed = True
+    if not acc.credit_limit:
+        return changed
     limit = Decimal(str(acc.credit_limit))
     target = card.account if card.account is not None else card
     if target.credit_limit is not None and Decimal(str(target.credit_limit)) == limit:
-        return False
+        return changed
     target.credit_limit = limit
     if target is not card and card.credit_limit is not None:
         card.credit_limit = limit
     return True
+
+
+def bill_of(day: date, close_day: int, due_day: int) -> tuple[int, int]:
+    """(ano, mês) da fatura que vence depois do fechamento que contém `day`.
+    Ex.: fecha 3/vence 10 → compra 05/10 vai na fatura de novembro; fecha 28/vence 5 → compra
+    05/10 fecha 28/10 e vence 05/11 (novembro)."""
+    y, m = day.year, day.month
+    if day.day > close_day:  # depois do fechamento deste mês: entra no próximo fechamento
+        m, y = (1, y + 1) if m == 12 else (m + 1, y)
+    if due_day <= close_day:  # vence no mês seguinte ao fechamento
+        m, y = (1, y + 1) if m == 12 else (m + 1, y)
+    return y, m
 
 
 def card_days(acc: BankAccount) -> tuple[int, int]:
@@ -276,6 +296,33 @@ def find_existing(tx: BankTransaction, card_id: int | None) -> Expense | None:
     return best[1] if best else None
 
 
+def reconcile_bill_payment(tx: BankTransaction) -> str | None:
+    """Pagamento de fatura saindo da conta: acha a fatura do FinFam com o mesmo total (mês do
+    pagamento, o anterior ou o seguinte) e marca as compras dela como pagas. Devolve o motivo."""
+    from app.services.finance import MONTH_NAMES_SHORT, month_offset
+    uids, _ = family_of(tx.user_id)
+    amount = Decimal(str(tx.amount))
+    for delta in (0, -1, 1):
+        m, y = month_offset(tx.date.month, tx.date.year, delta)
+        rows = Expense.query.filter(Expense.user_id.in_(uids), Expense.payment_method == CREDIT,
+                                    Expense.year == y, Expense.month == m, Expense.card_id.isnot(None)).all()
+        groups: dict[tuple, list[Expense]] = {}
+        for e in rows:
+            card = db.session.get(CreditCard, e.card_id)
+            key = ('a', card.account_id) if card and card.account_id else ('c', e.card_id)
+            groups.setdefault(key, []).append(e)
+        for items in groups.values():
+            total = sum(Decimal(str(e.amount)) for e in items)
+            if abs(total - amount) <= Decimal('0.05'):
+                for e in items:
+                    e.paid = True
+                card = db.session.get(CreditCard, items[0].card_id)
+                label = f"{card.bank or 'cartão'} •••• {card.last_digits}" if card else 'do cartão'
+                return (f'Pagamento da fatura {label} de {MONTH_NAMES_SHORT[m - 1]}/{y}: '
+                        'fatura marcada como paga (as compras já vêm pelo cartão).')
+    return None
+
+
 def _skip_reason(description: str, category: str | None) -> str | None:
     for rx, why in _SKIP:
         if rx.search(category or '') or rx.search(description):
@@ -345,10 +392,16 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
     since = start if conn.tx_synced_at is None else max(start, today - timedelta(days=RESYNC_DAYS))
     new_pending = 0
     for acc in conn.accounts.all():
-        raws, complete = _fetch(client, acc.pluggy_account_id, since)
+        # cartão: o período conta por FATURA (compra de setembro que vence em outubro entra em "desde outubro")
+        by_bill = acc.type == 'CREDIT' and bool(acc.close_day and acc.due_day)
+        acc_since = since
+        if by_bill:
+            acc_since = months_back(start, 2) if conn.tx_synced_at is None else \
+                max(months_back(start, 2), today - timedelta(days=RESYNC_DAYS + 62))
+        raws, complete = _fetch(client, acc.pluggy_account_id, acc_since)
         raws = [r for r in raws if _ID.fullmatch(str(r.get('id') or '')) and _is_expense(acc, r)]
         if complete:
-            _drop_vanished(acc, since, {str(r['id']) for r in raws})
+            _drop_vanished(acc, acc_since, {str(r['id']) for r in raws})
         for raw in raws:
             pid = str(raw['id'])
             tx = BankTransaction.query.filter_by(pluggy_id=pid).first()
@@ -363,12 +416,18 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
             else:  # classificado sozinho antes: classifica de novo (regras podem ter melhorado)
                 tx.status, tx.reason, tx.expense_id = 'pending', None, None
             _apply_tx(tx, raw)
-            if tx.date < start or not tx.amount:
+            if by_bill:
+                tx.bill_year, tx.bill_month = bill_of(tx.date, acc.close_day, acc.due_day)
+            # cartão: fica se a fatura vence a partir do início; conta: se a data é a partir do início
+            too_old = (date(tx.bill_year, tx.bill_month, min(acc.due_day, 28)) < start) if by_bill else tx.date < start
+            if too_old or not tx.amount:
                 if fresh:
                     db.session.expunge(tx)
                 continue
             why = _skip_reason(tx.description, tx.pluggy_category)
             match = None if why else find_existing(tx, acc.card_id)
+            if why and acc.type == 'BANK' and why.startswith('Pagamento de fatura'):
+                why = reconcile_bill_payment(tx) or why
             if why:
                 tx.status, tx.reason = 'ignored', why
             elif match:
@@ -494,6 +553,12 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
                        paid=not credit, installments=installments)
     result = create_expense(uids, data)
     first = result['expenses'][0]
+    if credit and tx.bill_year and tx.bill_month:  # a fatura que o banco diz, não a calculada
+        from app.services.finance import month_offset
+        delta = (tx.bill_year * 12 + tx.bill_month) - (first.year * 12 + first.month)
+        if delta:
+            for e in result['expenses']:
+                e.month, e.year = month_offset(e.month, e.year, delta)
     tx.status, tx.expense_id, tx.reason, tx.reviewed_at = 'imported', first.id, None, utcnow()
     return first
 

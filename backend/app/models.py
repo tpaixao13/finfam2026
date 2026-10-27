@@ -294,6 +294,8 @@ class BankTransaction(Base):
     total_amount = Column(Numeric(12, 2), nullable=True)
     pluggy_category = Column(Text, nullable=True)
     payment_hint = Column(String(16), nullable=True)      # PIX | BOLETO | TED ... (contas)
+    bill_year = Column(Integer, nullable=True)            # fatura em que o banco pôs a compra (cartão)
+    bill_month = Column(Integer, nullable=True)
     bank_status = Column(String(12), nullable=True)       # PENDING | POSTED
     status = Column(String(12), nullable=False, default='pending', index=True)
     reason = Column(Text, nullable=True)
