@@ -1,6 +1,6 @@
 // Open Finance — etapa 3: o que chegou do banco espera aqui. Só vira despesa o que a pessoa aprovar.
 import { useEffect, useMemo, useState } from 'react'
-import { Badge, Button, Empty, ErrorBox, Input, PageHeader, Panel, Segmented, Select, Spinner } from '../components/ui'
+import { Badge, Button, Empty, ErrorBox, IconButton, Input, PageHeader, Panel, Segmented, Select, Spinner } from '../components/ui'
 import { api } from '../lib/api'
 import { brl, dayMonth } from '../lib/format'
 import { useApi } from '../lib/hooks'
@@ -44,8 +44,37 @@ function Source({ tx }: { tx: BankTx }) {
   )
 }
 
-function PendingRow({ tx, draft, onChange }:
-  { tx: BankTx; draft: Draft; onChange: (d: Partial<Draft>) => void }) {
+const NEW_CATEGORY = '__nova__'
+
+/** Categoria: lista completa (sempre abre inteira) + "Nova categoria…" para digitar uma. */
+function CategoryField({ value, categories, onChange }:
+  { value: string; categories: string[]; onChange: (v: string) => void }) {
+  const [typing, setTyping] = useState(false)
+  const [text, setText] = useState('')
+  const options = !value || categories.includes(value) ? categories : [...categories, value]
+  if (typing) {
+    const done = () => { if (text.trim()) onChange(text.trim().slice(0, 50)); setTyping(false) }
+    return (
+      <div className="cat-new">
+        <Input autoFocus aria-label="Nova categoria" placeholder="Nova categoria" maxLength={50} value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); done() } else if (e.key === 'Escape') setTyping(false) }} />
+        <IconButton icon="check2" label="Usar esta categoria" onClick={done} />
+        <IconButton icon="x" label="Cancelar" onClick={() => setTyping(false)} />
+      </div>
+    )
+  }
+  return (
+    <Select aria-label="Categoria" value={value}
+      options={[...options.map((c) => ({ value: c, label: c })), { value: NEW_CATEGORY, label: '+ Nova categoria…' }]}
+      onChange={(e) => {
+        if (e.target.value === NEW_CATEGORY) { setText(''); setTyping(true) } else onChange(e.target.value)
+      }} />
+  )
+}
+
+function PendingRow({ tx, draft, categories, onChange }:
+  { tx: BankTx; draft: Draft; categories: string[]; onChange: (d: Partial<Draft>) => void }) {
   const credit = tx.account_type === 'CREDIT'
   const parcelado = credit && tx.installment && tx.installment.number <= 1
   return (
@@ -60,9 +89,7 @@ function PendingRow({ tx, draft, onChange }:
         {credit && !tx.card_id && <span className="small warn-text">Cartão do banco não ligado: vai sem cartão do FinFam.</span>}
       </div>
       <div className="review-fields">
-        <Input aria-label="Categoria" list="review-cats" value={draft.category} maxLength={50} required
-          placeholder="Categoria" title="Escolha da lista ou digite uma categoria nova"
-          onChange={(e) => onChange({ category: e.target.value })} />
+        <CategoryField value={draft.category} categories={categories} onChange={(category) => onChange({ category })} />
         {credit ? <span className="muted small review-method">Cartão de Crédito</span> : (
           <Select aria-label="Forma de pagamento" value={draft.payment_method} options={['PIX', 'Cartão de Débito']}
             onChange={(e) => onChange({ payment_method: e.target.value })} />
@@ -106,6 +133,12 @@ export function ReviewImportsPage() {
   }, [list, tab])
 
   const picked = useMemo(() => (list?.items ?? []).filter((t) => drafts[t.id]?.selected), [list, drafts])
+  // categorias da família + as novas digitadas em qualquer linha (aparecem para todas)
+  const categories = useMemo(() => {
+    const all = new Set(list?.categories ?? [])
+    Object.values(drafts).forEach((d) => { if (d.category.trim()) all.add(d.category.trim()) })
+    return [...all].sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [list, drafts])
   const all = !!list?.items.length && picked.length === list.items.length
   const edit = (id: number, d: Partial<Draft>) => setDrafts((s) => ({ ...s, [id]: { ...s[id], ...d } }))
   const run = async (fn: () => Promise<{ message: string }>) => { setBusy(true); await act(fn, data.reload); setBusy(false) }
@@ -162,10 +195,9 @@ export function ReviewImportsPage() {
               <Button icon="check2" busy={busy} disabled={!picked.length} onClick={approve}>{progress ? `Lançando ${progress}…` : `Lançar ${picked.length || ''}`}</Button>
             </div>
           </div>
-          <datalist id="review-cats">{list.categories.map((c) => <option key={c} value={c} />)}</datalist>
           <ul className="review-list">
             {list.items.map((t) => drafts[t.id] && (
-              <PendingRow key={t.id} tx={t} draft={drafts[t.id]} onChange={(d) => edit(t.id, d)} />
+              <PendingRow key={t.id} tx={t} draft={drafts[t.id]} categories={categories} onChange={(d) => edit(t.id, d)} />
             ))}
           </ul>
         </Panel>
