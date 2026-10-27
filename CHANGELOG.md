@@ -87,7 +87,8 @@ pelo bot ou importando extrato, como antes.
   (billId); a pendente, para a próxima em aberto. Funciona no Meu Pluggy, que não manda os dias de
   fechamento. O pagamento da conta liga à fatura do banco de mesmo total e vencimento próximo, e a
   conciliação é refeita depois de lançar as compras. Despesa já lançada fora da fatura certa é movida
-  (se a descrição não foi editada).
+  (se a descrição não foi editada) e volta a ficar não paga, para a conciliação refazer.
+- Compra pendente sem billId vai para a fatura em aberto (não para a última fechada).
 - Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
 
 **Próximas etapas**

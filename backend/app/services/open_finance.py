@@ -184,6 +184,16 @@ def tx_bill(acc: BankAccount, tx: BankTransaction) -> tuple[int, int] | None:
     bills = acc.bills.order_by(BankBill.due_date).all()
     if not bills:
         return None
+    today = date.today()
+    if tx.bank_status == 'PENDING':
+        # pendente = fatura em aberto: a que ainda vai vencer, ou a seguinte à última fechada
+        open_bill = next((b for b in bills if b.due_date > today), None)
+        if open_bill is not None:
+            return open_bill.due_date.year, open_bill.due_date.month
+        nxt = add_months(bills[-1].due_date, 1)
+        while nxt <= today:
+            nxt = add_months(nxt, 1)
+        return nxt.year, nxt.month
     for b in bills:
         if b.due_date >= tx.date + timedelta(days=7):
             return b.due_date.year, b.due_date.month
@@ -485,6 +495,7 @@ def _rebill(acc: BankAccount, tx: BankTransaction, by_bill: bool) -> None:
         return
     if (e.year, e.month) != bill:
         e.month, e.year = month_offset(bill[1], bill[0], 0)
+        e.paid = False  # mudou de fatura: a conciliação diz de novo se essa fatura foi paga
 
 
 def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date | None = None) -> int:

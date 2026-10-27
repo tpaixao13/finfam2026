@@ -452,3 +452,47 @@ def test_imported_expense_moves_to_bank_bill(client, family, bank, txs, monkeypa
         nxt = of.add_months(nxt, 1)
     assert (e.year, e.month) == (nxt.year, nxt.month)
     session.remove()
+
+
+def test_pending_goes_to_open_bill_and_moved_expense_is_unpaid(client, family, bank, txs, monkeypatch):  # noqa: F811
+    """Dados reais do Santander (Meu Pluggy): faturas vencem dia 12; a 9/10 pendente sem billId
+    caía na fatura já fechada e era marcada como paga pelo pagamento dela."""
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    closed = date(TODAY.year, TODAY.month, 12) if TODAY.day > 12 else of.add_months(date(TODAY.year, TODAY.month, 12), -1)
+    prev = of.add_months(closed, -1)
+    bills = [{'id': 'b-prev', 'dueDate': f'{prev.isoformat()}T03:00:00Z', 'totalAmount': 1597.76},
+             {'id': 'b-closed', 'dueDate': f'{closed.isoformat()}T03:00:00Z', 'totalAmount': 1597.76}]
+    inner = pg._http
+    monkeypatch.setattr(pg, '_http', lambda m, p, b=None, k=None: {'results': bills} if p.startswith('/bills?')
+                        else inner(m, p, b, k))
+
+    def iso(d):
+        return f'{d.isoformat()}T15:00:00Z'
+    c8_date = closed - timedelta(days=38)
+    c9_date = closed - timedelta(days=7)  # antes do vencimento da fechada, mas está pendente → em aberto
+    txs[cc] += [{'id': 'c8', 'type': 'DEBIT', 'amount': 1597.76, 'date': iso(c8_date), 'description': 'CATIVA',
+                 'creditCardMetadata': {'installmentNumber': 8, 'totalInstallments': 10, 'billId': 'b-closed'}},
+                {'id': 'c9', 'type': 'DEBIT', 'amount': 1597.76, 'date': iso(c9_date), 'description': 'CATIVA',
+                 'status': 'PENDING', 'creditCardMetadata': {'installmentNumber': 9, 'totalInstallments': 10}}]
+    txs[acc].append({'id': 'pay', 'type': 'DEBIT', 'amount': -1597.76, 'date': iso(closed - timedelta(days=3)),
+                     'description': 'PAGAMENTO CARTAO CREDITO BCE CARTAO MASTER'})
+    _post_item(family, months=3)
+    pend = family.get('/pluggy/transactions').json()['items']
+    nxt = of.add_months(closed, 1)
+    assert {t['installment']['number']: t['bill'] for t in pend} == {
+        8: f'{closed.month:02d}/{closed.year}', 9: f'{nxt.month:02d}/{nxt.year}'}
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': t['id'], 'category': 'Outros'} for t in pend]})
+    got = {e.description: (e.month, e.paid) for e in Expense.query.filter(Expense.description.like('CATIVA%')).all()}
+    assert got == {'CATIVA (8/10)': (closed.month, True), 'CATIVA (9/10)': (nxt.month, False)}
+
+    # despesa lançada na fatura errada (regra antiga) e marcada paga: volta para a certa, não paga
+    e9 = Expense.query.filter_by(description='CATIVA (9/10)').one()
+    e9.month, e9.year, e9.paid = closed.month, closed.year, True
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    session.remove()
+    family.get('/pluggy/transactions?status=imported')
+    e9 = Expense.query.filter_by(description='CATIVA (9/10)').one()
+    assert (e9.month, e9.paid) == (nxt.month, False)
+    assert Expense.query.filter_by(description='CATIVA (8/10)').one().paid is True
+    session.remove()
