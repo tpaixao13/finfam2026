@@ -648,3 +648,76 @@ def test_c6_one_account_many_cards(client, family, bank, txs):  # noqa: F811
     assert got['COMPRA 2'] == (adicional['id'], greyce_id)   # no nome de quem tem o adicional
     assert got['COMPRA 3'][0] == fisico['id'] and got['COMPRA 4'][0] == fisico['id']  # sem final / desconhecido
     session.remove()
+
+
+def test_c6_cut_day_inferred_and_bill_payment_undone(client, family, bank, txs, monkeypatch):  # noqa: F811
+    """C6 real: o corte é dia 7 (não informado); a fatura do mês passado veio inteira como
+    "pendente" sem código; o pagamento sai da conta C6 como "C6 BANK" e tinha sido lançado."""
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    D = date(TODAY.year, TODAY.month, 14)
+    if D <= TODAY:
+        D = of.add_months(D, 1)                      # fatura em aberto vence dia 14 do mês que vem
+    known = [of.add_months(D, -k) for k in (4, 3, 2)]   # 3 faturas com código; a de D-1 sem código
+    hidden = of.add_months(D, -1)
+    bills = [{'id': f'b{i}', 'dueDate': f'{d.isoformat()}T03:00:00Z', 'totalAmount': 100.0 * (i + 1)}
+             for i, d in enumerate(known)]
+    bills.append({'id': 'b-hidden', 'dueDate': f'{hidden.isoformat()}T03:00:00Z', 'totalAmount': 700.0})
+    inner = pg._http
+    monkeypatch.setattr(pg, '_http', lambda m, p, b=None, k=None: {'results': bills} if p.startswith('/bills?')
+                        else inner(m, p, b, k))
+
+    def iso(d):
+        return f'{d.isoformat()}T15:00:00Z'
+    n = 0
+    for i, due in enumerate(known):  # compras do dia 8 do mês anterior ao 7 do mês do vencimento
+        for day in (8, 15, 20, 7):
+            d = date(*(of.add_months(due, -1).year, of.add_months(due, -1).month, day)) if day != 7 else date(due.year, due.month, 7)
+            n += 1
+            txs[cc].append({'id': f'k{n}', 'type': 'DEBIT', 'amount': 10.0, 'date': iso(d), 'description': f'LOJA {n}',
+                            'creditCardMetadata': {'billId': f'b{i}'}})
+    prev = of.add_months(hidden, -1)
+    for day, amount in ((9, 300.0), (25, 400.0)):   # fatura escondida (pendente, sem código)
+        n += 1
+        txs[cc].append({'id': f'h{n}', 'type': 'DEBIT', 'amount': amount, 'date': iso(date(prev.year, prev.month, day)),
+                        'description': f'ESCONDIDA {n}', 'status': 'PENDING'})
+    n += 1
+    txs[cc].append({'id': f'o{n}', 'type': 'DEBIT', 'amount': 55.0, 'date': iso(date(hidden.year, hidden.month, 9)),
+                    'description': 'ABERTA', 'status': 'PENDING'})
+    pay_day = hidden - timedelta(days=6)
+    txs[acc].append({'id': 'pay-c6', 'type': 'DEBIT', 'amount': -700.0, 'date': iso(min(pay_day, TODAY)), 'description': 'C6 BANK'})
+    _post_item(family, months=6)
+    items = family.get('/pluggy/transactions').json()['items']
+    bills_seen = {t['description']: t['bill'] for t in items}
+    assert bills_seen[f'ESCONDIDA {n - 2}'] == f'{hidden.month:02d}/{hidden.year}'   # não foi para a aberta
+    assert bills_seen['ABERTA'] == f'{D.month:02d}/{D.year}'
+    c = next(c for c in family.get('/cards?light=true').json()['cards'] if c['id'] == card['id'])
+    assert c['best_buy_day'] == 7 and c['due_day'] == 14   # corte descoberto vai para o cartão
+    # o pagamento "C6 BANK" é reconhecido mesmo sem "pagamento/fatura" no texto
+    ign = family.get('/pluggy/transactions?status=ignored').json()['items']
+    assert any(t['description'] == 'C6 BANK' and 'Pagamento da fatura' in t['reason'] for t in ign)
+    session.remove()
+
+    # caso já lançado como despesa (antes da correção): desfaz
+    t = BankTransaction.query.filter_by(pluggy_id='pay-c6').one()
+    e = Expense(user_id=t.user_id, description='C6 BANK', amount=700, category='Outros', payment_method='PIX',
+                year=t.date.year, month=t.date.month, day=t.date.day, paid=True)
+    session.add(e)
+    session.flush()
+    t.status, t.reason, t.expense_id, t.reviewed_at = 'imported', None, e.id, t.date
+    session.commit()
+    session.remove()
+    family.get('/pluggy/transactions')
+    assert Expense.query.filter_by(description='C6 BANK').count() == 0
+    t = BankTransaction.query.filter_by(pluggy_id='pay-c6').one()
+    assert t.status == 'ignored' and 'removida' in t.reason
+    session.remove()
+
+
+def test_issuer_in_description():
+    from app.models import BankAccount, BankConnection
+    conn = BankConnection(bank_name='MeuPluggy', display_name='Santander')
+    acc = BankAccount(name='SANTANDER SX MASTER 0676', connection=conn)
+    assert of._issuer_in(acc, 'BANCO SANTANDER (BRASIL) S.A.')
+    assert not of._issuer_in(acc, 'PAGAMENTO BOLETO BCO BRADESCO S.A.')
+    conn2 = BankConnection(bank_name='MeuPluggy', display_name='C6 Bank')
+    assert of._issuer_in(BankAccount(name='BANDEIRADO 0982', connection=conn2), 'C6 BANK')

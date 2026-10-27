@@ -169,6 +169,28 @@ def sync_bills(acc: BankAccount, client: pg.PluggyClient) -> None:
         acc.due_day = latest.due_date.day
 
 
+def infer_close_day(acc: BankAccount, raws: list[dict]) -> int | None:
+    """Banco que não informa o fechamento (C6, Santander pelo Meu Pluggy): descobre o dia de
+    corte pelas compras que vêm com o código da fatura. Só usa se explica 90%+ delas."""
+    if acc.type != 'CREDIT' or acc.close_day or not acc.due_day:
+        return None
+    due_of = {b.pluggy_id: b.due_date for b in acc.bills.all()}
+    samples = []
+    for r in raws:
+        meta = r.get('creditCardMetadata') or {}
+        ref = str(meta.get('billId') or '') if isinstance(meta, dict) else ''
+        day = local_date(r.get('date'))
+        if ref in due_of and day:
+            samples.append((day, (due_of[ref].year, due_of[ref].month)))
+    if len(samples) < 10:
+        return None
+    best = max(((sum(bill_of(d, cut, acc.due_day) == b for d, b in samples), cut) for cut in range(1, 29)))
+    if best[0] >= 0.9 * len(samples):
+        acc.close_day = best[1]
+        return best[1]
+    return None
+
+
 def tx_bill(acc: BankAccount, tx: BankTransaction) -> tuple[int, int] | None:
     """Fatura (ano, mês) da compra do cartão: a que o banco diz (billId); senão pelos dias de
     fechamento/vencimento; senão pela lista de faturas (a 1ª que vence 7+ dias depois da compra,
@@ -390,10 +412,18 @@ def reconcile_bill_payment(tx: BankTransaction, bills_only: bool = False, max_ga
     amount = Decimal(str(tx.amount))
     # 1) pela fatura que o banco informa (mesmo total, vencimento até 20 dias do pagamento)
     best = None
+    paying = tx.account or db.session.get(BankAccount, tx.account_id)
     for b in (BankBill.query.join(BankAccount).join(BankConnection)
               .filter(BankConnection.user_id.in_(uids), BankBill.total.isnot(None)).all()):
         gap = abs((b.due_date - tx.date).days)
-        if abs(Decimal(str(b.total)) - amount) <= Decimal('0.05') and gap <= max_gap and (best is None or gap < best[0]):
+        if abs(Decimal(str(b.total)) - amount) > Decimal('0.05') or gap > max_gap:
+            continue
+        # sem "pagamento/fatura" no texto, só vale se cita o banco do cartão ou sai do mesmo banco
+        # (C6 paga a fatura do C6 com a descrição "C6 BANK"; outra conta paga "BANCO SANTANDER")
+        if bills_only and not (_BILL_LIKE.search(tx.description) or b.account.connection_id == paying.connection_id
+                               or _issuer_in(b.account, tx.description)):
+            continue
+        if best is None or gap < best[0]:
             best = (gap, b)
     if best:
         bill, acc = best[1], best[1].account
@@ -431,6 +461,22 @@ def reconcile_bill_payment(tx: BankTransaction, bills_only: bool = False, max_ga
 
 
 _BILL_LIKE = re.compile(r'boleto|pagamento|pgto|pagto|fatura|cart[aã]o', re.I)
+_GENERIC = {'banco', 'bank', 'bco', 'cartao', 'credito', 'meupluggy', 'pluggy', 'conta', 'sa', 's', 'a', 'do', 'de', 'da'}
+
+
+def _words(text: str | None) -> list[str]:
+    import unicodedata
+    t = unicodedata.normalize('NFKD', text or '').encode('ascii', 'ignore').decode().lower()
+    return re.findall(r'[a-z0-9]+', t)
+
+
+def _issuer_in(card_acc: BankAccount, description: str) -> bool:
+    """A descrição cita o banco do cartão? ("C6 BANK", "BANCO SANTANDER (BRASIL) S.A.")"""
+    conn = card_acc.connection
+    card = db.session.get(CreditCard, card_acc.card_id) if card_acc.card_id else None
+    names = [conn.display_name, conn.bank_name, card_acc.name, card.bank if card else None]
+    marks = {w for n in names for w in _words(n)[:1] if w not in _GENERIC and len(w) >= 2}
+    return bool(marks & set(_words(description)))
 
 
 def reconcile_payments(user_id: int) -> int:
@@ -450,10 +496,22 @@ def reconcile_payments(user_id: int) -> int:
     for tx in (BankTransaction.query.join(BankAccount)
                .filter(BankTransaction.user_id.in_(uids), BankTransaction.status == 'pending',
                        BankTransaction.reviewed_at.is_(None), BankAccount.type == 'BANK').all()):
-        if _BILL_LIKE.search(tx.description):
-            why = reconcile_bill_payment(tx, bills_only=True, max_gap=10)
-            if why:
-                tx.status, tx.reason, n = 'ignored', why, n + 1
+        why = reconcile_bill_payment(tx, bills_only=True, max_gap=10)
+        if why:
+            tx.status, tx.reason, n = 'ignored', why, n + 1
+    # pagamento de fatura que já foi lançado como despesa (antes de o FinFam reconhecer): desfaz,
+    # senão a fatura conta duas vezes (as compras pelo cartão e o pagamento pela conta)
+    for tx in (BankTransaction.query.join(BankAccount)
+               .filter(BankTransaction.user_id.in_(uids), BankTransaction.status == 'imported',
+                       BankTransaction.reason.is_(None), BankAccount.type == 'BANK').all()):
+        why = reconcile_bill_payment(tx, bills_only=True, max_gap=10)
+        if not why:
+            continue
+        e = db.session.get(Expense, tx.expense_id) if tx.expense_id else None
+        if e is not None and e.payment_method != CREDIT and abs(Decimal(str(e.amount)) - Decimal(str(tx.amount))) <= Decimal('0.05'):
+            db.session.delete(e)
+        tx.status, tx.expense_id, tx.reviewed_at = 'ignored', None, None
+        tx.reason, n = why + ' A despesa lançada antes foi removida (era pagamento de fatura).', n + 1
     db.session.flush()
     return n
 
@@ -577,6 +635,9 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
                 max(months_back(start, 2), today - timedelta(days=RESYNC_DAYS + 62))
         raws, complete = _fetch(client, acc.pluggy_account_id, acc_since)
         raws = [r for r in raws if _ID.fullmatch(str(r.get('id') or '')) and _is_expense(acc, r)]
+        if infer_close_day(acc, raws):
+            apply_card_limit(acc)  # o cartão ligado recebe o fechamento descoberto
+            by_bill = True
         if complete:
             _drop_vanished(acc, acc_since, {str(r['id']) for r in raws})
         for raw in raws:
@@ -607,8 +668,8 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
             why = _skip_reason(tx.description, tx.pluggy_category)
             if why and acc.type == 'BANK' and why.startswith('Pagamento de fatura'):
                 why = reconcile_bill_payment(tx) or why
-            elif not why and acc.type == 'BANK' and _BILL_LIKE.search(tx.description):
-                why = reconcile_bill_payment(tx, bills_only=True, max_gap=10)  # boleto que paga fatura
+            elif not why and acc.type == 'BANK':
+                why = reconcile_bill_payment(tx, bills_only=True, max_gap=10)  # boleto/"C6 BANK" que paga fatura
             match = None if why else find_existing(tx, acc.card_id)
             if why:
                 tx.status, tx.reason = 'ignored', why

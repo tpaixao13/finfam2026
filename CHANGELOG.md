@@ -105,6 +105,12 @@ pelo bot ou importando extrato, como antes.
 - Um cartão do banco com vários cartões (C6: físico, virtual e adicional chegam como um só): cada compra vai
   para o cartão do final que o banco informa (`creditCardMetadata.cardNumber`), entre os cartões de crédito
   da família do mesmo banco; compra no adicional fica no nome de quem tem o cartão.
+- Dia de corte descoberto pelas compras com código de fatura (C6/Santander pelo Meu Pluggy não informam):
+  vale se explica 90%+ delas; pendente sem código vai para a fatura do corte (o C6 deixou uma fatura
+  fechada inteira como "pendente"). O cartão ligado recebe o melhor dia descoberto.
+- Pagamento de fatura reconhecido também sem "pagamento/fatura" no texto, quando o valor bate com a fatura
+  do banco e a descrição cita o banco do cartão ("C6 BANK", "BANCO SANTANDER") ou sai da conta do mesmo
+  banco. Pagamento que já tinha sido lançado como despesa é desfeito (a fatura contava duas vezes).
 - Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
 
 **Próximas etapas**
