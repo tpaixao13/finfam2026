@@ -565,3 +565,4 @@ a.insight:hover { background: #e8edf1; }
 .balance-list li:first-child { border-top: 0; }
 .balance-list .num { font-weight: 600; white-space: nowrap; }
 .nowrap { white-space: nowrap; }
+.apply-preview { max-height: 50vh; overflow: auto; margin-top: .5rem; }

@@ -9,6 +9,7 @@ import { useApi, usePeriod } from '../lib/hooks'
 import { Link } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
 import type { Alert } from '../lib/types'
+import { ApplyRulesModal } from './ApplyRules'
 
 export function AlertsPage() {
   const { month, year, setPeriod } = usePeriod()
@@ -183,6 +184,7 @@ export function RulesPage() {
   const [keyword, setKeyword] = useState('')
   const [category, setCategory] = useState('')
   const [editing, setEditing] = useState<Rule | null>(null)
+  const [applying, setApplying] = useState(false)
 
   const save = (e: React.FormEvent) => {
     e.preventDefault()
@@ -195,7 +197,11 @@ export function RulesPage() {
     <div className="page">
       <PageHeader title="Regras de categoria"
         subtitle="Se a descrição contém a palavra, o FinFam sugere a categoria no lançamento, na importação e no Open Finance."
-        actions={<Button variant="ghost" icon="lightning" onClick={() => act(() => api.post<{ message: string }>('/rules/learn'), rules.reload)}>Criar pelo histórico</Button>} />
+        actions={<>
+          <Button variant="ghost" icon="lightning" onClick={() => act(() => api.post<{ message: string }>('/rules/learn'), rules.reload)}>Criar pelo histórico</Button>
+          <Button icon="arrow-repeat" disabled={!rules.data?.length} onClick={() => setApplying(true)}>Aplicar às despesas</Button>
+        </>} />
+      <ApplyRulesModal open={applying} onClose={() => setApplying(false)} onDone={rules.reload} />
       <Panel>
         <form className="inline-form" onSubmit={save}>
           <Field label="Palavra-chave" hint="Basta a descrição conter o trecho."><Input value={keyword} onChange={(e) => setKeyword(e.target.value)} required minLength={2} placeholder="Ex.: IFOOD" /></Field>

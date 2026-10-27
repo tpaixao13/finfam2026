@@ -1001,3 +1001,18 @@ def test_bank_balances_only_owner(client, family, other_family, bank, txs):  # n
     assert [(i['bank'], i['last_digits'], i['subtype']) for i in r['items']] == [('Nubank', '3456', 'CHECKING_ACCOUNT')]
     assert other_family.get('/pluggy/balances').json()['items'] == []
     session.remove()
+
+
+def test_apply_rules_to_existing_expenses(client, family):
+    for desc, cat in (('UBER TRIP 1', 'Outros'), ('UBER TRIP 2', 'Lazer'), ('PADARIA X', 'Outros')):
+        family.post('/expenses', json={'description': desc, 'amount': 10, 'category': cat, 'payment_method': 'PIX',
+                                       'day': 1, 'month': TODAY.month, 'year': TODAY.year})
+    family.post('/rules', json={'keyword': 'uber', 'category': 'Transporte'})
+    prev = family.post('/rules/apply', json={'only_others': True, 'dry_run': True}).json()
+    assert prev['count'] == 1 and prev['sample'][0]['to'] == 'Transporte'
+    assert family.post('/rules/apply', json={'only_others': False, 'dry_run': True}).json()['count'] == 2
+    family.post('/rules/apply', json={'only_others': False, 'dry_run': False})
+    cats = {e.description: e.category for e in Expense.query.filter(Expense.description.like('UBER%')).all()}
+    assert cats == {'UBER TRIP 1': 'Transporte', 'UBER TRIP 2': 'Transporte'}
+    assert Expense.query.filter_by(description='PADARIA X').one().category == 'Outros'
+    session.remove()

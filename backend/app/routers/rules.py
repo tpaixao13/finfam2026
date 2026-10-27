@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from app.core.db import db, get_or_404
 from app.core.deps import Ctx, get_ctx, get_ctx_session
 from app.models import CategoryRule
-from app.services.categorizer import learn_from_history
+from app.services.categorizer import learn_from_history, rule_changes
 from app.services.serializers import iso
 
 router = APIRouter(prefix='/rules', tags=['rules'])
@@ -58,6 +58,27 @@ def learn(ctx: Ctx = Depends(get_ctx_session)):
     db.session.commit()
     return {'created': created, 'message': f'{created} regra(s) criada(s) pelo histórico.' if created
             else 'Nenhuma regra nova: o histórico não tem padrões claros que já não estejam nas regras.'}
+
+
+class ApplyIn(BaseModel):
+    only_others: bool = Field(True, description='Só despesas em "Outros" (falso = todas que alguma regra cobre)')
+    dry_run: bool = Field(True, description='Só mostra o que mudaria, sem gravar')
+
+
+@router.post('/apply', summary='Aplica as regras às despesas já lançadas (com prévia)')
+def apply(body: ApplyIn, ctx: Ctx = Depends(get_ctx_session)):
+    changes = rule_changes(ctx.uids, _tid(ctx), body.only_others)
+    sample = [{'id': e.id, 'description': e.description, 'date': f'{e.purchase_year or e.year}-{(e.purchase_month or e.month):02d}-{e.day:02d}',
+               'amount': float(e.amount), 'from': e.category, 'to': cat, 'keyword': rule.keyword}
+              for e, cat, rule in changes[:200]]
+    if body.dry_run:
+        return {'count': len(changes), 'sample': sample,
+                'message': f'{len(changes)} despesa(s) mudariam de categoria.' if changes else 'Nenhuma despesa muda com as regras atuais.'}
+    for e, cat, rule in changes:
+        e.category = cat
+        rule.match_count = (rule.match_count or 0) + 1
+    db.session.commit()
+    return {'count': len(changes), 'sample': sample, 'message': f'{len(changes)} despesa(s) atualizada(s) pelas regras.'}
 
 
 @router.put('/{rule_id}', summary='Edita regra')

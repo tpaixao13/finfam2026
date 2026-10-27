@@ -150,7 +150,8 @@ pelo bot ou importando extrato, como antes.
 - Regras de categoria passam a ser preenchidas: em Revisar importados, trocar a categoria sugerida cria
   (ou corrige) a regra da palavra principal (`categorizer.keyword_of`, sem prefixos como DL/IFD/cidade);
   botão "Criar pelo histórico" (`POST /rules/learn`: palavra em 3+ despesas, 80%+ na mesma categoria);
-  "Usos" conta cada despesa salva com a categoria da regra.
+  "Usos" conta cada despesa salva com a categoria da regra. "Aplicar às despesas" (`POST /rules/apply`, com
+  prévia): recategoriza as despesas já lançadas — só as em "Outros" ou todas que alguma regra cobre.
 - Cartão do banco: dia de fechamento digitado (`bank_accounts.manual_close_day`, `PUT /pluggy/accounts/{id}/close-day`)
   vale enquanto o banco não informa; o do banco sempre manda. `close_source`: bank | manual | inferred.
 

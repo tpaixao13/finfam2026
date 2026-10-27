@@ -184,3 +184,22 @@ def learn_from_history(uids: list, tenant_id: int, min_count: int = 3, share: fl
             created += 1
     db.session.flush()
     return created
+
+
+def rule_changes(uids: list, tenant_id: int, only_others: bool = True) -> list[tuple[Expense, str, CategoryRule]]:
+    """Despesas da família que as regras mudariam: (despesa, categoria nova, regra). A 1ª regra que casa
+    vale, na mesma ordem da sugestão. only_others: só as que estão em "Outros" (ou sem categoria)."""
+    rules = (CategoryRule.query.filter_by(tenant_id=tenant_id)
+             .order_by(CategoryRule.match_count.desc(), CategoryRule.keyword).all())
+    if not rules:
+        return []
+    q = Expense.query.filter(Expense.user_id.in_(uids or [0]))
+    if only_others:
+        q = q.filter((Expense.category == 'Outros') | (Expense.category.is_(None)) | (Expense.category == ''))
+    out = []
+    for e in q.all():
+        desc = (e.description or '').upper()
+        rule = next((r for r in rules if r.keyword.upper() in desc), None)
+        if rule is not None and rule.category != e.category:
+            out.append((e, rule.category, rule))
+    return out
