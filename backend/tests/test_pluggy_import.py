@@ -380,3 +380,75 @@ def test_card_window_counts_by_bill(client, family, bank, txs):  # noqa: F811
     assert ('Antes mas na fatura' in got) == keep
     assert 'Fatura velha' not in got
     session.remove()
+
+
+def test_meupluggy_case_bills_from_bank(client, family, bank, txs, monkeypatch):  # noqa: F811
+    """Caso real (Meu Pluggy, sem dias de fechamento): CATIVA 7/10, 8/10 pagas pela conta; 9/10 em aberto."""
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    due1, due2 = TODAY - timedelta(days=48), TODAY - timedelta(days=18)
+    bills = [{'id': 'b-1', 'dueDate': f'{due1.isoformat()}T03:00:00Z', 'totalAmount': 1597.76},
+             {'id': 'b-2', 'dueDate': f'{due2.isoformat()}T03:00:00Z', 'totalAmount': 1597.76}]
+    inner = pg._http
+
+    def http(method, path, body=None, api_key=None):
+        if path.startswith('/bills?'):
+            return {'results': bills}
+        return inner(method, path, body, api_key)
+    monkeypatch.setattr(pg, '_http', http)
+
+    def iso(d):
+        return f'{d.isoformat()}T15:00:00Z'
+    txs[cc] += [
+        {'id': 'c7', 'type': 'DEBIT', 'amount': 1597.76, 'date': iso(TODAY - timedelta(days=80)), 'description': 'CATIVA',
+         'creditCardMetadata': {'installmentNumber': 7, 'totalInstallments': 10, 'billId': 'b-1'}},
+        {'id': 'c8', 'type': 'DEBIT', 'amount': 1597.76, 'date': iso(TODAY - timedelta(days=53)), 'description': 'CATIVA',
+         'creditCardMetadata': {'installmentNumber': 8, 'totalInstallments': 10, 'billId': 'b-2'}},
+        {'id': 'c9', 'type': 'DEBIT', 'amount': 1597.76, 'date': iso(TODAY - timedelta(days=22)), 'description': 'CATIVA',
+         'status': 'PENDING', 'creditCardMetadata': {'installmentNumber': 9, 'totalInstallments': 10}},
+    ]
+    txs[acc] += [
+        {'id': 'p1', 'type': 'DEBIT', 'amount': -1597.76, 'date': iso(due1 - timedelta(days=2)),
+         'description': 'PAGAMENTO CARTAO CREDITO BCE CARTAO MASTER'},
+        {'id': 'p2', 'type': 'DEBIT', 'amount': -1597.76, 'date': iso(due2 + timedelta(days=1)),
+         'description': 'PAGAMENTO CARTAO CREDITO BCE CARTAO MASTER'},
+    ]
+    _post_item(family, months=3)
+    pend = family.get('/pluggy/transactions').json()['items']
+    bills_seen = sorted(t['bill'] for t in pend)
+    nxt = of.add_months(due2, 1)
+    assert bills_seen == sorted([f'{due1.month:02d}/{due1.year}', f'{due2.month:02d}/{due2.year}',
+                                 f'{nxt.month:02d}/{nxt.year}'])
+    # lança as compras depois de o pagamento ter chegado: a conciliação é refeita
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': t['id'], 'category': 'Outros'} for t in pend]})
+    rows = {e.description: e for e in Expense.query.filter(Expense.description.like('CATIVA%')).all()}
+    assert {(e.month, e.paid) for e in rows.values()} == {(due1.month, True), (due2.month, True), (nxt.month, False)}
+    ign = family.get('/pluggy/transactions?status=ignored').json()['items']
+    assert all('fatura marcada como paga' in t['reason'] for t in ign) and len(ign) == 2
+    session.remove()
+
+
+def test_imported_expense_moves_to_bank_bill(client, family, bank, txs, monkeypatch):  # noqa: F811
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    d = TODAY - timedelta(days=5)
+    txs[cc].append({'id': 'c9', 'type': 'DEBIT', 'amount': 1597.76, 'date': f'{d.isoformat()}T15:00:00Z',
+                    'description': 'CATIVA', 'status': 'PENDING',
+                    'creditCardMetadata': {'installmentNumber': 9, 'totalInstallments': 10}})
+    _post_item(family)
+    t = family.get('/pluggy/transactions').json()['items'][0]
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': t['id'], 'category': 'Outros'}]})
+    session.remove()
+    # o banco passa a informar as faturas (a última venceu um mês antes da compra)
+    inner = pg._http
+    monkeypatch.setattr(pg, '_http', lambda m, p, b=None, k=None: {'results': [
+        {'id': 'b-x', 'dueDate': f'{of.add_months(d, -1).isoformat()}T03:00:00Z', 'totalAmount': 10}]}
+        if p.startswith('/bills?') else inner(m, p, b, k))
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    session.remove()
+    family.get('/pluggy/transactions?status=imported')
+    e = Expense.query.filter(Expense.description.like('CATIVA%')).one()
+    nxt = of.add_months(of.add_months(d, -1), 1)
+    while nxt < d + timedelta(days=7):
+        nxt = of.add_months(nxt, 1)
+    assert (e.year, e.month) == (nxt.year, nxt.month)
+    session.remove()

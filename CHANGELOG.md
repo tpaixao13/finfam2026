@@ -83,6 +83,11 @@ pelo bot ou importando extrato, como antes.
   início (a parcela de setembro que vence em outubro entra em "1 mês").
 - Pagamento de fatura saindo da conta é conciliado: o FinFam acha a fatura de mesmo total (mês do
   pagamento, anterior ou seguinte) e a marca como paga; o pagamento não vira despesa.
+- Faturas do banco (`GET /bills`, tabela `bank_bills`): a compra vai para a fatura que o banco diz
+  (billId); a pendente, para a próxima em aberto. Funciona no Meu Pluggy, que não manda os dias de
+  fechamento. O pagamento da conta liga à fatura do banco de mesmo total e vencimento próximo, e a
+  conciliação é refeita depois de lançar as compras. Despesa já lançada fora da fatura certa é movida
+  (se a descrição não foi editada).
 - Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
 
 **Próximas etapas**

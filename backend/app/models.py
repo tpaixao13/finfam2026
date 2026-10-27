@@ -272,6 +272,19 @@ class BankAccount(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     transactions = relationship('BankTransaction', backref='account', lazy='dynamic', cascade='all, delete-orphan')
+    bills = relationship('BankBill', backref='account', lazy='dynamic', cascade='all, delete-orphan')
+
+
+class BankBill(Base):
+    """Fatura do cartão como o banco informa (vencimento e total) — define o mês da fatura das
+    compras e concilia o pagamento que sai da conta."""
+    __tablename__ = 'bank_bills'
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey('bank_accounts.id'), nullable=False, index=True)
+    pluggy_id = Column(String(64), nullable=False, unique=True)
+    due_date = Column(Date, nullable=False)
+    total = Column(Numeric(14, 2), nullable=True)
 
 
 class BankTransaction(Base):
@@ -294,6 +307,7 @@ class BankTransaction(Base):
     total_amount = Column(Numeric(12, 2), nullable=True)
     pluggy_category = Column(Text, nullable=True)
     payment_hint = Column(String(16), nullable=True)      # PIX | BOLETO | TED ... (contas)
+    bill_ref = Column(String(64), nullable=True)          # id da fatura na Pluggy (creditCardMetadata.billId)
     bill_year = Column(Integer, nullable=True)            # fatura em que o banco pôs a compra (cartão)
     bill_month = Column(Integer, nullable=True)
     bank_status = Column(String(12), nullable=True)       # PENDING | POSTED

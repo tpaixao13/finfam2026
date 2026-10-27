@@ -15,7 +15,7 @@ from decimal import Decimal
 from app.core.db import db
 from app.core.security import decrypt_field
 from app.core.types import utcnow
-from app.models import BankAccount, BankConnection, BankTransaction, CreditCard, Expense, PluggyConfig, User
+from app.models import BankAccount, BankBill, BankConnection, BankTransaction, CreditCard, Expense, PluggyConfig, User
 from app.services import pluggy as pg
 from app.services.categorizer import categorize
 from app.services.expense_service import ExpenseData, create_expense
@@ -141,6 +141,56 @@ def apply_card_limit(acc: BankAccount) -> bool:
     if target is not card and card.credit_limit is not None:
         card.credit_limit = limit
     return True
+
+
+def sync_bills(acc: BankAccount, client: pg.PluggyClient) -> None:
+    """Faturas do cartão na Pluggy (vencimento e total). Banco que não informa: segue sem."""
+    if acc.type != 'CREDIT':
+        return
+    try:
+        r = client.call('GET', f'/bills?accountId={pg.safe_id(acc.pluggy_account_id)}') or {}
+    except pg.PluggyError as exc:
+        log.info('Faturas da conta %s não vieram: %s', acc.pluggy_account_id, exc)
+        return
+    for b in (r.get('results') or []) if isinstance(r, dict) else []:
+        pid, due = str(b.get('id') or ''), local_date(b.get('dueDate'))
+        if not _ID.fullmatch(pid) or due is None:
+            continue
+        bill = BankBill.query.filter_by(pluggy_id=pid).first()
+        if bill is None:
+            bill = BankBill(account_id=acc.id, pluggy_id=pid, due_date=due)
+            db.session.add(bill)
+        elif bill.account_id != acc.id:
+            continue
+        bill.due_date, bill.total = due, money(b.get('totalAmount'))
+    db.session.flush()
+    latest = acc.bills.order_by(BankBill.due_date.desc()).first()
+    if latest is not None and not acc.due_day:
+        acc.due_day = latest.due_date.day
+
+
+def tx_bill(acc: BankAccount, tx: BankTransaction) -> tuple[int, int] | None:
+    """Fatura (ano, mês) da compra do cartão: a que o banco diz (billId); senão pelos dias de
+    fechamento/vencimento; senão pela lista de faturas (a 1ª que vence 7+ dias depois da compra,
+    ou a próxima depois da última conhecida). None quando o banco não dá pista nenhuma."""
+    if acc.type != 'CREDIT':
+        return None
+    if tx.bill_ref:
+        bill = BankBill.query.filter_by(pluggy_id=tx.bill_ref, account_id=acc.id).first()
+        if bill is not None:
+            return bill.due_date.year, bill.due_date.month
+    if acc.close_day and acc.due_day:
+        return bill_of(tx.date, acc.close_day, acc.due_day)
+    bills = acc.bills.order_by(BankBill.due_date).all()
+    if not bills:
+        return None
+    for b in bills:
+        if b.due_date >= tx.date + timedelta(days=7):
+            return b.due_date.year, b.due_date.month
+    last = add_months(bills[-1].due_date, 1)
+    while last < tx.date + timedelta(days=7):
+        last = add_months(last, 1)
+    return last.year, last.month
 
 
 def bill_of(day: date, close_day: int, due_day: int) -> tuple[int, int]:
@@ -302,6 +352,25 @@ def reconcile_bill_payment(tx: BankTransaction) -> str | None:
     from app.services.finance import MONTH_NAMES_SHORT, month_offset
     uids, _ = family_of(tx.user_id)
     amount = Decimal(str(tx.amount))
+    # 1) pela fatura que o banco informa (mesmo total, vencimento até 20 dias do pagamento)
+    best = None
+    for b in (BankBill.query.join(BankAccount).join(BankConnection)
+              .filter(BankConnection.user_id.in_(uids), BankBill.total.isnot(None)).all()):
+        gap = abs((b.due_date - tx.date).days)
+        if abs(Decimal(str(b.total)) - amount) <= Decimal('0.05') and gap <= 20 and (best is None or gap < best[0]):
+            best = (gap, b)
+    if best:
+        bill, acc = best[1], best[1].account
+        y, m = bill.due_date.year, bill.due_date.month
+        name = f"{acc.connection.label} •••• {last4(acc.number) or ''}".strip()
+        if not acc.card_id:
+            return (f'Pagamento da fatura {name} de {MONTH_NAMES_SHORT[m - 1]}/{y}. Ligue esse cartão do banco a '
+                    'um cartão do FinFam para a fatura ficar marcada como paga.')
+        (Expense.query.filter(Expense.card_id.in_(card_family(acc.card_id)), Expense.payment_method == CREDIT,
+                              Expense.year == y, Expense.month == m)
+         .update({'paid': True}, synchronize_session=False))
+        return f'Pagamento da fatura {name} de {MONTH_NAMES_SHORT[m - 1]}/{y}: fatura marcada como paga.'
+    # 2) sem faturas do banco: pela fatura do FinFam com o mesmo total
     for delta in (0, -1, 1):
         m, y = month_offset(tx.date.month, tx.date.year, delta)
         rows = Expense.query.filter(Expense.user_id.in_(uids), Expense.payment_method == CREDIT,
@@ -321,6 +390,23 @@ def reconcile_bill_payment(tx: BankTransaction) -> str | None:
                 return (f'Pagamento da fatura {label} de {MONTH_NAMES_SHORT[m - 1]}/{y}: '
                         'fatura marcada como paga (as compras já vêm pelo cartão).')
     return None
+
+
+def reconcile_payments(user_id: int) -> int:
+    """Refaz a conciliação dos pagamentos de fatura classificados sozinhos (as compras do cartão
+    podem ter sido lançadas depois do pagamento chegar). Só mexe no banco de dados do FinFam."""
+    uids, _ = family_of(user_id)
+    n = 0
+    rows = (BankTransaction.query.join(BankAccount)
+            .filter(BankTransaction.user_id.in_(uids), BankTransaction.status == 'ignored',
+                    BankTransaction.reviewed_at.is_(None), BankAccount.type == 'BANK',
+                    BankTransaction.reason.like('Pagamento d%fatura%')).all())
+    for tx in rows:
+        why = reconcile_bill_payment(tx)
+        if why and why != tx.reason:
+            tx.reason, n = why, n + 1
+    db.session.flush()
+    return n
 
 
 def _skip_reason(description: str, category: str | None) -> str | None:
@@ -344,6 +430,8 @@ def _apply_tx(tx: BankTransaction, raw: dict) -> None:
     tx.pluggy_category = str(raw.get('category') or '')[:80] or None
     tx.payment_hint = (str(pay.get('paymentMethod') or '')[:16] or None) if isinstance(pay, dict) else None
     tx.bank_status = str(raw.get('status') or '')[:12] or None
+    ref = str(meta.get('billId') or '')
+    tx.bill_ref = ref if _ID.fullmatch(ref) else None
 
 
 def _is_expense(acc: BankAccount, raw: dict) -> bool:
@@ -385,6 +473,20 @@ def _drop_vanished(acc: BankAccount, since: date, seen: set[str]) -> None:
     db.session.flush()
 
 
+def _rebill(acc: BankAccount, tx: BankTransaction, by_bill: bool) -> None:
+    """Despesa à vista já lançada fora da fatura que o banco diz: move para a fatura certa
+    (só se a descrição ainda é a do banco — se você editou, fica como está)."""
+    from app.services.finance import month_offset
+    bill = tx_bill(acc, tx) if by_bill else None
+    tx.bill_year, tx.bill_month = bill if bill else (tx.bill_year, tx.bill_month)
+    e = db.session.get(Expense, tx.expense_id) if tx.expense_id else None
+    if not bill or e is None or e.installment_group_id or e.payment_method != CREDIT \
+            or not e.description.startswith(tx.description[:40]):
+        return
+    if (e.year, e.month) != bill:
+        e.month, e.year = month_offset(bill[1], bill[0], 0)
+
+
 def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date | None = None) -> int:
     """Traz os lançamentos novos de todas as contas. Devolve quantos ficaram para revisar."""
     today = today or date.today()
@@ -393,7 +495,8 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
     new_pending = 0
     for acc in conn.accounts.all():
         # cartão: o período conta por FATURA (compra de setembro que vence em outubro entra em "desde outubro")
-        by_bill = acc.type == 'CREDIT' and bool(acc.close_day and acc.due_day)
+        sync_bills(acc, client)
+        by_bill = acc.type == 'CREDIT' and bool((acc.close_day and acc.due_day) or acc.bills.count())
         acc_since = since
         if by_bill:
             acc_since = months_back(start, 2) if conn.tx_synced_at is None else \
@@ -411,15 +514,19 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
             if fresh:
                 tx = BankTransaction(account_id=acc.id, user_id=conn.user_id, pluggy_id=pid, status='pending')
                 db.session.add(tx)
-            elif tx.reviewed_at is not None or tx.status == 'imported':
-                continue  # você já mexeu (ou já lançou): não reclassifica
+            elif tx.status == 'imported':
+                _apply_tx(tx, raw)
+                _rebill(acc, tx, by_bill)  # lançado antes de o FinFam saber a fatura certa
+                continue
+            elif tx.reviewed_at is not None:
+                continue  # você já mexeu: não reclassifica
             else:  # classificado sozinho antes: classifica de novo (regras podem ter melhorado)
                 tx.status, tx.reason, tx.expense_id = 'pending', None, None
             _apply_tx(tx, raw)
-            if by_bill:
-                tx.bill_year, tx.bill_month = bill_of(tx.date, acc.close_day, acc.due_day)
+            bill = tx_bill(acc, tx) if by_bill else None
+            tx.bill_year, tx.bill_month = bill if bill else (None, None)
             # cartão: fica se a fatura vence a partir do início; conta: se a data é a partir do início
-            too_old = (date(tx.bill_year, tx.bill_month, min(acc.due_day, 28)) < start) if by_bill else tx.date < start
+            too_old = (date(bill[0], bill[1], min(acc.due_day or 10, 28)) < start) if bill else tx.date < start
             if too_old or not tx.amount:
                 if fresh:
                     db.session.expunge(tx)
@@ -488,6 +595,7 @@ def sync(conn: BankConnection, client: pg.PluggyClient, today: date | None = Non
     conn.needs_sync = False
     if conn.auto_import:
         auto_approve(conn)
+    reconcile_payments(conn.user_id)
     return count
 
 

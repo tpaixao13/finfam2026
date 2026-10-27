@@ -430,6 +430,8 @@ def list_transactions(status: Literal['pending', 'duplicate', 'ignored', 'import
                       ctx: Ctx = Depends(get_ctx_session)):
     _enabled_tenant(ctx)
     of.sync_stale(ctx.user.id)  # traz o que o webhook avisou
+    if of.reconcile_payments(ctx.user.id):
+        db.session.commit()
     counts = {s: 0 for s in STATUSES}
     for st, n in (db.session.query(BankTransaction.status, func.count(BankTransaction.id))
                   .filter(BankTransaction.user_id == ctx.user.id).group_by(BankTransaction.status)):
@@ -467,6 +469,7 @@ def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_session)):
             db.session.rollback()
             raise HTTPException(status_code=422, detail=f'{tx.description}: {exc}')
         done += 1
+    of.reconcile_payments(ctx.user.id)  # pagamento de fatura que chegou antes das compras
     db.session.commit()
     return {'message': f'{done} despesa(s) lançada(s) no FinFam.' if done else 'Nada para lançar.', 'imported': done}
 
