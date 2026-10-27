@@ -288,21 +288,39 @@ def test_auto_import_launches_and_pending_to_posted_does_not_double(client, fami
 
 
 def test_reset_from_date(client, family, other_family, bank, txs):  # noqa: F811
-    acc, _cc, _ = _connect(client, family, bank, txs)
+    """Só apaga o que os bancos conectados trazem de volta."""
+    acc, _cc, linked = _connect(client, family, bank, txs, card_digits='5162')
+    virtual = family.post('/cards', json={'supports_credit': True, 'last_digits': '6494', 'bank': 'Nubank',
+                                          'due_day': 10, 'best_buy_day': 3, 'is_virtual': True,
+                                          'account_id': linked['account_id']}).json()['card']
+    other_card = family.post('/cards', json={'supports_credit': True, 'last_digits': '1111', 'bank': 'Itaú',
+                                             'due_day': 10, 'best_buy_day': 3}).json()['card']
     d_old = (TODAY - timedelta(days=60)).isoformat()
     d_in = (TODAY - timedelta(days=3)).isoformat()
     d_future = (TODAY + timedelta(days=20)).isoformat()
-    for desc, when, method in (('Antigo', d_old, 'PIX'), ('Mercado', d_in, 'PIX'), ('Feira', d_in, 'Dinheiro'),
-                               ('Aluguel futuro', d_future, 'PIX')):
-        family.post('/expenses', json={'description': desc, 'amount': '50', 'category': 'Outros',
-                                       'payment_method': method, 'date': when})
+
+    def exp(desc, when, method, **kw):
+        r = family.post('/expenses', json={'description': desc, 'amount': '50', 'category': 'Outros',
+                                           'payment_method': method, 'date': when, **kw})
+        assert r.status_code == 201, r.text
+    exp('Antigo', d_old, 'PIX', bank='Nubank')
+    exp('Mercado', d_in, 'PIX', bank='Nubank')                    # apaga: PIX do banco conectado
+    exp('Pix sem banco', d_in, 'PIX')                              # fica: não dá para saber de onde saiu
+    exp('Pix do Itaú', d_in, 'PIX', bank='Itaú')                   # fica: banco não conectado
+    exp('Feira', d_in, 'Dinheiro')                                 # fica
+    exp('Aluguel futuro', d_future, 'PIX', bank='Nubank')          # fica: futuro
+    exp('Compra cartão', d_in, 'Cartão de Crédito', card_id=linked['id'])     # apaga
+    exp('Compra virtual', d_in, 'Cartão de Crédito', card_id=virtual['id'])   # apaga: mesma conta
+    exp('Compra Itaú', d_in, 'Cartão de Crédito', card_id=other_card['id'])   # fica: cartão não ligado
     other_family.post('/expenses', json={'description': 'De outra família', 'amount': '50', 'category': 'Outros',
-                                         'payment_method': 'PIX', 'date': d_in})
+                                         'payment_method': 'PIX', 'bank': 'Nubank', 'date': d_in})
     txs[acc].append({'id': 't-1', 'type': 'DEBIT', 'amount': -50.0, 'date': day(3), 'description': 'MERCADO DO ZE'})
     _post_item(family)
     since = (TODAY - timedelta(days=10)).isoformat()
     prev = family.get(f'/pluggy/reset/preview?date_from={since}').json()
-    assert prev['count'] == 1 and prev['total'] == 50.0  # só o Mercado (PIX, no período, até hoje)
+    assert prev['count'] == 3 and prev['total'] == 150.0
+    assert any('5162' in c for c in prev['covers']) and any('6494' in c for c in prev['covers'])
+    assert 'PIX/débito Nubank' in prev['covers']
     bk = family.get(f'/pluggy/reset/backup?date_from={since}')
     assert bk.status_code == 200 and bk.content[:2] == b'PK'
     assert family.post('/pluggy/reset', json={'date_from': since, 'password': 'errada'}).status_code == 403
@@ -310,11 +328,12 @@ def test_reset_from_date(client, family, other_family, bank, txs):  # noqa: F811
     assert family.get(f'/pluggy/reset/preview?date_from={too_old}').status_code == 422
     r = family.post('/pluggy/reset', json={'date_from': since, 'password': 'senha-segura'})
     assert r.status_code == 200, r.text
-    assert r.json()['deleted'] == 1
+    assert r.json()['deleted'] == 3
     left = {e.description for e in Expense.query.all()}
-    assert left == {'Antigo', 'Feira', 'Aluguel futuro', 'De outra família'}
-    pend = family.get('/pluggy/transactions').json()['items']
-    assert [t['description'] for t in pend] == ['MERCADO DO ZE']  # antes era "já no FinFam"; agora volta do banco
+    assert left == {'Antigo', 'Pix sem banco', 'Pix do Itaú', 'Feira', 'Aluguel futuro', 'Compra Itaú',
+                    'De outra família'}
+    dup = family.get('/pluggy/transactions?status=duplicate').json()['items']
+    assert [(t['description'], t['expense']['description']) for t in dup] == [('MERCADO DO ZE', 'Pix sem banco')]
     assert BankConnection.query.one().import_from == TODAY - timedelta(days=10)
     session.remove()
 

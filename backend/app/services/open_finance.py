@@ -188,6 +188,7 @@ def find_existing(tx: BankTransaction, card_id: int | None) -> Expense | None:
     q = Expense.query.filter(Expense.user_id == tx.user_id, Expense.amount == Decimal(str(tx.amount)),
                              Expense.year.between(when.year - 1, when.year + 1))
     credit = tx.account.type == 'CREDIT'
+    siblings = card_family(card_id)
     best = None
     for e in q.all():
         if e.id in used:
@@ -195,7 +196,7 @@ def find_existing(tx: BankTransaction, card_id: int | None) -> Expense | None:
         allowed = (CREDIT,) if credit else ('PIX', DEBIT)
         if e.payment_method not in allowed:
             continue  # cartão só com crédito; conta só com PIX/débito (dinheiro e VR/VA não saem do banco)
-        if card_id and e.card_id and e.card_id != card_id:
+        if siblings and e.card_id and e.card_id not in siblings:
             continue
         if n and n > 1 and e.installment_number and e.installment_number != n:
             continue
@@ -436,13 +437,73 @@ def valid_category(category: str | None, allowed: list[str]) -> str:
 
 # ── recomeçar pelo banco ─────────────────────────────────────────────────────
 
+def _norm(text: str | None) -> str:
+    import unicodedata
+    t = unicodedata.normalize('NFKD', text or '').encode('ascii', 'ignore').decode().lower()
+    return re.sub(r'[^a-z0-9 ]+', ' ', t).strip()
+
+
+def same_bank(a: str | None, b: str | None) -> bool:
+    """"Caixa" == "Caixa Econômica Federal"; "Nubank" == "nubank"."""
+    a, b = _norm(a), _norm(b)
+    return bool(a and b) and (a == b or a.startswith(b + ' ') or b.startswith(a + ' '))
+
+
+def card_family(card_id: int | None) -> set[int]:
+    """O cartão e os que dividem a mesma conta de crédito (virtual/adicional do mesmo banco)."""
+    if not card_id:
+        return set()
+    card = db.session.get(CreditCard, card_id)
+    if card is None:
+        return {card_id}
+    if not card.account_id:
+        return {card.id}
+    return {c.id for c in CreditCard.query.filter_by(account_id=card.account_id).all()} | {card.id}
+
+
+def coverage(user_id: int) -> tuple[set[int], list[str]]:
+    """O que os bancos conectados da pessoa trazem: (cartões cobertos, nomes dos bancos das contas)."""
+    cards: set[int] = set()
+    banks: list[str] = []
+    for conn in BankConnection.query.filter_by(user_id=user_id).all():
+        for acc in conn.accounts.all():
+            if acc.type == 'CREDIT' and acc.card_id:
+                cards |= card_family(acc.card_id)
+            elif acc.type == 'BANK':
+                banks += [n for n in (conn.display_name, conn.bank_name) if n]
+    return cards, banks
+
+
 def reset_candidates(user_id: int, date_from: date, today: date | None = None) -> list[Expense]:
-    """Despesas da pessoa que o banco cobre (PIX, débito, crédito) com data entre date_from e hoje.
-    Dinheiro, VR/VA e o que está no futuro (recorrências, parcelas a vencer) ficam."""
+    """Despesas da pessoa, entre date_from e hoje, que os bancos conectados vão trazer de volta:
+    crédito só nos cartões ligados (e virtuais/adicionais da mesma conta); PIX/débito só quando o
+    banco da despesa é um dos conectados. Todo o resto fica (dinheiro, VR/VA, cartões e bancos não
+    conectados, PIX sem banco, outras pessoas e o que está no futuro)."""
     today = today or date.today()
+    cards, banks = coverage(user_id)
     rows = (Expense.query.filter(Expense.user_id == user_id, Expense.payment_method.in_(BANK_PAYMENTS),
                                  Expense.year >= date_from.year - 1).all())
-    return [e for e in rows if date_from <= _expense_date(e) <= today]
+    out = []
+    for e in rows:
+        if not date_from <= _expense_date(e) <= today:
+            continue
+        if e.payment_method == CREDIT:
+            if e.card_id in cards:
+                out.append(e)
+        elif any(same_bank(e.bank, b) for b in banks):
+            out.append(e)
+    return out
+
+
+def coverage_labels(user_id: int) -> list[str]:
+    cards, banks = coverage(user_id)
+    labels = [f"Cartão {c.nickname or c.bank or ''} •••• {c.last_digits}".replace('  ', ' ')
+              for c in CreditCard.query.filter(CreditCard.id.in_(cards or {0})).all()]
+    seen = []
+    for b in banks:
+        if not any(same_bank(b, x) for x in seen):
+            seen.append(b)
+    return labels + [f'PIX/débito {b}' for b in seen]
 
 
 def reset_from(user_id: int, date_from: date) -> int:

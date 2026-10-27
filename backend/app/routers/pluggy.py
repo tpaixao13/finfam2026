@@ -290,7 +290,8 @@ def reset_preview(date_from: date, ctx: Ctx = Depends(get_ctx_session)):
     _enabled_tenant(ctx)
     rows = of.reset_candidates(ctx.user.id, _reset_date(date_from))
     return {'count': len(rows), 'total': round(sum(float(e.amount) for e in rows), 2),
-            'connections': BankConnection.query.filter_by(user_id=ctx.user.id).count()}
+            'connections': BankConnection.query.filter_by(user_id=ctx.user.id).count(),
+            'covers': of.coverage_labels(ctx.user.id)}
 
 
 @router.get('/reset/backup', summary='Backup (.xlsx) das despesas que seriam apagadas')

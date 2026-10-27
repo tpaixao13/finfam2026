@@ -63,9 +63,11 @@ pelo bot ou importando extrato, como antes.
   "Lançados" para corrigir. Duplicados e ignorados continuam fora. Compra pendente que o banco troca pela
   lançada (id novo) não é lançada duas vezes.
 - O webhook dispara a leitura em segundo plano (avisos em rajada viram uma leitura só).
-- **Recomeçar pelo banco**: apaga as despesas da pessoa de PIX, débito e crédito desde uma data (até 12 meses)
-  e reimporta do banco. Dinheiro, VR/VA, outras pessoas e o que está no futuro ficam. Exige baixar o
-  backup (.xlsx) e a senha.
+- **Recomeçar pelo banco**: apaga, desde uma data (até 12 meses), só o que os bancos conectados trazem de volta —
+  compras dos cartões ligados (e virtuais/adicionais da mesma conta) e PIX/débito cujo banco é um dos conectados —
+  e reimporta. Exige baixar o backup (.xlsx) e a senha. (A 1ª versão apagava todo PIX/débito/crédito: corrigido.)
+- `python -m scripts.restore_expenses BACKUP.db.gz --email ... --desde ... [--aplicar]`: devolve do backup do
+  Telegram as despesas apagadas que não voltaram pelo banco, com cartão, fatura, parcelas e "pago".
 - Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
 
 **Próximas etapas**

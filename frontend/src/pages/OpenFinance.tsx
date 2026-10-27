@@ -291,7 +291,7 @@ function ResetPanel({ onDone }: { onDone: () => void }) {
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const preview = useApi(() => open && dateFrom
-    ? api.get<{ count: number; total: number }>(`/pluggy/reset/preview?date_from=${dateFrom}`)
+    ? api.get<{ count: number; total: number; covers: string[] }>(`/pluggy/reset/preview?date_from=${dateFrom}`)
     : Promise.resolve(null), [open, dateFrom])
   const p = preview.data
   async function run(e: React.FormEvent) {
@@ -305,9 +305,9 @@ function ResetPanel({ onDone }: { onDone: () => void }) {
     <Panel title="Recomeçar pelo banco">
       {!open ? (
         <div className="stack-sm">
-          <p className="muted">Apaga as suas despesas de PIX, débito e crédito a partir de uma data e traz tudo de novo
-            dos bancos conectados. Dinheiro, VR/VA, as despesas das outras pessoas da família e o que está no futuro
-            (contas recorrentes, parcelas a vencer) ficam.</p>
+          <p className="muted">Apaga, a partir de uma data, as suas despesas que os bancos conectados trazem de volta
+            (compras dos cartões ligados e PIX/débito desses bancos) e importa tudo de novo do banco. Dinheiro, VR/VA,
+            outros cartões e bancos, as despesas das outras pessoas e o que está no futuro ficam.</p>
           <div><Button variant="ghost" icon="arrow-repeat" onClick={() => setOpen(true)}>Recomeçar pelo banco…</Button></div>
         </div>
       ) : (
@@ -316,7 +316,11 @@ function ResetPanel({ onDone }: { onDone: () => void }) {
             <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setBackup(false) }} required />
           </Field>
           {preview.error ? <p className="form-error" role="alert">{preview.error}</p> : !p ? <Spinner /> : (
-            <p><b>{p.count}</b> despesa(s) suas serão apagadas ({brl(p.total)}).</p>
+            <div className="stack-sm">
+              <p><b>{p.count}</b> despesa(s) suas serão apagadas ({brl(p.total)}) e trazidas de novo pelo banco.</p>
+              <p className="muted small">Só o que os bancos conectados trazem de volta: {p.covers.length ? p.covers.join(' · ')
+                : 'nada ainda — ligue os cartões e dê nome aos bancos'}. PIX sem banco, cartões e bancos não conectados ficam.</p>
+            </div>
           )}
           <div className="row gap">
             <Button type="button" variant="ghost" icon="download" disabled={!p}
