@@ -17,9 +17,11 @@ Diferenças para o script antigo:
 - token e chat vêm do .env (nada fixo no código) e respeitam INSECURE_EXTERNAL_SSL.
 """
 import gzip
+import http.client
 import json
 import os
 import shutil
+import socket
 import sqlite3
 import sys
 import tempfile
@@ -58,6 +60,37 @@ def snapshot(src: Path, folder: Path) -> Path:
     return gz
 
 
+CONNECT_TIMEOUT = 15  # para abrir a conexão; o envio do arquivo tem até 120 s
+
+
+class _IPv4FirstHTTPS(http.client.HTTPSConnection):
+    """Tenta IPv4 primeiro e desiste rápido de cada endereço. Num Raspberry com IPv6 sem rota,
+    a conexão padrão ficava minutos parada no endereço IPv6 do Telegram."""
+
+    def connect(self):
+        infos = socket.getaddrinfo(self.host, self.port, type=socket.SOCK_STREAM)
+        infos.sort(key=lambda info: info[0] != socket.AF_INET)
+        last: OSError | None = None
+        for family, kind, proto, _, addr in infos:
+            sock = socket.socket(family, kind, proto)
+            sock.settimeout(CONNECT_TIMEOUT)
+            try:
+                sock.connect(addr)
+            except OSError as exc:
+                sock.close()
+                last = exc
+                continue
+            sock.settimeout(self.timeout)
+            self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+            return
+        raise last or OSError(f'Sem endereço para {self.host}')
+
+
+class _IPv4FirstHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_IPv4FirstHTTPS, req, context=self._context)
+
+
 def send_document(token: str, chat_id: str, file: Path, caption: str) -> None:
     boundary = uuid.uuid4().hex
     head = ''.join(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'
@@ -67,8 +100,15 @@ def send_document(token: str, chat_id: str, file: Path, caption: str) -> None:
     body = head + file.read_bytes() + f'\r\n--{boundary}--\r\n'.encode()
     req = urllib.request.Request(f'https://api.telegram.org/bot{token}/sendDocument', data=body, method='POST',
                                  headers={'Content-Type': f'multipart/form-data; boundary={boundary}'})
-    with urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as resp:
-        result = json.loads(resp.read().decode())
+    opener = urllib.request.build_opener(_IPv4FirstHandler(context=_ssl_context()))
+    try:
+        with opener.open(req, timeout=120) as resp:
+            result = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:  # o Telegram explica o erro no corpo (ex.: chat not found)
+        try:
+            result = json.loads(exc.read().decode())
+        except ValueError:
+            raise RuntimeError(f'Telegram respondeu {exc.code}') from None
     if not result.get('ok'):
         raise RuntimeError(result.get('description', result))
 
