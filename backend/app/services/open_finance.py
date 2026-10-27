@@ -496,25 +496,42 @@ def _drop_vanished(acc: BankAccount, since: date, seen: set[str]) -> None:
     db.session.flush()
 
 
-def _rebill(acc: BankAccount, tx: BankTransaction, by_bill: bool) -> None:
-    """Despesa à vista já lançada fora da fatura que o banco diz: move para a fatura certa
-    (só se a descrição ainda é a do banco — se você editou, fica como está)."""
+def move_to_bill(e: Expense, bill: tuple[int, int]) -> bool:
+    """Põe a despesa do cartão na fatura (ano, mês) que o banco diz; numa série, as parcelas
+    seguintes andam junto (o banco pode pular um mês — ex.: fatura de junho zerada)."""
     from app.services.finance import month_offset
-    bill = tx_bill(acc, tx) if by_bill else None
-    tx.bill_year, tx.bill_month = bill if bill else (tx.bill_year, tx.bill_month)
-    e = db.session.get(Expense, tx.expense_id) if tx.expense_id else None
-    if not bill or e is None or e.payment_method != CREDIT or not e.description.startswith(tx.description[:40]):
-        return
     delta = (bill[0] * 12 + bill[1]) - (e.year * 12 + e.month)
-    if not delta:
-        return
+    if not delta or e.payment_method != CREDIT:
+        return False
     rows = [e]
-    if e.installment_group_id:  # parcela de uma série: as seguintes andam junto
+    if e.installment_group_id:
         rows = (Expense.query.filter(Expense.installment_group_id == e.installment_group_id,
                                      Expense.installment_number >= (e.installment_number or 0)).all())
     for row in rows:
         row.month, row.year = month_offset(row.month, row.year, delta)
         row.paid = False  # mudou de fatura: a conciliação diz de novo se essa fatura foi paga
+    return True
+
+
+def align_to_bank(acc: BankAccount) -> int:
+    """A fatura que o banco informa manda: cada compra do cartão já lançada (ou reconhecida como
+    já lançada) vai para a fatura dela, da mais antiga para a mais nova. Só banco de dados."""
+    if acc.type != 'CREDIT' or not ((acc.close_day and acc.due_day) or acc.bills.count()):
+        return 0
+    moved = 0
+    rows = (acc.transactions.filter(BankTransaction.status.in_(('imported', 'duplicate')),
+                                    BankTransaction.expense_id.isnot(None))
+            .order_by(BankTransaction.date, BankTransaction.installment_number).all())
+    for tx in rows:
+        bill = tx_bill(acc, tx)
+        if not bill:
+            continue
+        tx.bill_year, tx.bill_month = bill
+        e = db.session.get(Expense, tx.expense_id)
+        if e is not None and move_to_bill(e, bill):
+            moved += 1
+    db.session.flush()
+    return moved
 
 
 def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date | None = None) -> int:
@@ -545,8 +562,7 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
                 tx = BankTransaction(account_id=acc.id, user_id=conn.user_id, pluggy_id=pid, status='pending')
                 db.session.add(tx)
             elif tx.status == 'imported':
-                _apply_tx(tx, raw)
-                _rebill(acc, tx, by_bill)  # lançado antes de o FinFam saber a fatura certa
+                _apply_tx(tx, raw)  # a fatura é acertada no fim (align_to_bank)
                 continue
             elif tx.reviewed_at is not None:
                 continue  # você já mexeu: não reclassifica
@@ -575,6 +591,7 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
             elif fresh:
                 new_pending += 1
             db.session.flush()
+        align_to_bank(acc)  # lançado antes de o FinFam saber a fatura certa, ou série com mês pulado
     conn.tx_synced_at = utcnow()
     db.session.flush()
     return new_pending
@@ -721,9 +738,14 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
     from app.services.finance import month_offset
     acc, conn = tx.account, tx.account.connection
     credit = acc.type == 'CREDIT'
+    if credit and not (tx.bill_year and tx.bill_month):
+        bill = tx_bill(acc, tx)  # as faturas do banco podem ter chegado depois da classificação
+        tx.bill_year, tx.bill_month = bill if bill else (None, None)
     existing = find_existing(tx, acc.card_id)
     if existing is not None:
         tx.status, tx.expense_id, tx.reason, tx.reviewed_at = 'duplicate', existing.id, 'Já estava no FinFam.', utcnow()
+        if credit and tx.bill_year and tx.bill_month:
+            move_to_bill(existing, (tx.bill_year, tx.bill_month))
         return existing
     when = target_date(tx)
     desc = (description or tx.description).strip()[:200] or tx.description

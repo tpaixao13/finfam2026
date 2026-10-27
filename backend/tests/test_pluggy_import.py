@@ -570,3 +570,47 @@ def test_middle_installment_creates_rest_of_series(client, family, bank, txs):  
     assert [t['installment']['number'] for t in dup] == [8]
     assert Expense.query.filter(Expense.description.like('ANUIDADE%')).count() == 6
     session.remove()
+
+
+def test_series_follows_bank_bills_with_skipped_month(client, family, bank, txs, monkeypatch):  # noqa: F811
+    """Santander real: a fatura de junho veio zerada (sem parcela). CATIVA 4/10..9/10 cada uma com
+    o billId da sua fatura → a 10/10 cai depois da 9/10, não um mês antes."""
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    D = date(TODAY.year, TODAY.month, 12)
+    if D <= TODAY:
+        D = of.add_months(D, 1)          # vencimento da fatura em aberto
+    due = {k: of.add_months(D, -off) for k, off in ((4, 6), (5, 4), (6, 3), (7, 2), (8, 1))}  # D-5 (junho) zerada
+    bills = [{'id': f'b{k}', 'dueDate': f'{d.isoformat()}T03:00:00Z', 'totalAmount': 1597.76} for k, d in due.items()]
+    bills.append({'id': 'b-zero', 'dueDate': f'{of.add_months(D, -5).isoformat()}T03:00:00Z', 'totalAmount': 0})
+    inner = pg._http
+    monkeypatch.setattr(pg, '_http', lambda m, p, b=None, k=None: {'results': bills} if p.startswith('/bills?')
+                        else inner(m, p, b, k))
+    for k, d in due.items():
+        txs[cc].append({'id': f'c{k}', 'type': 'DEBIT', 'amount': 1597.76, 'date': f'{(d - timedelta(days=37)).isoformat()}T15:00:00Z',
+                        'description': 'CATIVA', 'creditCardMetadata': {'installmentNumber': k, 'totalInstallments': 10, 'billId': f'b{k}'}})
+    txs[cc].append({'id': 'c9', 'type': 'DEBIT', 'amount': 1597.76, 'date': f'{(D - timedelta(days=37)).isoformat()}T15:00:00Z',
+                    'description': 'CATIVA', 'status': 'PENDING', 'creditCardMetadata': {'installmentNumber': 9, 'totalInstallments': 10}})
+    _post_item(family, months=12)
+    pend = family.get('/pluggy/transactions').json()['items']
+    assert len(pend) == 6
+    r = family.post('/pluggy/transactions/approve', json={'items': [{'id': t['id'], 'category': 'Outros'} for t in pend]})
+    assert r.json()['imported'] == 1 and r.json()['already'] == 5  # a 4/10 cria a série; as outras já estavam
+    got = {e.installment_number: (e.year, e.month) for e in Expense.query.filter(Expense.description == 'CATIVA').all()}
+    want = {k: (d.year, d.month) for k, d in due.items()}
+    want[9] = (D.year, D.month)
+    nd = of.add_months(D, 1)
+    want[10] = (nd.year, nd.month)
+    assert got == want
+    session.remove()
+
+    # série que já estava lançada errada (mês a mês, sem o mês pulado): a próxima leitura acerta
+    for e in Expense.query.filter(Expense.description == 'CATIVA').all():
+        base = of.add_months(due[4], e.installment_number - 4)
+        e.year, e.month = base.year, base.month
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    session.remove()
+    family.get('/pluggy/items')
+    got = {e.installment_number: (e.year, e.month) for e in Expense.query.filter(Expense.description == 'CATIVA').all()}
+    assert got == want
+    session.remove()

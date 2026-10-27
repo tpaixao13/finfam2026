@@ -92,6 +92,10 @@ pelo bot ou importando extrato, como antes.
 - Parcela do meio (k/n) lançada cria também k+1..n nas faturas seguintes (como compra parcelada lançada à
   mão); as parcelas que o banco lançar depois — ou outras do mesmo lote — viram "já no FinFam". Mudar de
   fatura uma parcela de série leva as seguintes junto.
+- A fatura que o banco informa manda (align_to_bank): a cada leitura, toda compra do cartão lançada ou
+  reconhecida vai para a fatura do seu billId, da mais antiga para a mais nova, e as parcelas seguintes
+  da série se ajustam — o banco pode pular um mês (ex.: fatura de junho zerada no Santander). Lançar
+  calcula a fatura na hora se as faturas do banco chegaram depois da classificação.
 - Boleto que tem o total de uma fatura do banco (vencimento até 10 dias) é o pagamento dela: conciliado,
   não vira despesa (ex.: boleto de R$ 17,25 da fatura só com a anuidade).
 - Sugestões: conta → PIX (boleto, débito automático, transferência) e Cartão de Débito só para compra no
