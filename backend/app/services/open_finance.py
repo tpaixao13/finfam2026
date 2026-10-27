@@ -594,7 +594,29 @@ def reconcile_payments(user_id: int) -> int:
         tx.status, tx.expense_id, tx.reviewed_at = 'ignored', None, None
         tx.reason, n = why + ' A despesa lançada antes foi removida (era pagamento de fatura).', n + 1
     db.session.flush()
+    settle_paid_bills(uids)
     return n
+
+
+def settle_paid_bills(uids: list) -> int:
+    """Estorno lançado numa fatura que já venceu e foi paga (ex.: estorno de agosto aprovado agora):
+    não fica "vencido" — se todas as compras dessa fatura estão pagas, o estorno também. Devolve quantos."""
+    from app.services.serializers import expense_due_date
+    today = date.today()
+    open_refunds = Expense.query.filter(Expense.user_id.in_(uids or [0]), Expense.payment_method == CREDIT,
+                                        Expense.card_id.isnot(None), Expense.paid.is_(False), Expense.amount < 0).all()
+    done, seen = 0, {}
+    for e in open_refunds:
+        cards = frozenset(card_family(e.card_id))
+        key = (cards, e.year, e.month)
+        if key not in seen:
+            buys = Expense.query.filter(Expense.card_id.in_(cards), Expense.payment_method == CREDIT,
+                                        Expense.year == e.year, Expense.month == e.month, Expense.amount > 0).all()
+            seen[key] = bool(buys) and all(b.paid for b in buys) and expense_due_date(e) <= today
+        if seen[key]:
+            e.paid, done = True, done + 1
+    db.session.flush()
+    return done
 
 
 def _skip_reason(description: str, category: str | None) -> str | None:

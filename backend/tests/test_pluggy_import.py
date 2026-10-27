@@ -951,3 +951,22 @@ def test_category_rules_learn_and_count(client, family, bank, txs):  # noqa: F81
     assert r['created'] >= 1
     assert any(x['keyword'] == 'PADARIA' and x['category'] == 'Alimentação' for x in family.get('/rules').json())
     session.remove()
+
+
+def test_refund_in_paid_bill_is_not_overdue(client, family, bank, txs):  # noqa: F811
+    """Estorno aprovado numa fatura já vencida e paga entra como pago (não "Vencida")."""
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    past = of.add_months(date(TODAY.year, TODAY.month, 1), -2)
+    txs[cc] += [{'id': 'buy', 'type': 'DEBIT', 'amount': 50.0, 'date': f'{past.isoformat()}T15:00:00Z', 'description': 'TARIFA ANUIDADE'},
+                {'id': 'ref', 'type': 'CREDIT', 'amount': -50.0, 'date': f'{past.isoformat()}T15:00:00Z',
+                 'description': 'Estorno Tarifa Anuidade'}]
+    _post_item(family, months=3)
+    items = {t['description']: t for t in family.get('/pluggy/transactions').json()['items']}
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': items['TARIFA ANUIDADE']['id'], 'category': 'Outros'}]})
+    buy = Expense.query.filter_by(description='TARIFA ANUIDADE').one()
+    buy.paid = True                       # a fatura foi paga
+    session.commit()
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': items['Estorno Tarifa Anuidade']['id'], 'category': 'Outros'}]})
+    ref = Expense.query.filter(Expense.amount < 0).one()
+    assert (ref.year, ref.month) == (buy.year, buy.month) and ref.paid is True
+    session.remove()
