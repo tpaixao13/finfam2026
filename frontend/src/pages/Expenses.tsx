@@ -4,7 +4,7 @@ import { Button, Empty, ErrorBox, Field, IconButton, Input, Money, PageHeader, P
 import { api } from '../lib/api'
 import { brl, MONTHS } from '../lib/format'
 import { useApi } from '../lib/hooks'
-import { useSearchParams } from '../lib/router'
+import { Link, useSearchParams } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
 import type { Expense } from '../lib/types'
 
@@ -43,6 +43,7 @@ export function ExpensesPage() {
   const setFilter = (k: string, v: string) => setParams({ [k]: v || null, page: null })
   const toggle = (id: number) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const data = list.data
+  const late = (data?.items ?? []).filter((e) => e.status === 'vencida')
 
   return (
     <div className="page">
@@ -86,6 +87,14 @@ export function ExpensesPage() {
         </button>
       </Panel>
 
+      {selected.size === 0 && late.length > 0 && (
+        <p className="small muted">
+          <button type="button" className="link-btn" onClick={() => setSelected(new Set(late.map((e) => e.id)))}>
+            Selecionar as {late.length} vencida(s) desta página
+          </button>
+          {' '}· todas as atrasadas de uma vez: <Link to="/bills">Contas a pagar › Pagar todas</Link>
+        </p>
+      )}
       {selected.size > 0 && (
         <div className="bulk-bar">
           <span>{selected.size} selecionada(s)</span>
