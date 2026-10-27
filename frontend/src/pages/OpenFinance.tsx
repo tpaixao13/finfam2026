@@ -322,6 +322,7 @@ interface CheckItem { id: number; description: string; amount: number; date: str
 interface CheckRow {
   account_id: number; label: string; linked: boolean; bank_total: number | null; bank_source: 'fatura' | 'lancamentos' | 'sem_fatura'
   finfam_total: number | null; diff: number | null; due_date: string | null
+  bank_items_total: number; items_match: boolean
   only_bank: CheckItem[]; only_finfam: CheckItem[]
 }
 
@@ -354,13 +355,16 @@ function InvoiceCheck() {
         <ul className="check-rows">
           {data.data.cards.map((c) => {
             const ok = c.diff !== null && Math.abs(c.diff) < 0.01
+            const adjust = !ok && c.diff !== null && c.items_match  // compras batem; o total do banco tem crédito/ajuste
             return (
               <li key={c.account_id}>
                 <div className="check-head">
                   <b>{c.label}</b>
                   {!c.linked ? <Badge tone="warning">ligue a um cartão do FinFam</Badge>
                     : c.bank_source === 'sem_fatura' ? <Badge tone="info">banco não informa a fatura</Badge>
-                      : ok ? <Badge tone="success">bate</Badge> : <Badge tone="danger">diferença {brl(c.diff)}</Badge>}
+                      : ok ? <Badge tone="success">bate</Badge>
+                        : adjust ? <Badge tone="success">compras batem</Badge>
+                          : <Badge tone="danger">diferença {brl(c.diff)}</Badge>}
                 </div>
                 <div className="muted small">
                   {c.bank_total === null ? 'O banco não diz em que fatura cada compra está'
@@ -368,6 +372,13 @@ function InvoiceCheck() {
                   {c.finfam_total !== null && <> · FinFam {brl(c.finfam_total)}</>}
                   {c.due_date && <> · vence {dayMonth(c.due_date)}</>}
                 </div>
+                {adjust && (
+                  <div className="small">
+                    As compras que o banco mandou para esta fatura somam {brl(c.bank_items_total)}, igual ao FinFam.
+                    O total que o banco cobra é {brl(Math.abs(c.diff!))} {c.diff! > 0 ? 'menor' : 'maior'}: é crédito ou ajuste
+                    da fatura (ex.: pagamento a mais no mês anterior), não compra faltando.
+                  </div>
+                )}
                 {(c.only_bank.length > 0 || c.only_finfam.length > 0) && (
                   open === c.account_id ? (
                     <div className="stack-sm">
@@ -386,7 +397,7 @@ function InvoiceCheck() {
         </ul>
       )}
       <p className="muted small">"Fatura do banco" é o total que o banco informa; sem ele, soma os lançamentos que já chegaram.
-        Estornos e créditos na fatura não entram no FinFam, então o banco pode ficar menor.</p>
+        "Compras batem" quer dizer que cada compra do banco está no FinFam e só o total do banco tem um crédito ou ajuste à parte.</p>
     </Panel>
   )
 }

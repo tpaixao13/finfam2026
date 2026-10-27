@@ -189,5 +189,6 @@ def bank_text(summary: dict, check: dict, site_url: str = '') -> str:
         for r in rows_:
             ok = abs(r['diff']) < 0.01
             lines.append(f"• {h(r['label'])}: banco {brl(r['bank_total'])} · FinFam {brl(r['finfam_total'])} "
-                         + ('✅' if ok else f"— diferença {brl(r['diff'])}"))
+                         + ('✅' if ok else f"— compras batem ✅ (o banco desconta {brl(-r['diff'])} de crédito/ajuste)"
+                            if r.get('items_match') else f"— diferença {brl(r['diff'])}"))
     return '\n'.join(lines)

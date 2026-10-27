@@ -970,3 +970,24 @@ def test_refund_in_paid_bill_is_not_overdue(client, family, bank, txs):  # noqa:
     ref = Expense.query.filter(Expense.amount < 0).one()
     assert (ref.year, ref.month) == (buy.year, buy.month) and ref.paid is True
     session.remove()
+
+
+def test_invoice_check_items_match_when_bank_total_has_credit(client, family, bank, txs, monkeypatch):  # noqa: F811
+    """C6 out/26: o total da fatura do banco é R$ 42,49 menor que a soma das compras dela (crédito)."""
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    due = TODAY - timedelta(days=5)
+    monkeypatch.setattr(pg, '_http', (lambda inner: lambda m, p, b=None, k=None: {'results': [
+        {'id': 'b-oct', 'dueDate': f'{due.isoformat()}T03:00:00Z', 'totalAmount': 57.51}]}
+        if p.startswith('/bills?') else inner(m, p, b, k))(pg._http))
+    buy = (due - timedelta(days=20)).isoformat()
+    txs[cc] += [{'id': 'p1', 'type': 'DEBIT', 'amount': 57.51, 'date': f'{buy}T15:00:00Z', 'description': 'LOJA A',
+                 'creditCardMetadata': {'billId': 'b-oct'}},
+                {'id': 'p2', 'type': 'DEBIT', 'amount': 42.49, 'date': f'{buy}T16:00:00Z', 'description': '99FOOD',
+                 'creditCardMetadata': {'billId': 'b-oct'}}]
+    _post_item(family, months=3)
+    ids = [t['id'] for t in family.get('/pluggy/transactions').json()['items']]
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': i, 'category': 'Outros'} for i in ids]})
+    [row] = [r for r in family.get(f'/pluggy/invoice-check?month={due.month}&year={due.year}').json()['cards']
+             if r['bank_source'] == 'fatura']
+    assert (row['diff'], row['items_match'], row['bank_items_total']) == (42.49, True, 100.0)
+    session.remove()

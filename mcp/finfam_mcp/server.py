@@ -328,7 +328,9 @@ def conferir_fatura_com_banco(mes: int | None = None, ano: int | None = None) ->
         if not c['linked']:
             lines.append(f"• {c['label']}: banco {brl(c['bank_total'])} ({src}) — cartão não ligado a um cartão do FinFam")
             continue
-        status = 'bate ✅' if abs(c['diff']) < 0.01 else f"diferença {brl(c['diff'])}"
+        status = ('bate ✅' if abs(c['diff']) < 0.01 else
+                  f"compras batem ✅; o total do banco tem {brl(-c['diff'])} de crédito/ajuste" if c.get('items_match')
+                  else f"diferença {brl(c['diff'])}")
         lines.append(f"• {c['label']}: banco {brl(c['bank_total'])} ({src}) · FinFam {brl(c['finfam_total'])} — {status}")
         for i in c['only_bank'][:10]:
             lines.append(f"   só no banco (para revisar): {dm(i['date'])} {i['description']} {brl(i['amount'])}")

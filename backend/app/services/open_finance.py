@@ -1183,7 +1183,7 @@ def invoice_check(user_id: int, month: int, year: int) -> list[dict]:
             bank_total, source = None, 'sem_fatura'
         row = {'account_id': acc.id, 'label': label, 'linked': bool(acc.card_id), 'bank_total': bank_total,
                'bank_source': source, 'bank_items_total': items_total, 'finfam_total': None, 'diff': None,
-               'only_bank': [], 'only_finfam': [],
+               'only_bank': [], 'only_finfam': [], 'items_match': False,
                'due_date': bill.due_date.isoformat() if bill is not None else None}
         if acc.card_id:
             cards = card_family(acc.card_id)
@@ -1193,6 +1193,9 @@ def invoice_check(user_id: int, month: int, year: int) -> list[dict]:
                       .filter(BankTransaction.expense_id.in_([e.id for e in exps] or [0])).all()}
             row['finfam_total'] = round(sum(float(e.amount) for e in exps), 2)
             row['diff'] = round(row['finfam_total'] - bank_total, 2) if bank_total is not None else None
+            # o total da fatura difere, mas as compras que o banco mandou para ela batem: é crédito/ajuste
+            # do banco no total (ex.: pagamento a mais na fatura anterior), não compra faltando
+            row['items_match'] = abs(row['finfam_total'] - items_total) < 0.01
             row['only_finfam'] = [{'id': e.id, 'description': e.description, 'amount': float(e.amount),
                                    'date': _expense_date(e).isoformat(), 'installment': e.installment_number}
                                   for e in exps if e.id not in linked]
