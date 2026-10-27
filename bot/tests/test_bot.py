@@ -308,6 +308,13 @@ class StubApi:
             return {'month': 11, 'year': 2026, 'cards': [
                 {'label': 'C6 Bank •••• 0982', 'linked': True, 'bank_total': 7264.41, 'finfam_total': 5865.6, 'diff': -1398.81},
                 {'label': 'Santander •••• 0676', 'linked': True, 'bank_total': 1597.76, 'finfam_total': 1597.76, 'diff': 0}]}
+        if path == '/pluggy/balances':
+            return {'enabled': True, 'total': 1832.44, 'items': [{'bank': 'C6 Bank', 'last_digits': '5665', 'balance': 1832.44}]}
+        if path == '/pluggy/investments':
+            return {'enabled': True, 'total': 3839.92, 'items': [
+                {'name': 'CDB - BANCO C6 S.A.', 'bank': 'C6 Bank', 'balance': 3839.92, 'currency': 'BRL'}]}
+        if path == '/investments':
+            return {'fixed': [], 'crypto': [], 'fixed_total': 0, 'crypto_total': 0}
         assert path == '/settings/ai', path
         return {'configured': self.ai[0], 'enabled': self.ai[1], 'provider': 'gemini', 'model': None,
                 'providers': [{'id': 'gemini', 'label': 'Gemini (Google)', 'default_model': 'gemini-flash-lite-latest'}]}
@@ -469,5 +476,10 @@ def test_bank_question_without_ai():
     assert 'Santander •••• 0676: banco R$ 1.597,76 · FinFam R$ 1.597,76 ✅' in text
     b.handle(_msg(90, '/banco'))
     assert '2 para revisar' in tg.last['text']
+    b.handle(_msg(90, '/openfinance'))
+    assert 'Saldo nas contas</b>: R$ 1.832,44' in tg.last['text'] and 'C6 Bank •••• 5665' in tg.last['text']
+    assert 'Investimentos nos bancos</b>: R$ 3.839,92' in tg.last['text']
+    b.handle(_msg(90, '/carteira'))
+    assert 'Total investido</b>: R$ 3.839,92' in tg.last['text'] and 'CDB - BANCO C6 S.A. (C6 Bank)' in tg.last['text']
     b.handle(_msg(91, 'almoço 25 no banco'))  # gasto com valor segue para o lançamento
     assert 'Bancos conectados' not in tg.last['text']

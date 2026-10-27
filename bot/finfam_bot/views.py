@@ -10,7 +10,7 @@ HELP = ('<b>O que eu faço</b>\n'
         '/lancar — lançar um gasto passo a passo\n'
         '/investir — registrar um investimento (real, dólar, euro…)\n'
         '/carteira — seus investimentos em reais\n'
-        '/banco — o que chegou dos bancos conectados e se a fatura bate\n'
+        '/banco ou /openfinance — bancos conectados: o que chegou, saldo, investimentos e se a fatura bate\n'
         '/cancelar — cancela o lançamento em andamento\n'
         '/desconectar — desliga este Telegram da sua conta\n\n'
         'Com a IA configurada no site, é só escrever, por exemplo:\n'
@@ -87,8 +87,13 @@ def summary_text(d: dict) -> str:
     return '\n'.join(lines)
 
 
-def portfolio_text(d: dict) -> str:
-    lines = [f'💼 <b>Carteira</b>: {brl(d["fixed_total"])}']
+def portfolio_text(d: dict, bank: dict | None = None) -> str:
+    in_bank = [i for i in (bank or {}).get('items', []) if i.get('currency', 'BRL') == 'BRL']
+    bank_total = sum(i['balance'] for i in in_bank)
+    lines = []
+    if in_bank:
+        lines.append(f'💰 <b>Total investido</b>: {brl(d["fixed_total"] + d.get("crypto_total", 0) + bank_total)}')
+    lines.append(f'💼 <b>Carteira</b>: {brl(d["fixed_total"])}')
     if d.get('fx_gain_total'):
         lines.append(f'Câmbio: {"+" if d["fx_gain_total"] >= 0 else ""}{brl(d["fx_gain_total"])}')
     if d.get('crypto'):
@@ -101,7 +106,10 @@ def portfolio_text(d: dict) -> str:
         lines.append(f'• {label}: {brl(i.get("value_brl", i["amount"]))}{extra}')
     for i in d.get('crypto', [])[:10]:
         lines.append(f'• {h(i["crypto_coin"])}: {brl(i["amount"])} aplicado')
-    if not d['fixed'] and not d.get('crypto'):
+    if in_bank:
+        lines += ['', f'🏦 <b>Nos bancos</b> (saldo do banco): {brl(bank_total)}']
+        lines += [f'• {h(i["name"])} ({h(i["bank"])}): {brl(i["balance"])}' for i in in_bank[:15]]
+    elif not d['fixed'] and not d.get('crypto'):
         lines.append('Nenhum investimento ainda. Use /investir.')
     return '\n'.join(lines)
 
@@ -162,7 +170,8 @@ def invoices_text(r: dict, bank: str | None = None) -> str:
     return '\n'.join(lines)
 
 
-def bank_text(summary: dict, check: dict, site_url: str = '') -> str:
+def bank_text(summary: dict, check: dict, site_url: str = '', balances: dict | None = None,
+              investments: dict | None = None) -> str:
     """Bancos conectados: situação, o que falta revisar e se a fatura do mês bate com o banco."""
     c = summary['counts']
     banks = summary['banks']
@@ -191,4 +200,11 @@ def bank_text(summary: dict, check: dict, site_url: str = '') -> str:
             lines.append(f"• {h(r['label'])}: banco {brl(r['bank_total'])} · FinFam {brl(r['finfam_total'])} "
                          + ('✅' if ok else f"— compras batem ✅ (o banco desconta {brl(-r['diff'])} de crédito/ajuste)"
                             if r.get('items_match') else f"— diferença {brl(r['diff'])}"))
+    accounts = (balances or {}).get('items') or []
+    if accounts:
+        lines += ['', f"💵 <b>Saldo nas contas</b>: {brl(balances['total'])}"]
+        lines += [f"• {h(a['bank'])}{' •••• ' + h(a['last_digits']) if a.get('last_digits') else ''}: {brl(a['balance'])}"
+                  for a in accounts]
+    if (investments or {}).get('items'):
+        lines += ['', f"📈 <b>Investimentos nos bancos</b>: {brl(investments['total'])} ({len(investments['items'])}) · detalhes em /carteira"]
     return '\n'.join(lines)

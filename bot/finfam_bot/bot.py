@@ -110,6 +110,7 @@ class Bot:
                     '/investir': lambda: self.linked(chat_id) and self.invest.start(chat_id),
                     '/carteira': lambda: self.portfolio(chat_id),
                     '/banco': lambda: self.bank(chat_id),
+                    '/openfinance': lambda: self.bank(chat_id), '/open_finance': lambda: self.bank(chat_id),
                     '/desconectar': lambda: self.unlink(chat_id)}
         if command in handlers:
             handlers[command]()
@@ -188,7 +189,17 @@ class Bot:
                 raise
             self.tg.send(chat_id, '🏦 O Open Finance (bancos conectados) não está liberado para a sua família.')
             return
-        self.tg.send(chat_id, bank_text(summary, check, self.site_url))
+        self.tg.send(chat_id, bank_text(summary, check, self.site_url, self.optional(chat_id, '/pluggy/balances'),
+                                        self.optional(chat_id, '/pluggy/investments')))
+
+    def optional(self, chat_id: int, path: str) -> dict | None:
+        """Complemento que pode faltar (Open Finance desligado, API antiga): sem ele, a resposta segue."""
+        try:
+            return self.api.get(chat_id, path)
+        except ApiError as exc:
+            if exc.code == 'telegram_not_linked':
+                raise
+            return None
 
     def bills(self, chat_id: int, message_id: int | None = None, days: int = 7) -> None:
         text, markup = bills_view(self.api.get(chat_id, '/expenses/bills', days_ahead=days), days)
@@ -201,7 +212,8 @@ class Bot:
         self.tg.send(chat_id, summary_text(self.api.get(chat_id, '/dashboard')))
 
     def portfolio(self, chat_id: int) -> None:
-        self.tg.send(chat_id, portfolio_text(self.api.get(chat_id, '/investments')))
+        self.tg.send(chat_id, portfolio_text(self.api.get(chat_id, '/investments'),
+                                             self.optional(chat_id, '/pluggy/investments')))
 
     # texto livre com IA ──────────────────────────────────────────────────────
     def ai_status(self, chat_id: int) -> dict:
