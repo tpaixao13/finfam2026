@@ -109,14 +109,31 @@ export function ReviewImportsPage() {
   const edit = (id: number, d: Partial<Draft>) => setDrafts((s) => ({ ...s, [id]: { ...s[id], ...d } }))
   const run = async (fn: () => Promise<{ message: string }>) => { setBusy(true); await act(fn, data.reload); setBusy(false) }
 
-  const approve = () => run(() => api.post('/pluggy/transactions/approve', {
-    items: picked.map((t) => {
+  const [progress, setProgress] = useState('')
+  // em lotes de 100 (o servidor aceita até 200 por vez), dos mais antigos para os mais novos:
+  // a parcela mais antiga cria a série e as seguintes, em outro lote, são reconhecidas
+  const approve = () => run(async () => {
+    const items = [...picked].sort((a, b) => a.date.localeCompare(b.date)).map((t) => {
       const d = drafts[t.id]
       return { id: t.id, category: d.category.trim() || 'Outros', description: d.description.trim() || t.description,
         ...(t.account_type === 'BANK' ? { payment_method: d.payment_method } : {}) }
-    }),
-  }))
-  const ignore = () => run(() => api.post('/pluggy/transactions/ignore', { ids: picked.map((t) => t.id) }))
+    })
+    let imported = 0, already = 0
+    try {
+      for (let i = 0; i < items.length; i += 100) {
+        setProgress(`${Math.min(i + 100, items.length)}/${items.length}`)
+        const r = await api.post<{ imported: number; already?: number }>('/pluggy/transactions/approve', { items: items.slice(i, i + 100) })
+        imported += r.imported
+        already += r.already ?? 0
+      }
+    } finally { setProgress('') }
+    return { message: `${imported} despesa(s) lançada(s) no FinFam.` + (already ? ` ${already} já estava(m) no FinFam.` : '') }
+  })
+  const ignore = () => run(async () => {
+    const ids = picked.map((t) => t.id)
+    for (let i = 0; i < ids.length; i += 400) await api.post('/pluggy/transactions/ignore', { ids: ids.slice(i, i + 400) })
+    return { message: `${ids.length} lançamento(s) ignorado(s).` }
+  })
   const restore = (id: number) => run(() => api.post('/pluggy/transactions/restore', { ids: [id] }))
   const total = picked.reduce((s, t) => s + t.amount, 0)
 
@@ -141,7 +158,7 @@ export function ReviewImportsPage() {
             </label>
             <div className="row gap">
               <Button variant="ghost" icon="x" disabled={!picked.length || busy} onClick={ignore}>Ignorar</Button>
-              <Button icon="check2" busy={busy} disabled={!picked.length} onClick={approve}>Lançar {picked.length || ''}</Button>
+              <Button icon="check2" busy={busy} disabled={!picked.length} onClick={approve}>{progress ? `Lançando ${progress}…` : `Lançar ${picked.length || ''}`}</Button>
             </div>
           </div>
           <datalist id="review-cats">{list.categories.map((c) => <option key={c} value={c} />)}</datalist>
