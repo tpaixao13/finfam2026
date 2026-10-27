@@ -7,6 +7,7 @@ Módulos: `fmt` (texto/botões), `parsers` (valores e frases), `views` (resposta
 `flow` + `expense_flow` + `invest_flow` (passo a passo).
 """
 import logging
+import re
 import secrets
 import time
 from datetime import date
@@ -18,8 +19,18 @@ from finfam_bot.fmt import btn, dm, h
 from finfam_bot.http import ApiError, FinFam, Telegram
 from finfam_bot.invest_flow import InvestFlow
 from finfam_bot.parsers import parse_amount, parse_date, quick_parse  # noqa: F401  (usados pelos testes)
-from finfam_bot.views import (HELP, bills_view, draft_text, invoices_text, portfolio_text, purchases_text,
+from finfam_bot.views import (HELP, bank_text, bills_view, draft_text, invoices_text, portfolio_text, purchases_text,
                               spending_text, summary_text)
+
+# perguntas sobre os bancos conectados — respondidas sem IA
+BANK_QUESTION = re.compile(
+    r'(chegou|veio|vieram|tem|novidade|novo|import|revis|confer|bate|batendo|sincroniz|atualiz)\w*\b.{0,40}'
+    r'\b(banco|bancos|importad\w*|open ?finance|pluggy|extrato do banco)\b'
+    r'|\b(banco|bancos)\b.{0,30}\b(chegou|importou|revisar|bate|atualizou|sincronizou)\b'
+    r'|^\s*(banco|bancos|importados)\s*\??\s*$'
+    r'|\bfatura\b.{0,40}\bbate\b.{0,30}\bbanco\b|\bpara revisar\b'
+    r'|\b(falta|faltam|pendente\w*)\b.{0,20}\brevis', re.I)
+_AMOUNT = re.compile(r'(?<![a-z])\d+(?:[.,]\d{1,2})?\b', re.I)  # valor solto ("25"), não o 6 de "C6"
 
 log = logging.getLogger('finfam.bot')
 
@@ -98,6 +109,7 @@ class Bot:
                     '/cancelar': lambda: self.cancel(chat_id),
                     '/investir': lambda: self.linked(chat_id) and self.invest.start(chat_id),
                     '/carteira': lambda: self.portfolio(chat_id),
+                    '/banco': lambda: self.bank(chat_id),
                     '/desconectar': lambda: self.unlink(chat_id)}
         if command in handlers:
             handlers[command]()
@@ -166,6 +178,18 @@ class Bot:
     def cancel(self, chat_id: int) -> None:
         self.tg.send(chat_id, 'Lançamento cancelado.' if self.flows.pop(chat_id, None) else 'Nada em andamento.')
 
+    def bank(self, chat_id: int) -> None:
+        """Bancos conectados (Open Finance): o que chegou, o que falta revisar e se a fatura bate."""
+        try:
+            summary = self.api.get(chat_id, '/pluggy/summary', status='pending', limit=20)
+            check = self.api.get(chat_id, '/pluggy/invoice-check')
+        except ApiError as exc:
+            if exc.status != 403 or exc.code == 'telegram_not_linked':
+                raise
+            self.tg.send(chat_id, '🏦 O Open Finance (bancos conectados) não está liberado para a sua família.')
+            return
+        self.tg.send(chat_id, bank_text(summary, check, self.site_url))
+
     def bills(self, chat_id: int, message_id: int | None = None, days: int = 7) -> None:
         text, markup = bills_view(self.api.get(chat_id, '/expenses/bills', days_ahead=days), days)
         if message_id:
@@ -200,6 +224,9 @@ class Bot:
                 '• <b>Sem IA:</b> use /lancar, ou escreva no formato simples: <b>almoço 25 no pix</b>.')
 
     def free_text(self, chat_id: int, text: str) -> None:
+        if BANK_QUESTION.search(text) and not _AMOUNT.search(text):  # "chegou algo do banco?" (com ou sem IA)
+            self.bank(chat_id)
+            return
         status = self.ai_status(chat_id)
         if not status['on']:  # verifica antes: sem IA, só o formato simples
             if not self.quick_flow(chat_id, text):

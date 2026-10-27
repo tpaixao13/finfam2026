@@ -9,7 +9,7 @@ from finfam_bot.config import Config
 from finfam_bot.http import FinFam, Telegram
 
 COMMANDS = [('contas', 'Contas a pagar'), ('resumo', 'Resumo do mês'), ('lancar', 'Lançar um gasto'), ('investir', 'Registrar um investimento'),
-            ('carteira', 'Seus investimentos'),
+            ('carteira', 'Seus investimentos'), ('banco', 'O que chegou dos bancos conectados'),
             ('cancelar', 'Cancelar o lançamento em andamento'), ('ajuda', 'O que o bot faz'),
             ('desconectar', 'Desligar este Telegram da conta')]
 

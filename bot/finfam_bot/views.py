@@ -10,13 +10,14 @@ HELP = ('<b>O que eu faço</b>\n'
         '/lancar — lançar um gasto passo a passo\n'
         '/investir — registrar um investimento (real, dólar, euro…)\n'
         '/carteira — seus investimentos em reais\n'
+        '/banco — o que chegou dos bancos conectados e se a fatura bate\n'
         '/cancelar — cancela o lançamento em andamento\n'
         '/desconectar — desliga este Telegram da sua conta\n\n'
         'Com a IA configurada no site, é só escrever, por exemplo:\n'
         '<i>gastei 87,50 no mercado no cartão Inter em 3x</i>\n'
         '<i>quanto gastei de alimentação este mês?</i>\n'
         '<i>o que comprei dia 20/10?</i> · <i>contas dos próximos 5 dias</i>\n'
-        '<i>qual o valor da fatura do cartão de novembro?</i>')
+        '<i>qual o valor da fatura do cartão de novembro?</i> · <i>chegou algo do banco?</i>')
 
 
 def draft_text(d: dict, title: str = 'Confere o lançamento?') -> str:
@@ -158,4 +159,35 @@ def invoices_text(r: dict, bank: str | None = None) -> str:
         due = f' · vence {dm(i["due_date"])}' if i.get('due_date') else ''
         status = '✅ paga' if i['status'] == 'paga' else '⏳ aberta'
         lines.append(f'• {h(i["label"])}: {brl(i["total"])}{due} · {status}')
+    return '\n'.join(lines)
+
+
+def bank_text(summary: dict, check: dict, site_url: str = '') -> str:
+    """Bancos conectados: situação, o que falta revisar e se a fatura do mês bate com o banco."""
+    c = summary['counts']
+    banks = summary['banks']
+    if not banks:
+        return '🏦 Nenhum banco conectado. Conecte em <b>Contas conectadas</b> no site.'
+    lines = ['🏦 <b>Bancos conectados</b>']
+    for b in banks:
+        when = dm(b['last_updated_at'][:10]) if b.get('last_updated_at') else '—'
+        lines.append(f"• {h(b['name'])} — atualizado em {when}{' · lança sozinho' if b.get('auto_import') else ''}")
+    lines.append('')
+    if c['pending']:
+        total = sum(i['amount'] for i in summary['items'])
+        lines.append(f"📝 <b>{c['pending']} para revisar</b> ({brl(total)}):")
+        lines += [f"• {dm(i['date'])} {h(i['description'][:35])} — {brl(i['amount'])}" for i in summary['items'][:8]]
+        if c['pending'] > 8:
+            lines.append(f"… e mais {c['pending'] - 8}.")
+        if site_url:
+            lines.append(f'Revise em {site_url}/bank/review')
+    else:
+        lines.append('✅ Nada para revisar.')
+    rows_ = [r for r in check.get('cards', []) if r.get('linked') and r.get('bank_total') is not None]
+    if rows_:
+        lines += ['', f"💳 <b>Faturas de {check['month']:02d}/{check['year']}</b> (banco × FinFam)"]
+        for r in rows_:
+            ok = abs(r['diff']) < 0.01
+            lines.append(f"• {h(r['label'])}: banco {brl(r['bank_total'])} · FinFam {brl(r['finfam_total'])} "
+                         + ('✅' if ok else f"— diferença {brl(r['diff'])}"))
     return '\n'.join(lines)

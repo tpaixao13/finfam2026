@@ -120,6 +120,8 @@ pelo bot ou importando extrato, como antes.
 - Aviso no Telegram (bot central) quando uma leitura sozinha (webhook ou cron) traz lançamentos: quantos
   foram lançados automaticamente e quais estão para revisar, com o link. Liga/desliga por pessoa
   (`pluggy_configs.notify`, `PUT /pluggy/notify`). Quem está na página não recebe aviso.
+- Bot: `/banco` e perguntas livres ("chegou algo do banco?", "o que falta revisar?", "a fatura do C6 bate
+  com o banco?") — sem precisar de IA: bancos, o que falta revisar e banco × FinFam no mês.
 - MCP: `importados_do_banco(situacao)` e `conferir_fatura_com_banco(mes, ano)` — leitura com token de API
   (`GET /pluggy/summary` e `/pluggy/invoice-check`); aprovar continua só pelo site.
 

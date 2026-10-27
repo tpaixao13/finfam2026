@@ -298,6 +298,16 @@ class StubApi:
             return {'banks': ['Nubank', 'Inter', 'Outros']}
         if path == '/expenses/suggest-category':
             return {'category': 'Alimentação'}
+        if path == '/pluggy/summary':
+            return {'counts': {'pending': 2, 'imported': 5, 'duplicate': 0, 'ignored': 1},
+                    'banks': [{'name': 'C6 Bank', 'status': 'UPDATED', 'auto_import': False,
+                               'last_updated_at': '2026-10-27T12:47:00Z'}],
+                    'items': [{'date': '2026-10-24', 'description': 'COOP <DIADEMA>', 'amount': 38.78},
+                              {'date': '2026-10-23', 'description': 'UBER', 'amount': 11.22}]}
+        if path == '/pluggy/invoice-check':
+            return {'month': 11, 'year': 2026, 'cards': [
+                {'label': 'C6 Bank •••• 0982', 'linked': True, 'bank_total': 7264.41, 'finfam_total': 5865.6, 'diff': -1398.81},
+                {'label': 'Santander •••• 0676', 'linked': True, 'bank_total': 1597.76, 'finfam_total': 1597.76, 'diff': 0}]}
         assert path == '/settings/ai', path
         return {'configured': self.ai[0], 'enabled': self.ai[1], 'provider': 'gemini', 'model': None,
                 'providers': [{'id': 'gemini', 'label': 'Gemini (Google)', 'default_model': 'gemini-flash-lite-latest'}]}
@@ -445,3 +455,19 @@ def test_ai_invoice_for_one_bank():
     b.handle(_msg(81, 'qual o valor do mes de novembro no cartão da caixa'))
     assert ('/cards/invoices', {'month': 11, 'year': 2026, 'bank': 'Caixa Econômica Federal'}) in b.api.gets
     assert tg.last['text'].startswith('💳 <b>Fatura Caixa Econômica Federal — novembro/2026</b>: <b>R$ 17,25</b>')
+
+
+def test_bank_question_without_ai():
+    """"chegou algo do banco?" responde pelos bancos conectados mesmo sem IA; gasto com valor não."""
+    tg = FakeTelegram()
+    b = Bot(tg, StubApi({}, ai=(False, False)), 'https://finfam.test')
+    b.handle(_msg(90, 'chegou algo do banco'))
+    text = tg.last['text']
+    assert ('/pluggy/summary', {'status': 'pending', 'limit': 20}) in b.api.gets
+    assert '2 para revisar' in text and 'COOP &lt;DIADEMA&gt;' in text and 'https://finfam.test/bank/review' in text
+    assert 'C6 Bank •••• 0982: banco R$ 7.264,41 · FinFam R$ 5.865,60 — diferença' in text
+    assert 'Santander •••• 0676: banco R$ 1.597,76 · FinFam R$ 1.597,76 ✅' in text
+    b.handle(_msg(90, '/banco'))
+    assert '2 para revisar' in tg.last['text']
+    b.handle(_msg(91, 'almoço 25 no banco'))  # gasto com valor segue para o lançamento
+    assert 'Bancos conectados' not in tg.last['text']
