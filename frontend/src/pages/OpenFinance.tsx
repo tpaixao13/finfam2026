@@ -1,17 +1,18 @@
 // Open Finance (Pluggy) — cada pessoa cadastra a chave da própria conta Pluggy (etapa 1)
 // e conecta os bancos pelo widget Pluggy Connect, vendo contas e cartões (etapa 2).
 import { useState } from 'react'
-import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, Input, PageHeader, Panel, Select, Spinner } from '../components/ui'
+import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, Input, Modal, PageHeader, Panel, Segmented, Select, Spinner } from '../components/ui'
 import { api } from '../lib/api'
 import { money } from '../lib/format'
 import { useApi } from '../lib/hooks'
+import { Link } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
 import type { Card } from '../lib/types'
 
 interface PluggyConfig {
   available: boolean; max_items: number | null; configured: boolean; client_id_masked: string
   status: 'ok' | 'error' | null; last_error: string | null; webhook: boolean; public_url_ok: boolean
-  include_sandbox: boolean; connections: number
+  include_sandbox: boolean; connections: number; to_review: number
 }
 type Saved = { message: string; config: PluggyConfig }
 
@@ -139,30 +140,65 @@ function ConnectionCard({ conn, cards, onChange }: { conn: Connection; cards: Ca
   )
 }
 
+type Months = '1' | '3' | '6' | '12'
+const WINDOWS: { value: Months; label: string }[] = [
+  { value: '1', label: '1 mês' }, { value: '3', label: '3 meses' }, { value: '6', label: '6 meses' }, { value: '12', label: '12 meses' },
+]
+
+/** Antes de abrir a Pluggy: quanto do passado trazer para revisar. */
+function WindowModal({ open, onClose, onGo }: { open: boolean; onClose: () => void; onGo: (m: number) => void }) {
+  const [months, setMonths] = useState<Months>('1')
+  return (
+    <Modal open={open} title="Conectar banco" onClose={onClose} footer={<>
+      <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+      <Button icon="bank" onClick={() => onGo(Number(months))}>Escolher o banco</Button>
+    </>}>
+      <div className="stack">
+        <p>Quanto do passado trazer deste banco?</p>
+        <Segmented ariaLabel="Período a trazer" value={months} onChange={setMonths} options={WINDOWS} />
+        <p className="muted small">
+          Os lançamentos desse período chegam em <b>Revisar importados</b>. Nada vira despesa sem você aprovar,
+          e o que você já lançou à mão ou pelo bot é reconhecido para não duplicar.
+        </p>
+      </div>
+    </Modal>
+  )
+}
+
 function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => void }) {
   const items = useApi(() => api.get<{ items: Connection[] }>('/pluggy/items'), [])
   const cards = useApi(() => api.get<{ cards: Card[] }>('/cards?light=true'), [])
   const act = useAction()
   const { toast } = useSession()
   const [busy, setBusy] = useState(false)
+  const [asking, setAsking] = useState(false)
   const list = items.data?.items
   const creditCards = (cards.data?.cards ?? []).filter((c) => c.card_type === 'credit' || c.supports_credit)
   const full = !!cfg.max_items && (list?.length ?? 0) >= cfg.max_items
   const reload = () => { items.reload(); onChange() }
 
-  async function connect() {
+  async function connect(months: number) {
+    setAsking(false)
     setBusy(true)
     try {
       const id = await openConnect()
-      if (id) await act(() => api.post<{ message: string }>('/pluggy/items', { item_id: id }), reload)
+      if (id) await act(() => api.post<{ message: string }>('/pluggy/items', { item_id: id, months }), reload)
     } catch (e) { toast((e as Error).message, 'danger') }
     setBusy(false)
   }
 
   return (
     <Panel title="Bancos conectados" actions={
-      <Button icon="plus" busy={busy} disabled={full} title={full ? 'Limite de bancos da sua família' : undefined}
-        onClick={connect}>Conectar banco</Button>}>
+      <div className="row gap">
+        {list && list.length > 0 && (
+          <Link to="/bank/review" className="btn btn-ghost">
+            Revisar importados{cfg.to_review ? <Badge tone="warning">{cfg.to_review}</Badge> : null}
+          </Link>
+        )}
+        <Button icon="plus" busy={busy} disabled={full} title={full ? 'Limite de bancos da sua família' : undefined}
+          onClick={() => setAsking(true)}>Conectar banco</Button>
+      </div>}>
+      <WindowModal open={asking} onClose={() => setAsking(false)} onGo={connect} />
       {items.error ? <ErrorBox message={items.error} onRetry={items.reload} /> : !list ? <Spinner /> : !list.length ? (
         <Empty icon="bank" title="Nenhum banco conectado">
           Toque em <b>Conectar banco</b>: a janela da Pluggy abre aqui, você escolhe o banco e entra com a senha dele.
@@ -175,7 +211,8 @@ function Connections({ cfg, onChange }: { cfg: PluggyConfig; onChange: () => voi
       )}
       <p className="muted small">
         {cfg.max_items ? `Limite da sua família: ${cfg.max_items} banco(s) por pessoa. ` : ''}
-        Ligue cada cartão do banco ao cartão do FinFam: é assim que a fatura vai ser conferida. Os lançamentos chegam na próxima etapa.
+        Ligue cada cartão do banco ao cartão do FinFam: as compras caem na fatura certa e a fatura pode ser conferida.
+        Desconectar apaga os dados vindos do banco; as despesas que você aprovou continuam.
       </p>
     </Panel>
   )

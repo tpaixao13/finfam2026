@@ -27,8 +27,22 @@ pelo bot ou importando extrato, como antes.
 - Limite de bancos por pessoa definido pelo admin. Tabelas novas: `bank_connections`, `bank_accounts`.
 - Nova variável: `PLUGGY_INCLUDE_SANDBOX` (bancos de teste no Connect; `0` em produção real).
 
+**Etapa 3 — lançamentos do banco e "Revisar importados"** ✅
+- Ao conectar, a pessoa escolhe quanto do passado trazer: 1 (padrão), 3, 6 ou 12 meses.
+- Cada saída de dinheiro vira um item em `bank_transactions`, nunca uma despesa sozinha:
+  - **Para revisar**: com categoria sugerida (regras e histórico) e forma de pagamento (PIX/débito/crédito);
+  - **Já no FinFam**: mesmo valor e data perto (e mesma parcela) de algo lançado à mão, pelo bot ou importado;
+  - **Ignorados**: pagamento de fatura, transferência entre contas suas, aplicações;
+  - entradas (salário, estornos, pagamento recebido no cartão) não entram.
+- "Lançar" usa a mesma regra do site: compra parcelada lança as N parcelas no cartão ligado
+  (na fatura certa); conta corrente entra como paga. Dá para editar descrição e categoria antes.
+- A parcela seguinte que chega depois é reconhecida como "Já no FinFam".
+- O webhook `transactions/*` avisa; a lista relê o banco ao abrir. Compra pendente que o banco troca some sozinha.
+- `python -m scripts.pluggy_sync` (cron de hora em hora) relê quem ficou sem novidade há 24 h.
+- Desconectar apaga os lançamentos vindos do banco; as despesas aprovadas continuam.
+- Tabela nova: `bank_transactions`; colunas `bank_connections.import_from` e `tx_synced_at`.
+
 **Próximas etapas**
-3. Importação: duplicados, parcelas, categoria e a caixa "Revisar importados".
 4. Conferência de fatura, aviso no bot e ferramenta no MCP.
 
 ## 2026.1.0 — versão estável antes do Open Finance

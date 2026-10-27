@@ -59,6 +59,8 @@ _ALTERS = [
     'ALTER TABLE investments ADD COLUMN currency TEXT',
     'ALTER TABLE tenants ADD COLUMN open_finance_enabled INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE tenants ADD COLUMN open_finance_max_items INTEGER',
+    'ALTER TABLE bank_connections ADD COLUMN import_from DATE',
+    'ALTER TABLE bank_connections ADD COLUMN tx_synced_at DATETIME',
     'ALTER TABLE users ADD COLUMN totp_secret TEXT',
     'ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE users ADD COLUMN totp_failures INTEGER NOT NULL DEFAULT 0',

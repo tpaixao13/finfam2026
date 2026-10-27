@@ -5,6 +5,7 @@ import { Spinner } from './components/ui'
 import { matchPath, navigate, useLocation } from './lib/router'
 import { useSession } from './lib/session'
 import { OpenFinancePage } from './pages/OpenFinance'
+import { ReviewImportsPage } from './pages/ReviewImports'
 import { FamilyPage, SettingsPage, UpgradePage } from './pages/Account'
 import { TelegramPage } from './pages/Telegram'
 import { AdminLoginPage, AdminPage } from './pages/admin/Admin'
@@ -33,13 +34,14 @@ const ROUTES: [string, (p: Record<string, string>) => React.ReactNode][] = [
   ['/settings', () => <SettingsPage />],
   ['/telegram', () => <TelegramPage />],
   ['/bank', () => <OpenFinancePage />],
+  ['/bank/review', () => <ReviewImportsPage />],
   ['/upgrade', () => <UpgradePage />],
 ]
 
 const TITLES: Record<string, string> = {
   '/': 'Painel', '/expenses': 'Despesas', '/bills': 'Contas a pagar', '/incomes': 'Rendas', '/cards': 'Cartões',
   '/investments': 'Investimentos', '/goals': 'Metas', '/alerts': 'Alertas', '/import': 'Importar extrato',
-  '/rules': 'Regras de categoria', '/family': 'Família', '/settings': 'Perfil e acesso', '/telegram': 'Telegram e IA', '/bank': 'Contas conectadas',
+  '/rules': 'Regras de categoria', '/family': 'Família', '/settings': 'Perfil e acesso', '/telegram': 'Telegram e IA', '/bank': 'Contas conectadas', '/bank/review': 'Revisar importados',
   '/upgrade': 'Planos', '/login': 'Entrar', '/register': 'Criar conta',
 }
 

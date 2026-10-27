@@ -2,7 +2,7 @@
 
 O schema é o MESMO do FinFam original (tabelas e colunas), então um `gastos.db`
 existente pode ser usado diretamente. Tabelas novas: `api_tokens`, `telegram_links`,
-`telegram_link_codes`, `ai_configs`, `pluggy_configs`, `bank_connections` e `bank_accounts`
+`telegram_link_codes`, `ai_configs`, `pluggy_configs`, `bank_connections`, `bank_accounts` e `bank_transactions`
 (criadas sozinhas ao subir a API).
 """
 import calendar
@@ -238,6 +238,8 @@ class BankConnection(Base):
     error_message = Column(Text, nullable=True)
     last_updated_at = Column(DateTime, nullable=True)     # última atualização do banco na Pluggy
     needs_sync = Column(Boolean, default=False, nullable=False)  # webhook avisou novidade: reler contas
+    import_from = Column(Date, nullable=True)             # desde quando trazer lançamentos (escolha ao conectar)
+    tx_synced_at = Column(DateTime, nullable=True)        # última leitura dos lançamentos
     created_at = Column(DateTime, default=utcnow)
 
     accounts = relationship('BankAccount', backref='connection', lazy='dynamic', cascade='all, delete-orphan')
@@ -259,6 +261,36 @@ class BankAccount(Base):
     credit_limit = Column(Numeric(14, 2), nullable=True)
     card_id = Column(Integer, ForeignKey('credit_cards.id', ondelete='SET NULL'), nullable=True)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    transactions = relationship('BankTransaction', backref='account', lazy='dynamic', cascade='all, delete-orphan')
+
+
+class BankTransaction(Base):
+    """Lançamento que chegou do banco e espera revisão. Nunca vira despesa sozinho.
+
+    status: pending (revisar) | duplicate (já estava no FinFam) | ignored | imported
+    """
+    __tablename__ = 'bank_transactions'
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey('bank_accounts.id'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    pluggy_id = Column(String(64), nullable=False, unique=True)
+    date = Column(Date, nullable=False)                   # data (fuso de Brasília) do lançamento
+    purchase_date = Column(Date, nullable=True)           # compra original (parcelas)
+    description = Column(Text, nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)       # sempre positivo (saída de dinheiro)
+    installment_number = Column(Integer, nullable=True)
+    total_installments = Column(Integer, nullable=True)
+    total_amount = Column(Numeric(12, 2), nullable=True)
+    pluggy_category = Column(Text, nullable=True)
+    payment_hint = Column(String(16), nullable=True)      # PIX | BOLETO | TED ... (contas)
+    bank_status = Column(String(12), nullable=True)       # PENDING | POSTED
+    status = Column(String(12), nullable=False, default='pending', index=True)
+    reason = Column(Text, nullable=True)
+    expense_id = Column(Integer, ForeignKey('expenses.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
 
 
 class SalaryGroup(Base):

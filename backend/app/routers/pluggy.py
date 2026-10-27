@@ -11,8 +11,8 @@
   ligando cada cartão do banco a um cartão do FinFam.
 - Importação e revisão: próximas etapas.
 """
-import re
-from datetime import datetime, timezone
+from datetime import date
+from typing import Literal
 import hmac
 import logging
 import secrets
@@ -20,14 +20,17 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 
 from app.core.config import settings
 from app.core.db import db
 from app.core.deps import Ctx, get_ctx_session
 from app.core.security import decrypt_field, encrypt_field
 from app.core.types import utcnow
-from app.models import BankAccount, BankConnection, CreditCard, PluggyConfig, Tenant, User
+from app.models import BankAccount, Expense, BankConnection, BankTransaction, CreditCard, PluggyConfig, Tenant, User
+from app.services import open_finance as of
 from app.services import pluggy as pg
+from app.services.expense_service import ExpenseError, tenant_categories
 
 log = logging.getLogger('finfam.pluggy')
 router = APIRouter(prefix='/pluggy', tags=['open finance'])
@@ -65,6 +68,7 @@ def _out(ctx: Ctx, cfg: PluggyConfig | None) -> dict:
         'public_url_ok': settings.public_url.startswith('https://'),
         'include_sandbox': settings.pluggy_include_sandbox,
         'connections': BankConnection.query.filter_by(user_id=ctx.user.id).count() if cfg else 0,
+        'to_review': BankTransaction.query.filter_by(user_id=ctx.user.id, status='pending').count() if cfg else 0,
     }
 
 
@@ -187,86 +191,11 @@ def _conn(ctx: Ctx, conn_id: int) -> BankConnection:
     return conn
 
 
-def _when(value) -> datetime | None:
-    if not value:
-        return None
-    try:
-        dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
-    except ValueError:
-        return None
-    return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
-
-
-def _money(value):
-    try:
-        return round(float(value), 2) if value is not None else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _apply_item(conn: BankConnection, item: dict) -> None:
-    connector = item.get('connector') or {}
-    color = str(connector.get('primaryColor') or '').lstrip('#')
-    conn.bank_name = str(connector.get('name') or conn.bank_name or 'Banco')[:120]
-    conn.bank_color = f'#{color[:6]}' if re.fullmatch(r'[0-9a-fA-F]{6}', color[:6]) else conn.bank_color
-    conn.status = str(item.get('status') or '')[:32] or conn.status
-    conn.execution_status = str(item.get('executionStatus') or '')[:48] or None
-    err = item.get('error') or {}
-    conn.error_message = (str(err.get('message') or '')[:300] or None) if isinstance(err, dict) else None
-    conn.last_updated_at = _when(item.get('lastUpdatedAt')) or conn.last_updated_at
-
-
-def _last4(number) -> str | None:
-    digits = re.sub(r'\D', '', str(number or ''))
-    return digits[-4:] if len(digits) >= 4 else None
-
-
-def _auto_card(conn: BankConnection, acc: BankAccount) -> None:
-    """Liga o cartão do banco ao cartão de crédito da pessoa com os mesmos 4 últimos dígitos."""
-    last4 = _last4(acc.number)
-    if acc.type != 'CREDIT' or acc.card_id or not last4:
-        return
-    cards = [c for c in CreditCard.query.filter_by(user_id=conn.user_id, last_digits=last4).all()
-             if c.card_type == 'credit' or c.supports_credit]
-    if len(cards) == 1:
-        acc.card_id = cards[0].id
-
-
-def _sync(conn: BankConnection, client: pg.PluggyClient) -> None:
-    """Relê o item e as contas na Pluggy."""
-    _apply_item(conn, client.item(conn.item_id))
-    seen = set()
-    for a in client.accounts(conn.item_id):
-        pid = str(a.get('id') or '')
-        if not re.fullmatch(r'[A-Za-z0-9-]{1,64}', pid):
-            continue
-        seen.add(pid)
-        acc = BankAccount.query.filter_by(pluggy_account_id=pid).first()
-        if acc is not None and acc.connection_id != conn.id:
-            continue  # pertence a outra conexão: nunca mistura
-        if acc is None:
-            acc = BankAccount(connection_id=conn.id, pluggy_account_id=pid, type='BANK')
-            db.session.add(acc)
-        credit = a.get('creditData') or {}
-        acc.type = 'CREDIT' if a.get('type') == 'CREDIT' else 'BANK'
-        acc.subtype = str(a.get('subtype') or '')[:32] or None
-        acc.name = str(a.get('marketingName') or a.get('name') or '')[:120] or None
-        acc.number = str(a.get('number') or '')[:32] or None
-        acc.balance = _money(a.get('balance'))
-        acc.currency = str(a.get('currencyCode') or 'BRL')[:3]
-        acc.credit_limit = _money(credit.get('creditLimit')) if isinstance(credit, dict) else None
-        _auto_card(conn, acc)
-    for acc in conn.accounts.all():
-        if acc.pluggy_account_id not in seen:
-            db.session.delete(acc)  # o banco deixou de devolver a conta
-    conn.needs_sync = False
-
-
 def _account_out(acc: BankAccount) -> dict:
     card = db.session.get(CreditCard, acc.card_id) if acc.card_id else None
     return {
         'id': acc.id, 'type': acc.type, 'subtype': acc.subtype, 'name': acc.name,
-        'last_digits': _last4(acc.number), 'currency': acc.currency or 'BRL',
+        'last_digits': of.last4(acc.number), 'currency': acc.currency or 'BRL',
         'balance': float(acc.balance) if acc.balance is not None else None,
         'credit_limit': float(acc.credit_limit) if acc.credit_limit is not None else None,
         'card_id': acc.card_id,
@@ -311,22 +240,14 @@ def connect_token(body: ConnectTokenIn, ctx: Ctx = Depends(get_ctx_session)):
 def list_items(ctx: Ctx = Depends(get_ctx_session)):
     _enabled_tenant(ctx)
     conns = BankConnection.query.filter_by(user_id=ctx.user.id).order_by(BankConnection.id).all()
-    stale = [c for c in conns if c.needs_sync]
-    if stale:  # o webhook avisou que o banco atualizou: relê só esses
-        cfg = PluggyConfig.query.filter_by(user_id=ctx.user.id).first()
-        if cfg:
-            client = pg.PluggyClient(cfg.client_id, decrypt_field(cfg.client_secret))
-            for conn in stale:
-                try:
-                    _sync(conn, client)
-                except pg.PluggyError as exc:
-                    log.warning('Sincronização do item %s falhou: %s', conn.item_id, exc)
-            db.session.commit()
+    if any(c.needs_sync for c in conns):  # o webhook avisou novidade: relê só esses
+        of.sync_stale(ctx.user.id)
     return {'items': [_conn_out(c) for c in conns]}
 
 
 class ItemIn(BaseModel):
     item_id: str = Field(pattern=r'^[A-Za-z0-9-]{1,64}$', description='id devolvido pelo Pluggy Connect')
+    months: Literal[1, 3, 6, 12] | None = Field(None, description='Quanto do passado trazer (só ao conectar)')
 
 
 @router.post('/items', summary='Registra o banco que acabou de ser conectado no Pluggy Connect')
@@ -342,13 +263,16 @@ def add_item(body: ItemIn, ctx: Ctx = Depends(get_ctx_session)):
     created = conn is None
     if created:
         _check_limit(ctx)
-        conn = BankConnection(user_id=ctx.user.id, item_id=body.item_id)
+        conn = BankConnection(user_id=ctx.user.id, item_id=body.item_id,
+                              import_from=of.months_back(date.today(), body.months or 1))
         db.session.add(conn)
         db.session.flush()
-    _apply_item(conn, item)
-    _pluggy(_sync, conn, client)
+    of.apply_item(conn, item)
+    count = _pluggy(of.sync, conn, client)
     db.session.commit()
     msg = f'{conn.bank_name} conectado!' if created else f'{conn.bank_name} atualizado.'
+    if count:
+        msg += f' {count} lançamento(s) para revisar.'
     return {'message': msg, 'item': _conn_out(conn)}
 
 
@@ -356,7 +280,7 @@ def add_item(body: ItemIn, ctx: Ctx = Depends(get_ctx_session)):
 def refresh_item(conn_id: int, ctx: Ctx = Depends(get_ctx_session)):
     _cfg, client = _client(ctx)
     conn = _conn(ctx, conn_id)
-    _apply_item(conn, _pluggy(client.update_item, conn.item_id))
+    of.apply_item(conn, _pluggy(client.update_item, conn.item_id))
     conn.needs_sync = True  # quando a Pluggy terminar, o webhook avisa (ou a próxima listagem relê)
     db.session.commit()
     return {'message': f'Atualização de {conn.bank_name} pedida. Pode levar alguns minutos.', 'item': _conn_out(conn)}
@@ -395,6 +319,111 @@ def map_account(account_id: int, body: AccountIn, ctx: Ctx = Depends(get_ctx_ses
     acc.card_id = body.card_id
     db.session.commit()
     return {'message': 'Cartão ligado.' if body.card_id else 'Cartão desligado.', 'account': _account_out(acc)}
+
+
+# ── Revisar importados (etapa 3) ─────────────────────────────────────────────
+
+STATUSES = ('pending', 'duplicate', 'ignored', 'imported')
+
+
+def _tx_out(tx: BankTransaction, ctx: Ctx) -> dict:
+    acc = tx.account
+    match = db.session.get(Expense, tx.expense_id) if tx.expense_id else None
+    out = {
+        'id': tx.id, 'date': tx.date.isoformat(), 'description': tx.description, 'amount': float(tx.amount),
+        'installment': ({'number': tx.installment_number, 'total': tx.total_installments}
+                        if tx.total_installments and tx.total_installments > 1 else None),
+        'status': tx.status, 'reason': tx.reason, 'bank_pending': tx.bank_status == 'PENDING',
+        'bank_name': acc.connection.bank_name, 'account_type': acc.type,
+        'account_name': acc.name, 'account_last_digits': of.last4(acc.number),
+        'card_id': acc.card_id,
+        'expense': ({'id': match.id, 'description': match.description, 'amount': float(match.amount),
+                     'date': of._expense_date(match).isoformat()} if match else None),
+    }
+    if tx.status == 'pending':
+        out.update(of.suggestion(tx, ctx.uids, ctx.tenant.id if ctx.tenant else None))
+    return out
+
+
+def _my_tx(ctx: Ctx, ids: list[int]) -> list[BankTransaction]:
+    rows = BankTransaction.query.filter(BankTransaction.id.in_(ids), BankTransaction.user_id == ctx.user.id).all()
+    if len(rows) != len(set(ids)):
+        raise HTTPException(status_code=404, detail='Lançamento não encontrado.')
+    return rows
+
+
+@router.get('/transactions', summary='Lançamentos que chegaram do banco, por situação')
+def list_transactions(status: Literal['pending', 'duplicate', 'ignored', 'imported'] = 'pending',
+                      ctx: Ctx = Depends(get_ctx_session)):
+    _enabled_tenant(ctx)
+    of.sync_stale(ctx.user.id)  # traz o que o webhook avisou
+    counts = {s: 0 for s in STATUSES}
+    for st, n in (db.session.query(BankTransaction.status, func.count(BankTransaction.id))
+                  .filter(BankTransaction.user_id == ctx.user.id).group_by(BankTransaction.status)):
+        counts[st] = n
+    rows = (BankTransaction.query.filter_by(user_id=ctx.user.id, status=status)
+            .order_by(BankTransaction.date.desc(), BankTransaction.id.desc()).limit(500).all())
+    return {'counts': counts, 'categories': tenant_categories(ctx.uids),
+            'items': [_tx_out(t, ctx) for t in rows]}
+
+
+class ApproveItem(BaseModel):
+    id: int
+    category: str = Field(min_length=1, max_length=60)
+    description: str | None = Field(None, max_length=200)
+    payment_method: Literal['PIX', 'Cartão de Débito'] | None = None
+
+
+class ApproveIn(BaseModel):
+    items: list[ApproveItem] = Field(min_length=1, max_length=200)
+
+
+@router.post('/transactions/approve', summary='Lança como despesa os lançamentos escolhidos')
+def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_session)):
+    _enabled_tenant(ctx)
+    rows = {t.id: t for t in _my_tx(ctx, [i.id for i in body.items])}
+    allowed = tenant_categories(ctx.uids)
+    done = 0
+    for item in body.items:
+        tx = rows[item.id]
+        if tx.status == 'imported':
+            continue
+        try:
+            of.approve(tx, ctx.uids, of.valid_category(item.category, allowed), item.description, item.payment_method)
+        except ExpenseError as exc:
+            db.session.rollback()
+            raise HTTPException(status_code=422, detail=f'{tx.description}: {exc}')
+        done += 1
+    db.session.commit()
+    return {'message': f'{done} despesa(s) lançada(s) no FinFam.' if done else 'Nada para lançar.', 'imported': done}
+
+
+class IdsIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+@router.post('/transactions/ignore', summary='Ignora os lançamentos escolhidos (não viram despesa)')
+def ignore_transactions(body: IdsIn, ctx: Ctx = Depends(get_ctx_session)):
+    _enabled_tenant(ctx)
+    n = 0
+    for tx in _my_tx(ctx, body.ids):
+        if tx.status in ('pending', 'duplicate'):
+            tx.status, tx.reason, tx.reviewed_at = 'ignored', 'Ignorado por você.', utcnow()
+            n += 1
+    db.session.commit()
+    return {'message': f'{n} lançamento(s) ignorado(s).'}
+
+
+@router.post('/transactions/restore', summary='Volta lançamentos ignorados/duplicados para a revisão')
+def restore_transactions(body: IdsIn, ctx: Ctx = Depends(get_ctx_session)):
+    _enabled_tenant(ctx)
+    n = 0
+    for tx in _my_tx(ctx, body.ids):
+        if tx.status in ('ignored', 'duplicate'):
+            tx.status, tx.reason, tx.expense_id, tx.reviewed_at = 'pending', None, None, None
+            n += 1
+    db.session.commit()
+    return {'message': f'{n} lançamento(s) de volta para revisar.'}
 
 
 # ── Webhook (chamado pela Pluggy) ────────────────────────────────────────────
@@ -441,12 +470,14 @@ _EVENT_STATUS = {'item/error': 'LOGIN_ERROR', 'item/waiting_user_input': 'WAITIN
 def _item_event(user_id: int, event: str, item_id: str, error) -> None:
     """Só anota (sem chamar a Pluggy: o webhook tem de responder rápido). A próxima
     listagem relê o banco quando há novidade."""
-    if not event.startswith('item/') or not item_id:
+    if not (event.startswith('item/') or event.startswith('transactions/')) or not item_id:
         return
     conn = BankConnection.query.filter_by(item_id=item_id[:64], user_id=user_id).first()
     if conn is None:
         return
-    if event == 'item/deleted':
+    if event.startswith('transactions/'):
+        conn.needs_sync = True  # lançamentos novos/alterados: a próxima leitura traz
+    elif event == 'item/deleted':
         db.session.delete(conn)
     elif event in ('item/updated', 'item/created'):
         conn.status, conn.error_message, conn.needs_sync = 'UPDATED', None, True
