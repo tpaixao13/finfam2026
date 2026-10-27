@@ -9,7 +9,7 @@ import { useAction } from '../lib/session'
 
 type Status = 'pending' | 'duplicate' | 'ignored' | 'imported'
 interface BankTx {
-  id: number; date: string; description: string; amount: number; status: Status; reason: string | null
+  id: number; date: string; description: string; amount: number; refund?: boolean; status: Status; reason: string | null
   installment: { number: number; total: number } | null; bank_pending: boolean; bill: string | null
   bank_name: string | null; account_type: 'BANK' | 'CREDIT'; account_name: string | null
   account_last_digits: string | null; card_id: number | null; card_digits: string | null
@@ -39,6 +39,7 @@ function Source({ tx }: { tx: BankTx }) {
       {(tx.card_digits || tx.account_last_digits) && ` •••• ${tx.card_digits || tx.account_last_digits}`}
       {tx.installment && ` · parcela ${tx.installment.number}/${tx.installment.total}`}
       {tx.bill && ` · fatura ${tx.bill}`}
+      {tx.refund && ' · estorno (abate a fatura)'}
       {tx.bank_pending && ' · ainda pendente no banco'}
     </span>
   )
@@ -95,7 +96,7 @@ function PendingRow({ tx, draft, categories, onChange }:
             onChange={(e) => onChange({ payment_method: e.target.value })} />
         )}
       </div>
-      <b className="review-amount">{brl(tx.amount)}</b>
+      <b className="review-amount">{brl(tx.refund ? -tx.amount : tx.amount)}</b>
     </li>
   )
 }

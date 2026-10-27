@@ -310,6 +310,7 @@ class BankTransaction(Base):
     payment_hint = Column(String(16), nullable=True)      # PIX | BOLETO | TED ... (contas)
     bill_ref = Column(String(64), nullable=True)          # id da fatura na Pluggy (creditCardMetadata.billId)
     card_digits = Column(String(4), nullable=True)        # final do cartão usado (virtual/adicional da mesma conta)
+    kind = Column(String(10), nullable=False, default='expense')  # expense | refund (estorno/crédito no cartão)
     bill_year = Column(Integer, nullable=True)            # fatura em que o banco pôs a compra (cartão)
     bill_month = Column(Integer, nullable=True)
     bank_status = Column(String(12), nullable=True)       # PENDING | POSTED

@@ -404,6 +404,7 @@ def _tx_out(tx: BankTransaction, ctx: Ctx) -> dict:
     match = db.session.get(Expense, tx.expense_id) if tx.expense_id else None
     out = {
         'id': tx.id, 'date': tx.date.isoformat(), 'description': tx.description, 'amount': float(tx.amount),
+        'refund': tx.kind == 'refund',
         'installment': ({'number': tx.installment_number, 'total': tx.total_installments}
                         if tx.total_installments and tx.total_installments > 1 else None),
         'status': tx.status, 'reason': tx.reason, 'bank_pending': tx.bank_status == 'PENDING',

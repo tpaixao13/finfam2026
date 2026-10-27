@@ -786,3 +786,62 @@ def test_invoice_check_summary_and_telegram_notice(client, family, bank, txs, mo
     of.sync_stale(family.user['id'], notify=True)
     assert len(sent) == 1  # desligado
     session.remove()
+
+
+def test_installment_cents_merge_and_refund(client, family, bank, txs, monkeypatch):  # noqa: F811
+    """C6 real: TELLERINA 1/3 de 166,68 e as seguintes de 166,66 — a mesma parcela é reconhecida
+    (fica o valor do banco), séries duplicadas antigas são juntadas, e estorno abate a fatura."""
+    from app.models import InstallmentGroup
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+
+    def iso(d):
+        return f'{d.isoformat()}T15:00:00Z'
+    d1 = TODAY - timedelta(days=70)
+    txs[cc] += [{'id': 't1', 'type': 'DEBIT', 'amount': 166.68, 'date': iso(d1), 'description': 'TELLERINA COMERCIO DE',
+                 'creditCardMetadata': {'installmentNumber': 1, 'totalInstallments': 3}}]
+    _post_item(family, months=6)
+    t = family.get('/pluggy/transactions').json()['items'][0]
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': t['id'], 'category': 'Outros'}]})
+    session.remove()
+    txs[cc] += [{'id': 't2', 'type': 'DEBIT', 'amount': 166.66, 'date': iso(of.add_months(d1, 1)), 'description': 'TELLERINA COMERCIO DE',
+                 'creditCardMetadata': {'installmentNumber': 2, 'totalInstallments': 3}},
+                {'id': 'r1', 'type': 'CREDIT', 'amount': -104.48, 'date': iso(TODAY - timedelta(days=3)),
+                 'description': 'ESTORNO LOJA X'},
+                {'id': 'p1', 'type': 'CREDIT', 'amount': -500.0, 'date': iso(TODAY - timedelta(days=4)),
+                 'description': 'PAGAMENTO RECEBIDO'}]
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    session.remove()
+    dup = family.get('/pluggy/transactions?status=duplicate').json()['items']
+    assert [d['installment']['number'] for d in dup] == [2]          # a 2/3 de 166,66 é a mesma parcela
+    rows = Expense.query.filter(Expense.description.like('TELLERINA%')).order_by(Expense.installment_number).all()
+    assert len(rows) == 3 and float(rows[1].amount) == 166.66          # ficou o valor do banco
+    pend = family.get('/pluggy/transactions').json()['items']
+    est = next(p for p in pend if p['refund'])
+    assert est['description'] == 'ESTORNO LOJA X' and not any('PAGAMENTO' in p['description'] for p in pend)
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': est['id'], 'category': 'Outros'}]})
+    e = Expense.query.filter(Expense.amount < 0).one()
+    assert float(e.amount) == -104.48 and e.card_id == card['id']
+    session.remove()
+
+    # séries duplicadas que já existiam (antes da correção): são juntadas na próxima leitura
+    g1 = Expense.query.filter(Expense.description.like('TELLERINA%')).first().installment_group_id
+    rows = Expense.query.filter_by(installment_group_id=g1).order_by(Expense.installment_number).all()
+    g2 = InstallmentGroup(user_id=rows[0].user_id, description='TELLERINA COMERCIO DE', total_amount=499.98,
+                          num_installments=3, bank='Nubank')
+    session.add(g2)
+    session.flush()
+    for r in rows[1:]:  # cópia das parcelas 2 e 3 numa segunda série
+        session.add(Expense(user_id=r.user_id, description=r.description, amount=166.66, category='Outros',
+                            payment_method='Cartão de Crédito', year=r.year, month=r.month, day=r.day,
+                            card_id=r.card_id, installment_group_id=g2.id, installment_number=r.installment_number))
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    assert Expense.query.filter(Expense.description.like('TELLERINA%')).count() == 5
+    session.remove()
+    family.get('/pluggy/items')
+    rows = Expense.query.filter(Expense.description.like('TELLERINA%')).order_by(Expense.installment_number).all()
+    assert [r.installment_number for r in rows] == [1, 2, 3] and len({r.installment_group_id for r in rows}) == 1
+    linked = {t.expense_id for t in BankTransaction.query.filter(BankTransaction.pluggy_id.in_(('t1', 't2'))).all()}
+    assert linked <= {r.id for r in rows}                               # as que vieram do banco ficaram
+    session.remove()

@@ -111,6 +111,11 @@ pelo bot ou importando extrato, como antes.
 - Pagamento de fatura reconhecido também sem "pagamento/fatura" no texto, quando o valor bate com a fatura
   do banco e a descrição cita o banco do cartão ("C6 BANK", "BANCO SANTANDER") ou sai da conta do mesmo
   banco. Pagamento que já tinha sido lançado como despesa é desfeito (a fatura contava duas vezes).
+- A mesma parcela da mesma compra é reconhecida com até R$ 0,10 de diferença (o banco põe o arredondamento
+  na 1ª parcela: 166,68 + 166,66...) e fica com o valor do banco. Séries de parcelas duplicadas por isso
+  (mesma loja, nº de parcelas e cartão) são juntadas na leitura, ficando as parcelas vindas do banco.
+- Estornos e créditos no cartão (valor negativo que não é pagamento da fatura) chegam para revisar e entram
+  como despesa negativa, abatendo a fatura; a categoria é a da compra original quando o FinFam a encontra.
 - Saída da conta só casa com despesa PIX/débito (dinheiro e VR/VA não saem do banco).
 
 **Etapa 4 — conferir fatura, aviso no Telegram e MCP** ✅

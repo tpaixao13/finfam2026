@@ -367,6 +367,13 @@ def card_used(tx: BankTransaction) -> CreditCard | None:
     return db.session.get(CreditCard, acc.card_id)
 
 
+def take_bank_amount(e: Expense, tx: BankTransaction) -> None:
+    """Parcela reconhecida com centavos de diferença: fica com o valor que o banco cobrou."""
+    bank = Decimal(str(tx.amount)) * (-1 if tx.kind == 'refund' else 1)
+    if e.installment_number and Decimal(str(e.amount)) != bank and abs(Decimal(str(e.amount)) - bank) <= Decimal('0.10'):
+        e.amount = bank
+
+
 def find_existing(tx: BankTransaction, card_id: int | None) -> Expense | None:
     """Despesa da pessoa que já representa este lançamento (mesmo valor, data perto;
     cartão igual quando o cartão do banco está ligado; mesma parcela)."""
@@ -381,12 +388,18 @@ def find_existing(tx: BankTransaction, card_id: int | None) -> Expense | None:
     used = {row[0] for row in db.session.query(BankTransaction.expense_id)
             .filter(BankTransaction.user_id.in_(uids), BankTransaction.expense_id.isnot(None),
                     BankTransaction.id != (tx.id or 0))}
-    q = Expense.query.filter(Expense.user_id.in_(uids), Expense.amount == Decimal(str(tx.amount)),
+    amount = Decimal(str(tx.amount)) * (-1 if tx.kind == 'refund' else 1)
+    # a mesma parcela da mesma compra pode vir com centavos de diferença (o banco põe o
+    # arredondamento na 1ª parcela: 120,94 + 120,92 + ...): parcela igual aceita até R$ 0,10
+    slack = Decimal('0.10') if n and n > 1 else Decimal('0')
+    q = Expense.query.filter(Expense.user_id.in_(uids), Expense.amount.between(amount - slack, amount + slack),
                              Expense.year.between(when.year - 1, when.year + 1))
     best = None
     for e in q.all():
         if e.id in used:
             continue
+        if Decimal(str(e.amount)) != amount and e.installment_number != n:
+            continue  # centavos de diferença só valem para a mesma parcela
         if e.user_id != tx.user_id and e.card_id not in siblings:
             continue  # de outra pessoa só vale no mesmo cartão/conta
         allowed = (CREDIT,) if credit else ('PIX', DEBIT)
@@ -542,12 +555,24 @@ def _apply_tx(tx: BankTransaction, raw: dict) -> None:
     tx.card_digits = last4(meta.get('cardNumber'))
 
 
-def _is_expense(acc: BankAccount, raw: dict) -> bool:
-    """Saída de dinheiro. No cartão, valor positivo é compra; negativo é pagamento/estorno."""
+_CARD_PAYMENT = re.compile(r'pagamento|pagto|pgto|pag fatura|pag\.? ?boleto|pagamento recebido|cr[eé]dito de pagamento', re.I)
+
+
+def tx_kind(acc: BankAccount, raw: dict) -> str | None:
+    """'expense' (saída de dinheiro), 'refund' (estorno/crédito no cartão, abate a fatura) ou None.
+    No cartão, valor positivo é compra; negativo é pagamento da fatura (fica de fora) ou estorno."""
     amount = money(raw.get('amount')) or 0
     if acc.type == 'CREDIT':
-        return amount > 0 and raw.get('type', 'DEBIT') != 'CREDIT'
-    return raw.get('type') == 'DEBIT' or (raw.get('type') is None and amount < 0)
+        if amount > 0 and raw.get('type', 'DEBIT') != 'CREDIT':
+            return 'expense'
+        if amount and not _CARD_PAYMENT.search(str(raw.get('description') or '')):
+            return 'refund'
+        return None
+    return 'expense' if raw.get('type') == 'DEBIT' or (raw.get('type') is None and amount < 0) else None
+
+
+def _is_expense(acc: BankAccount, raw: dict) -> bool:
+    return tx_kind(acc, raw) is not None
 
 
 _NEXT = re.compile(r'\?[A-Za-z0-9=&%._:+\-]{1,1000}')
@@ -596,6 +621,61 @@ def move_to_bill(e: Expense, bill: tuple[int, int]) -> bool:
         row.month, row.year = month_offset(row.month, row.year, delta)
         row.paid = False  # mudou de fatura: a conciliação diz de novo se essa fatura foi paga
     return True
+
+
+def merge_duplicate_series(user_id: int) -> int:
+    """Junta séries de parcelas duplicadas da mesma compra (criadas quando a parcela seguinte do
+    banco vinha com centavos de diferença e não era reconhecida). Mesma loja, mesmo número de
+    parcelas, mesmo cartão e valor até R$ 0,10: fica a série com mais parcelas vindas do banco;
+    de cada número de parcela sobra uma, de preferência a do banco. Se as duas séries têm a
+    MESMA parcela vinda do banco, são duas compras de verdade e nada muda. Devolve quantas
+    despesas foram apagadas."""
+    from app.models import InstallmentGroup
+    uids, _ = family_of(user_id)
+    linked = {i for (i,) in db.session.query(BankTransaction.expense_id)
+              .filter(BankTransaction.expense_id.isnot(None)).all()}
+    buckets: dict[tuple, list] = {}
+    for g in InstallmentGroup.query.filter(InstallmentGroup.user_id.in_(uids)).order_by(InstallmentGroup.id).all():
+        rows = Expense.query.filter_by(installment_group_id=g.id).all()
+        rows = [r for r in rows if r.payment_method == CREDIT]
+        if not rows:
+            continue
+        word = next(iter(_words(rows[0].description)), '')
+        cards = frozenset(card_family(rows[0].card_id)) if rows[0].card_id else frozenset()
+        buckets.setdefault((word, g.num_installments, cards), []).append((g, rows))
+    removed = 0
+    for groups in buckets.values():
+        if len(groups) < 2:
+            continue
+        keep_g, keep_rows = max(groups, key=lambda gr: (sum(r.id in linked for r in gr[1]), -gr[0].id))
+        by_num = {r.installment_number: r for r in keep_rows}
+        typical = sorted(Decimal(str(r.amount)) for r in keep_rows)[len(keep_rows) // 2]
+        for g, rows in groups:
+            if g.id == keep_g.id:
+                continue
+            other = sorted(Decimal(str(r.amount)) for r in rows)[len(rows) // 2]
+            clash = any(r.id in linked and by_num.get(r.installment_number) is not None
+                        and by_num[r.installment_number].id in linked for r in rows)
+            if abs(other - typical) > Decimal('0.10') or clash:
+                continue  # outra compra
+            for r in rows:
+                mine = by_num.get(r.installment_number)
+                if mine is None:
+                    r.installment_group_id = keep_g.id  # parcela que só a outra série tinha
+                    by_num[r.installment_number] = r
+                elif r.id in linked and mine.id not in linked:
+                    db.session.delete(mine)  # fica a que veio do banco
+                    r.installment_group_id = keep_g.id
+                    by_num[r.installment_number] = r
+                    removed += 1
+                else:
+                    db.session.delete(r)
+                    removed += 1
+            db.session.flush()
+            if not Expense.query.filter_by(installment_group_id=g.id).count():
+                db.session.delete(g)
+    db.session.flush()
+    return removed
 
 
 def align_to_bank(acc: BankAccount) -> int:
@@ -657,6 +737,7 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
             else:  # classificado sozinho antes: classifica de novo (regras podem ter melhorado)
                 tx.status, tx.reason, tx.expense_id = 'pending', None, None
             _apply_tx(tx, raw)
+            tx.kind = tx_kind(acc, raw) or 'expense'
             bill = tx_bill(acc, tx) if by_bill else None
             tx.bill_year, tx.bill_month = bill if bill else (None, None)
             # cartão: fica se a fatura vence a partir do início; conta: se a data é a partir do início
@@ -665,7 +746,7 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
                 if fresh:
                     db.session.expunge(tx)
                 continue
-            why = _skip_reason(tx.description, tx.pluggy_category)
+            why = _skip_reason(tx.description, tx.pluggy_category) if tx.kind == 'expense' else None
             if why and acc.type == 'BANK' and why.startswith('Pagamento de fatura'):
                 why = reconcile_bill_payment(tx) or why
             elif not why and acc.type == 'BANK':
@@ -676,6 +757,7 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
             elif match:
                 tx.status, tx.expense_id = 'duplicate', match.id
                 tx.reason = 'Já estava no FinFam.'
+                take_bank_amount(match, tx)
             elif fresh:
                 new_pending += 1
             db.session.flush()
@@ -730,6 +812,7 @@ def sync(conn: BankConnection, client: pg.PluggyClient, today: date | None = Non
         conn.needs_sync = True
         return 0
     conn.needs_sync = False
+    merge_duplicate_series(conn.user_id)
     reconcile_payments(conn.user_id)  # antes do automático: boleto que paga fatura não vira despesa
     if conn.auto_import:
         auto_approve(conn)
@@ -852,6 +935,12 @@ def suggestion(tx: BankTransaction, uids: list, tenant_id: int | None) -> dict:
     """Categoria e forma de pagamento sugeridas: regras e histórico da família primeiro; sem
     nada, pela descrição e pela categoria que o banco manda."""
     category, source = categorize(tx.description, uids, tenant_id) if tenant_id else (None, None)
+    if tx.kind == 'refund':  # estorno: a categoria da compra que ele devolve
+        orig = (Expense.query.filter(Expense.user_id.in_(uids), Expense.amount > 0,
+                                     Expense.description.ilike(f'%{tx.description[:20]}%'))
+                .order_by(Expense.year.desc(), Expense.month.desc()).first())
+        if orig is not None:
+            category, source = orig.category, 'compra'
     if not category:
         category = guess_category(tx)
         source = 'banco' if category else None
@@ -876,6 +965,7 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
         tx.status, tx.expense_id, tx.reason, tx.reviewed_at = 'duplicate', existing.id, 'Já estava no FinFam.', utcnow()
         if credit and tx.bill_year and tx.bill_month:
             move_to_bill(existing, (tx.bill_year, tx.bill_month))
+        take_bank_amount(existing, tx)
         return existing
     when = target_date(tx)
     desc = (description or tx.description).strip()[:200] or tx.description
@@ -883,6 +973,10 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
     method = CREDIT if credit else (payment_method if payment_method in ('PIX', DEBIT) else suggested_method(tx))
     installments = None
     amount = Decimal(str(tx.amount))
+    if tx.kind == 'refund':  # estorno/crédito no cartão: entra negativo e abate a fatura
+        amount, n, k = -amount, 0, 0
+        if not desc.lower().startswith('estorno'):
+            desc = f'Estorno: {desc}'[:200]
     if credit and n > 1 and k <= 1:  # 1ª parcela: lança a compra inteira parcelada, como no site
         installments = n
         amount = Decimal(str(tx.total_amount)) if tx.total_amount else amount * n
@@ -985,7 +1079,7 @@ def invoice_check(user_id: int, month: int, year: int) -> list[dict]:
         bill = next((b for b in acc.bills.all() if (b.due_date.year, b.due_date.month) == (year, month)), None)
         txs = acc.transactions.filter(BankTransaction.bill_year == year, BankTransaction.bill_month == month,
                                       BankTransaction.status != 'ignored').all()
-        items_total = round(sum(float(t.amount) for t in txs), 2)
+        items_total = round(sum(float(t.amount) * (-1 if t.kind == 'refund' else 1) for t in txs), 2)
         knows_bills = bool((acc.close_day and acc.due_day) or acc.bills.count())
         if bill is not None and bill.total:
             bank_total, source = round(float(bill.total), 2), 'fatura'
@@ -1008,7 +1102,8 @@ def invoice_check(user_id: int, month: int, year: int) -> list[dict]:
             row['only_finfam'] = [{'id': e.id, 'description': e.description, 'amount': float(e.amount),
                                    'date': _expense_date(e).isoformat(), 'installment': e.installment_number}
                                   for e in exps if e.id not in linked]
-        row['only_bank'] = [{'id': t.id, 'description': t.description, 'amount': float(t.amount),
+        row['only_bank'] = [{'id': t.id, 'description': t.description,
+                             'amount': float(t.amount) * (-1 if t.kind == 'refund' else 1),
                              'date': t.date.isoformat(), 'status': t.status} for t in txs if t.status == 'pending']
         out.append(row)
     return out
