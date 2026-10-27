@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { LineChart } from '../components/charts'
-import { ConfirmButton, Empty, ErrorBox, Money, PageHeader, Panel, Spinner, Table, Button } from '../components/ui'
+import { ConfirmButton, Empty, ErrorBox, Money, PageHeader, Panel, Segmented, Spinner, Table, Button } from '../components/ui'
 import { api } from '../lib/api'
 import { brl, dateBR, money, MONTHS_SHORT, pct, rate } from '../lib/format'
 import { useApi } from '../lib/hooks'
 import { useAction, useSession } from '../lib/session'
 import type { Investment } from '../lib/types'
 import { InvestmentForm } from './InvestmentForm'
+import { allocate, bankClass, manualClass, type Holding } from '../lib/allocation'
 
 interface InvestmentsData {
   fixed: Investment[]; crypto: Investment[]; fixed_total: number; crypto_total: number; fx_gain_total: number
@@ -123,6 +124,42 @@ function BankInvestmentsPanel({ data }: { data: BankInvestments }) {
   )
 }
 
+const SLICE_COLORS = ['var(--primary)', 'var(--card)', 'var(--income)', 'var(--warning)', 'var(--info)', 'var(--expense)', 'var(--ink-3)']
+
+/** Tudo o que a família tem, numa lista só: carteira (em R$), cripto (aplicado) e bancos (saldo). */
+function holdings(d: InvestmentsData, bank: BankInvestments | null): Holding[] {
+  return [
+    ...d.fixed.map((i) => ({ klass: manualClass(i.investment_type, false), place: 'Lançados no FinFam', value: i.value_brl ?? i.amount })),
+    ...d.crypto.map((i) => ({ klass: 'Cripto', place: 'Lançados no FinFam', value: i.amount })),
+    ...(bank?.items ?? []).filter((i) => i.currency === 'BRL')
+      .map((i) => ({ klass: bankClass(i.type, i.subtype), place: i.bank, value: i.balance })),
+  ]
+}
+
+/** "Para onde vai o dinheiro": por classe ou instituição, com a fatia de cada uma. */
+function AllocationPanel({ items }: { items: Holding[] }) {
+  const [by, setBy] = useState<'klass' | 'place'>('klass')
+  const slices = allocate(items, by)
+  if (slices.length === 0) return null
+  return (
+    <Panel title="Distribuição" actions={<Segmented ariaLabel="Agrupar por" value={by} onChange={setBy}
+      options={[{ value: 'klass', label: 'Classes' }, { value: 'place', label: 'Instituições' }]} />}>
+      <ul className="alloc">
+        {slices.map((s, i) => (
+          <li key={s.label}>
+            <div className="alloc-head">
+              <span>{s.label} <span className="muted">({s.count})</span></span>
+              <span><span className="muted">{pct(s.share * 100, 1)}</span> <b>{brl(s.value)}</b></span>
+            </div>
+            <div className="alloc-bar" role="presentation">
+              <span style={{ width: `${Math.max(s.share * 100, 0.5)}%`, background: SLICE_COLORS[i % SLICE_COLORS.length] }} />
+            </div>
+          </li>))}
+      </ul>
+    </Panel>
+  )
+}
+
 export function InvestmentsPage() {
   const { dataVersion } = useSession()
   const act = useAction()
@@ -131,6 +168,7 @@ export function InvestmentsPage() {
   const bank = useApi(() => api.get<BankInvestments>('/pluggy/investments').catch(() => null), [dataVersion])
   const [open, setOpen] = useState(false)
   const d = data.data
+  const bankTotal = bank.data?.enabled ? bank.data.total : 0
   const reloadAll = () => { data.reload(); proj.reload() }
   const remove = (id: number) => act(() => api.del<{ message: string }>(`/investments/${id}`), reloadAll)
 
@@ -142,12 +180,15 @@ export function InvestmentsPage() {
       {data.error ? <ErrorBox message={data.error} onRetry={data.reload} /> : !d ? <Spinner /> : (
         <>
           <dl className="kpis kpis-inline">
-            <div><dt>Carteira (em R$)</dt><dd><Money value={d.fixed_total} /></dd></div>
+            <div><dt>Total investido</dt><dd><Money value={d.fixed_total + d.crypto_total + bankTotal} /></dd></div>
+            {bankTotal > 0 && <div><dt>Nos bancos (saldo do banco)</dt><dd><Money value={bankTotal} /></dd></div>}
+            {(d.fixed.length > 0 || !bankTotal) && <div><dt>Carteira (em R$)</dt><dd><Money value={d.fixed_total} /></dd></div>}
             {d.fixed.some((i) => i.currency !== 'BRL') && (
               <div><dt>Ganho com câmbio</dt><dd><Money value={d.fx_gain_total} tone="auto" /></dd></div>
             )}
-            <div><dt>Cripto (valor aplicado)</dt><dd><Money value={d.crypto_total} /></dd></div>
+            {d.crypto.length > 0 && <div><dt>Cripto (valor aplicado)</dt><dd><Money value={d.crypto_total} /></dd></div>}
           </dl>
+          <AllocationPanel items={holdings(d, bank.data)} />
           {proj.data && proj.data.labels.length > 0 && (
             <Panel title="Projeção da renda fixa — 12 meses">
               <LineChart ariaLabel="Projeção de 12 meses" labels={proj.data.labels} series={[
@@ -156,11 +197,13 @@ export function InvestmentsPage() {
                 { label: 'Líquido de IR/IOF', data: proj.data.projected_net, color: 'var(--income)' }]} />
             </Panel>
           )}
-          <Panel title="Carteira" flush>
-            {d.fixed.length === 0
-              ? <Empty icon="piggy-bank" title="Nenhum investimento na carteira." />
-              : <PortfolioTable items={d.fixed} onRemove={remove} />}
-          </Panel>
+          {(d.fixed.length > 0 || !bankTotal) && (
+            <Panel title="Carteira" flush>
+              {d.fixed.length === 0
+                ? <Empty icon="piggy-bank" title="Nenhum investimento na carteira." />
+                : <PortfolioTable items={d.fixed} onRemove={remove} />}
+            </Panel>
+          )}
           {bank.data && <BankInvestmentsPanel data={bank.data} />}
           {d.crypto.length > 0 && <Panel title="Criptomoedas" flush><CryptoTable items={d.crypto} onRemove={remove} /></Panel>}
         </>

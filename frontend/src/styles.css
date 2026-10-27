@@ -545,3 +545,8 @@ a.insight:hover { background: #e8edf1; }
 .check-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .2rem; font-size: .85rem; }
 .check-list li { display: flex; gap: .4rem; flex-wrap: wrap; }
 .check-list li b { margin-left: auto; white-space: nowrap; }
+/* Investimentos: distribuição por classe/instituição */
+.alloc { list-style: none; margin: 0; padding: 0; display: grid; gap: .85rem; }
+.alloc-head { display: flex; justify-content: space-between; gap: 1rem; font-size: .92rem; margin-bottom: .3rem; flex-wrap: wrap; }
+.alloc-bar { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.alloc-bar span { display: block; height: 100%; border-radius: 99px; }

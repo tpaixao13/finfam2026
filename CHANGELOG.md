@@ -134,6 +134,8 @@ pelo bot ou importando extrato, como antes.
 - Investimentos dos bancos (`bank_investments`, `GET /pluggy/investments`): CDB, fundos etc. que o banco
   informa aparecem em Investimentos › "Nos bancos", com o saldo do banco, taxa e vencimento — só consulta,
   não entram na carteira lançada à mão. Resgatado some na leitura seguinte. Só quem conectou vê.
+  O topo mostra o total investido (carteira + cripto + bancos) e o painel "Distribuição" separa por
+  classe (Renda Fixa, Ações, Fundos...) ou por instituição, com a % de cada uma (`lib/allocation.ts`).
 - C6: "DÉBITO DE CARTÃO" na conta é compra no débito (a Pluggy marca como pagamento de cartão).
 - Despesas: atalho para selecionar as vencidas da página e marcar como pagas.
 - Regras de categoria passam a ser preenchidas: em Revisar importados, trocar a categoria sugerida cria
