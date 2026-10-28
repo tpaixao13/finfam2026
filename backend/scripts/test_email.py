@@ -14,7 +14,7 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     if not mailer.enabled():
-        print('E-mail desligado: preencha SMTP_HOST, SMTP_USER, SMTP_PASSWORD e SMTP_FROM no .env.')
+        print('E-mail desligado: preencha SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM e PUBLIC_URL no .env.')
         return 1
     print(f'Enviando por {settings.smtp_host}:{settings.smtp_port} ({settings.smtp_security}) como {mailer._sender()}…')
     mailer.BACKGROUND = False

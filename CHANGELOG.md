@@ -156,6 +156,10 @@ pelo bot ou importando extrato, como antes.
     pede confirmação de novo. Família mostra "aguardando confirmar" com reenviar; admin pode confirmar à mão.
   - "Esqueci minha senha": link de 1 h e uso único (amarrado à senha atual); trocar desconecta sessões,
     Telegram e tokens. Resposta igual exista ou não a conta; limite de pedidos.
+  - Revisão de segurança: links sempre com o PUBLIC_URL (e-mail só liga com ele — Host forjado não
+    redireciona o link de nova senha); o link de confirmação só confirma (não entra na conta); conta nunca
+    confirmada há 24 h pode ser cadastrada de novo; link de nova senha morre se o e-mail mudar; token sai da
+    barra de endereço; limites por IP usam o CF-Connecting-IP atrás do cloudflared.
   - Sem SMTP configurado, nada muda (conta entra direto). `services/mailer.py`, `services/account_mail.py`,
     `users.email_verified_at`; telas `/confirmar-email`, `/esqueci-senha`, `/redefinir-senha`.
 - Categoria do banco: a classificação da Pluggy (em inglês, ~100 categorias) é traduzida e encaixada na

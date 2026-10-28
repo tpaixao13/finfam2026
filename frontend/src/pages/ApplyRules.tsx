@@ -50,7 +50,7 @@ export function ApplyRulesModal({ open, onClose, onDone }: { open: boolean; onCl
               <thead><tr><th>Despesa</th><th className="hide-sm">Data</th><th className="num hide-sm">Valor</th><th>Categoria</th></tr></thead>
               <tbody>{preview.sample.map((c) => (
                 <tr key={c.id}>
-                  <td>{c.description}<small className="muted block">{c.keyword ? <>regra <code>{c.keyword}</code></> : "categoria do banco"}
+                  <td>{c.description}<small className="muted block">{c.keyword ? <>regra <code>{c.keyword}</code></> : 'categoria do banco'}
                     <span className="only-sm"> · {dateBR(c.date)} · {brl(c.amount)}</span></small></td>
                   <td className="hide-sm nowrap">{dateBR(c.date)}</td>
                   <td className="num hide-sm nowrap">{brl(c.amount)}</td>

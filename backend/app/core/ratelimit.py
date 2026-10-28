@@ -10,8 +10,16 @@ _lock = threading.Lock()
 _hits: dict[str, deque] = defaultdict(deque)
 
 
+_LOCAL = {'127.0.0.1', '::1', 'localhost'}
+
+
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else 'desconhecido'
+    """IP de quem pediu. Atrás do cloudflared (mesma máquina) todo pedido chega de 127.0.0.1: aí vale o
+    CF-Connecting-IP, senão o limite seria um só para o site inteiro. Pedido de fora não escolhe o IP."""
+    host = request.client.host if request.client else 'desconhecido'
+    if host in _LOCAL:
+        return (request.headers.get('cf-connecting-ip') or host).strip()[:64]
+    return host
 
 
 def check(request: Request, scope: str, key: str = '', limit: int = 10, window: int = 900) -> None:

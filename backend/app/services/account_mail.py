@@ -24,11 +24,14 @@ def _email_fp(email: str | None) -> str:
     return hashlib.sha256(f'verify|{(email or "").lower()}|{settings.secret_key}'.encode()).hexdigest()[:24]
 
 
-def base_url(request: Request | None) -> str:
-    """Endereço público do site (PUBLIC_URL); sem ele, o endereço por onde o pedido chegou."""
-    if settings.public_url:
-        return settings.public_url
-    return str(request.base_url).rstrip('/') if request is not None else ''
+def base_url(request: Request | None = None) -> str:
+    """Endereço público do site: sempre o PUBLIC_URL do .env (nunca o Host do pedido, que pode ser forjado)."""
+    return settings.public_url
+
+
+def _reset_fp(user: User) -> str:
+    """Nova senha: o link morre quando a senha muda (uso único) ou o e-mail muda."""
+    return hashlib.sha256(f'{session_fingerprint(user.password_hash)}|{_email_fp(user.email)}'.encode()).hexdigest()[:24]
 
 
 def needs_verification(user: User) -> bool:
@@ -55,7 +58,8 @@ def send_verification(user: User, request: Request | None, invited_by: str | Non
 
 
 def verify(token: str) -> User | None:
-    """Usuário do link de confirmação válido (e marca confirmado), ou None."""
+    """Usuário do link de confirmação válido (e marca confirmado), ou None. O link só confirma:
+    não entra na conta (quem tem o link não tem a senha — ex.: conta criada por outra pessoa com o seu e-mail)."""
     payload = decode_access_token(token or '')
     if not payload or payload.get('typ') != 'verify':
         return None
@@ -66,9 +70,19 @@ def verify(token: str) -> User | None:
     return user
 
 
+def stale_unconfirmed(user: User, hours: int = 24) -> bool:
+    """Conta criada e nunca confirmada há mais de `hours` (sozinha na família): pode ser trocada por um
+    cadastro novo com o mesmo e-mail — impede alguém de "segurar" o e-mail de outra pessoa."""
+    if user.is_admin or user.email_verified_at is not None or not mailer.enabled() or not user.tenant_id:
+        return False
+    tenant = db.session.get(Tenant, user.tenant_id)
+    if tenant is None or tenant.users.count() != 1 or tenant.created_at is None:
+        return False
+    return (utcnow() - tenant.created_at).total_seconds() > hours * 3600
+
+
 def send_reset(user: User, request: Request | None) -> None:
-    token, _ = create_access_token(user.id, kind='reset', fingerprint=session_fingerprint(user.password_hash),
-                                   minutes=RESET_MINUTES)
+    token, _ = create_access_token(user.id, kind='reset', fingerprint=_reset_fp(user), minutes=RESET_MINUTES)
     mailer.send_reset(user.email, user.name, f'{base_url(request)}/redefinir-senha?token={token}')
 
 
@@ -79,6 +93,6 @@ def reset_user(token: str) -> User | None:
         return None
     user = db.session.get(User, int(payload.get('sub', 0) or 0))
     if user is None or user.is_admin or \
-            not hmac.compare_digest(str(payload.get('fp', '')), session_fingerprint(user.password_hash)):
+            not hmac.compare_digest(str(payload.get('fp', '')), _reset_fp(user)):
         return None
     return user

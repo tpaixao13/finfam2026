@@ -120,7 +120,11 @@ def login_2fa(body: TwoFactorLoginIn, request: Request):
 def register(body: RegisterIn, request: Request):
     ratelimit.check(request, 'register', limit=5, window=3600)
     email = body.email.strip().lower()
-    if User.query.filter_by(email=email).first():
+    existing = User.query.filter_by(email=email).first()
+    if existing is not None and account_mail.stale_unconfirmed(existing):
+        db.session.delete(db.session.get(Tenant, existing.tenant_id))  # nunca confirmada: libera o e-mail
+        db.session.flush()
+    elif existing is not None:
         raise HTTPException(status_code=409, detail='E-mail já cadastrado. Faça login ou use outro e-mail.')
     first_name = body.name.strip().split()[0]
     tenant = Tenant(name=f'Família {first_name}', code=secrets.token_hex(8),
@@ -159,18 +163,16 @@ class ResetIn(BaseModel):
         return self
 
 
-@router.post('/auth/verify', summary='Confirma o e-mail pelo link das boas-vindas (e já entra)')
+@router.post('/auth/verify', summary='Confirma o e-mail pelo link das boas-vindas')
 def verify_email(body: TokenOnlyIn, request: Request):
+    """Só confirma o e-mail; para entrar, e-mail e senha (o link não substitui a senha)."""
     ratelimit.check(request, 'verify', limit=60, window=900)
     user = account_mail.verify(body.token)
     if user is None:
         raise HTTPException(status_code=400, detail={
             'code': 'link_invalid', 'message': 'Este link de confirmação expirou ou não vale mais. Peça outro.'})
     db.session.commit()
-    if user.totp_enabled:  # com 2FA, entra pelo login normal (o link não pula o código do app)
-        return {'message': 'E-mail confirmado! Entre com seu e-mail e senha.'}
-    tenant = db.session.get(Tenant, user.tenant_id) if user.tenant_id else None
-    return {'message': 'E-mail confirmado! Bem-vindo ao FinFam.', **_session_payload(user, tenant)}
+    return {'message': 'E-mail confirmado! Agora entre com seu e-mail e senha.', 'email': user.email}
 
 
 _GENERIC_RESEND = 'Se o e-mail estiver cadastrado e ainda não confirmado, enviamos um novo link. Veja também o spam.'

@@ -42,7 +42,7 @@ def test_register_sends_welcome_and_login_waits_for_confirmation(client, outbox)
         client.post(f'{API}/auth/verify/resend', json={'email': 'nova@test.com'}).json()['message']
     token = _link(outbox[0], 'confirmar-email')
     v = client.post(f'{API}/auth/verify', json={'token': token})
-    assert v.status_code == 200 and v.json()['access_token']
+    assert v.status_code == 200 and 'access_token' not in v.json()  # o link só confirma; entra com a senha
     assert client.post(f'{API}/auth/login', json={'email': 'nova@test.com', 'password': 'senha-segura'}).status_code == 200
     assert client.post(f'{API}/auth/verify', json={'token': 'x' * 20}).status_code == 400
 
@@ -84,3 +84,41 @@ def test_member_gets_welcome_and_owner_can_resend(client, family, outbox):
     assert client.post(f'{API}/auth/login', json={'email': 'greyce@test.com', 'password': 'senha-segura', 'confirm_password': 'senha-segura'}).status_code == 403
     assert family.post(f"/family/members/{r.json()['member']['id']}/resend").status_code == 200
     assert len(outbox) == 2
+
+
+def test_links_use_public_url_not_host_header(client, outbox, monkeypatch):
+    from app.core import config
+    from app.services import account_mail
+    monkeypatch.setattr(account_mail, 'settings', __import__('dataclasses').replace(config.settings, public_url='https://finfam.test'))
+    _register(client)
+    client.post(f'{API}/auth/verify/resend', json={'email': 'nova@test.com'}, headers={'Host': 'evil.example'})
+    for msg in outbox:
+        body = msg.get_body(preferencelist=('plain',)).get_content()
+        assert 'https://finfam.test/confirmar-email?token=' in body and 'evil.example' not in body
+
+
+def test_stale_unconfirmed_account_can_be_registered_again(client, outbox):
+    from datetime import timedelta
+    from app.core.types import utcnow
+    from app.models import Tenant
+    _register(client)
+    assert _register(client).status_code == 409             # recente: ainda é de quem criou
+    t = Tenant.query.join(User).filter(User.email == 'nova@test.com').one()
+    t.created_at = utcnow() - timedelta(days=2)
+    session.commit()
+    session.remove()
+    assert _register(client).status_code == 201             # nunca confirmada há 2 dias: libera o e-mail
+    assert User.query.filter_by(email='nova@test.com').count() == 1
+    session.remove()
+
+
+def test_reset_link_dies_when_email_changes(client, family, outbox):
+    client.post(f'{API}/auth/forgot-password', json={'email': 'tiago@test.com'})
+    token = _link(outbox[-1], 'redefinir-senha')
+    u = User.query.filter_by(email='tiago@test.com').one()
+    u.email = 'tiago2@test.com'
+    session.commit()
+    session.remove()
+    r = client.post(f'{API}/auth/reset-password', json={'token': token, 'password': 'nova-senha-123',
+                                                       'confirm_password': 'nova-senha-123'})
+    assert r.status_code == 400

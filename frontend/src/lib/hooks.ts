@@ -53,3 +53,15 @@ export function usePeriod() {
   const setPeriod = (m: number, y: number) => set({ month: m, year: y })
   return { month, year, setPeriod }
 }
+
+/** Tarefa de formulário: `run(fn)` liga `busy`, limpa e guarda o erro da API (telas sem toast, como o login). */
+export function useTask() {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const run = useCallback(async (fn: () => Promise<void>) => {
+    setBusy(true)
+    setError(null)
+    try { await fn() } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
+  }, [])
+  return { busy, error, setError, run }
+}

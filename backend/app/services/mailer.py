@@ -18,7 +18,9 @@ BACKGROUND = True  # testes desligam: o envio vira chamada direta (e é trocado 
 
 
 def enabled() -> bool:
-    return bool(settings.smtp_host and (settings.smtp_from or settings.smtp_user))
+    """Precisa do SMTP e do PUBLIC_URL: os links dos e-mails nunca usam o endereço que veio no pedido
+    (um Host forjado mandaria o link de nova senha para o site de outra pessoa)."""
+    return bool(settings.smtp_host and (settings.smtp_from or settings.smtp_user) and settings.public_url)
 
 
 def _sender() -> str:

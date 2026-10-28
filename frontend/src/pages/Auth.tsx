@@ -2,15 +2,16 @@ import { useState } from 'react'
 import { AppVersion } from '../components/AppVersion'
 import { Button, Field, Input } from '../components/ui'
 import { api, type ApiError } from '../lib/api'
+import { useTask } from '../lib/hooks'
 import { Link, navigate } from '../lib/router'
 import { useSession } from '../lib/session'
-import { CheckEmail, ResendConfirmation } from './AccountEmail'
+import { CheckEmail, PASSWORD_MISMATCH, PasswordFields, ResendConfirmation } from './AccountEmail'
 
 interface SessionResponse { access_token: string }
 type LoginResponse = SessionResponse | { two_factor_required: true; challenge: string }
 type RegisterResponse = SessionResponse | { verify_required: true; email: string; message: string }
 
-export function AuthShell({ title, lead, children, footer }: { title: string; lead: string; children: React.ReactNode; footer: React.ReactNode }) {
+export function AuthShell({ title, lead, children, footer }: { title: string; lead: string; children: React.ReactNode; footer?: React.ReactNode }) {
   return (
     <div className="auth">
       <div className="auth-side">
@@ -22,7 +23,7 @@ export function AuthShell({ title, lead, children, footer }: { title: string; le
           <h1>{title}</h1>
           <p className="muted">{lead}</p>
           {children}
-          <p className="auth-foot">{footer}</p>
+          {footer && <p className="auth-foot">{footer}</p>}
         </div>
         <AppVersion />
       </div>
@@ -107,26 +108,19 @@ export function LoginPage() {
 export function RegisterPage() {
   const { login } = useSession()
   const [form, setForm] = useState({ name: '', email: '', password: '', confirm_password: '' })
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
   const [sentTo, setSentTo] = useState<string | null>(null)  // conta criada: falta confirmar o e-mail
-  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
+  const { busy, error, setError, run } = useTask()
+  const set = (k: 'name' | 'email', v: string) => setForm((f) => ({ ...f, [k]: v }))
 
-  async function submit(e: React.FormEvent) {
+  const submit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (form.password !== form.confirm_password) { setError('As senhas não coincidem.'); return }
-    setBusy(true)
-    setError(null)
-    try {
+    if (form.password !== form.confirm_password) { setError(PASSWORD_MISMATCH); return }
+    run(async () => {
       const r = await api.post<RegisterResponse>('/auth/register', form)
       if ('verify_required' in r) { setSentTo(r.email); return }
       await login(r.access_token)
       navigate('/', { replace: true })
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   if (sentTo) return <CheckEmail email={sentTo} />
@@ -137,8 +131,7 @@ export function RegisterPage() {
       <form className="stack" onSubmit={submit}>
         <Field label="Seu nome"><Input value={form.name} onChange={(e) => set('name', e.target.value)} required minLength={2} maxLength={30} autoFocus /></Field>
         <Field label="E-mail"><Input type="email" autoComplete="email" value={form.email} onChange={(e) => set('email', e.target.value)} required /></Field>
-        <Field label="Senha" hint="Mínimo de 8 caracteres"><Input type="password" autoComplete="new-password" value={form.password} onChange={(e) => set('password', e.target.value)} required minLength={8} /></Field>
-        <Field label="Confirmar senha"><Input type="password" autoComplete="new-password" value={form.confirm_password} onChange={(e) => set('confirm_password', e.target.value)} required /></Field>
+        <PasswordFields value={form} onChange={(v) => setForm((f) => ({ ...f, ...v }))} />
         {error && <p className="form-error" role="alert">{error}</p>}
         <Button type="submit" busy={busy} className="btn-block">Criar conta</Button>
       </form>
