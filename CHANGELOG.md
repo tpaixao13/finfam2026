@@ -153,7 +153,7 @@ pelo bot ou importando extrato, como antes.
   - Cadastro manda e-mail de boas-vindas com link de confirmação (48 h); o login só entra depois de
     confirmar (`email_not_verified`, com "Reenviar"). Contas que já existiam ficam confirmadas.
   - Membro adicionado pela família recebe as boas-vindas ("Fulano adicionou você…"); trocar o e-mail
-    pede confirmação de novo. Família mostra "aguardando confirmar" com reenviar; admin pode confirmar à mão.
+    pede confirmação de novo. Família mostra "aguardando confirmar" com reenviar; admin pode confirmar à mão e "enviar link de nova senha".
   - "Esqueci minha senha": link de 1 h e uso único (amarrado à senha atual); trocar desconecta sessões,
     Telegram e tokens. Resposta igual exista ou não a conta; limite de pedidos.
   - Revisão de segurança: links sempre com o PUBLIC_URL (e-mail só liga com ele — Host forjado não

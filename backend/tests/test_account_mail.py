@@ -122,3 +122,12 @@ def test_reset_link_dies_when_email_changes(client, family, outbox):
     r = client.post(f'{API}/auth/reset-password', json={'token': token, 'password': 'nova-senha-123',
                                                        'confirm_password': 'nova-senha-123'})
     assert r.status_code == 400
+
+
+def test_admin_sends_reset_link(client, family, outbox):
+    from test_pluggy import _admin
+    admin = _admin(client)
+    r = client.post(f"{API}/admin/users/{family.user['id']}/send-reset", headers=admin)
+    assert r.status_code == 200, r.text
+    assert outbox[-1]['To'] == 'tiago@test.com' and '/redefinir-senha?token=' in outbox[-1].get_body(preferencelist=('plain',)).get_content()
+    assert client.post(f"{API}/admin/users/{family.user['id']}/send-reset").status_code == 401

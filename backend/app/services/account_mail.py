@@ -81,7 +81,7 @@ def stale_unconfirmed(user: User, hours: int = 24) -> bool:
     return (utcnow() - tenant.created_at).total_seconds() > hours * 3600
 
 
-def send_reset(user: User, request: Request | None) -> None:
+def send_reset(user: User, request: Request | None = None) -> None:
     token, _ = create_access_token(user.id, kind='reset', fingerprint=_reset_fp(user), minutes=RESET_MINUTES)
     mailer.send_reset(user.email, user.name, f'{base_url(request)}/redefinir-senha?token={token}')
 

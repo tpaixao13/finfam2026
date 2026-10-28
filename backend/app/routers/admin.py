@@ -13,6 +13,7 @@ from app.core.db import db, get_or_404
 from app.core.deps import get_admin
 from app.core.security import create_access_token, decode_access_token, session_fingerprint
 from app.models import PluggyConfig, Tenant, User
+from app.services import account_mail, mailer
 from app.services import family_backup as fb
 from app.services import open_finance as of
 from app.services import two_factor as tfa
@@ -188,6 +189,18 @@ def _family_user(user_id: int) -> User:
     if user.is_admin:
         raise HTTPException(status_code=403, detail='2FA de administrador: use o comando no servidor (scripts.reset_2fa).')
     return user
+
+
+@router.post('/users/{user_id}/send-reset', summary='Manda à pessoa o e-mail com o link para criar uma nova senha')
+def admin_send_reset(user_id: int, admin: User = Depends(get_admin)):
+    user = get_or_404(User.query.filter_by(id=user_id, is_admin=False), 'Usuário não encontrado.')
+    if not mailer.enabled():
+        raise HTTPException(status_code=422, detail='O e-mail não está configurado (SMTP e PUBLIC_URL no .env). '
+                                                    'Use "senha" para definir uma nova.')
+    if not user.email:
+        raise HTTPException(status_code=422, detail='Esta pessoa não tem e-mail cadastrado.')
+    account_mail.send_reset(user)
+    return {'message': f'Link de nova senha enviado para {user.email} (vale 1 hora).'}
 
 
 @router.post('/users/{user_id}/verify-email', summary='Confirma o e-mail do usuário à mão (ex.: e-mail não chegou)')

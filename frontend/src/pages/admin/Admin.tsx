@@ -182,6 +182,7 @@ export function AdminPage() {
                                 <button className="link-btn" onClick={() => run(() => api.admin.post(`/admin/users/${m.id}/verify-email`))}>confirmar e-mail</button>
                               </>}
                               <button className="link-btn" onClick={() => { setReset(m); setNewPwd('') }}>senha</button>
+                              <button className="link-btn" onClick={() => run(() => api.admin.post(`/admin/users/${m.id}/send-reset`))}>enviar link de nova senha</button>
                               {(m.two_factor_locked || m.two_factor_failures > 0) && (
                                 <button className="link-btn" onClick={() => run(() => api.admin.post(`/admin/users/${m.id}/2fa/unlock`))}>zerar erros 2FA</button>
                               )}
