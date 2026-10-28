@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Avatar, Badge, Button, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Modal, PageHeader,
-  Panel, Spinner, Table } from '../components/ui'
+import { Avatar, Badge, Button, ConfirmButton, ErrorBox, Field, IconButton, Input, Modal, PageHeader,
+  Panel, Spinner } from '../components/ui'
 import { TwoFactorPanel } from '../components/TwoFactor'
 import { api, tokens as authTokens } from '../lib/api'
 import { dateBR } from '../lib/format'
@@ -108,31 +108,15 @@ export function FamilyPage() {
   )
 }
 
-interface ApiToken { id: number; name: string; prefix: string; created_at: string; last_used_at: string | null; revoked: boolean }
-
 export function SettingsPage() {
-  const { me, refreshMe, toast } = useSession()
+  const { me, refreshMe } = useSession()
   const act = useAction()
-  const tokens = useApi(() => api.get<ApiToken[]>('/auth/tokens'), [])
   const [pwd, setPwd] = useState({ current_password: '', new_password: '', confirm_password: '' })
-  const [tokenName, setTokenName] = useState('Bot do Telegram')
-  const [newToken, setNewToken] = useState<string | null>(null)
 
   async function uploadAvatar(file: File) {
     const fd = new FormData()
     fd.append('file', file)
     await act(() => api.post<{ message: string }>('/auth/avatar', fd), () => refreshMe())
-  }
-
-  async function createToken(e: React.FormEvent) {
-    e.preventDefault()
-    try {
-      const r = await api.post<{ token: string }>('/auth/tokens', { name: tokenName })
-      setNewToken(r.token)
-      tokens.reload()
-    } catch (err) {
-      toast((err as Error).message, 'danger')
-    }
   }
 
   return (
@@ -163,31 +147,6 @@ export function SettingsPage() {
           </form>
         </Panel>
       </div>
-      <Panel title="Tokens de API (MCP e bot do Telegram)">
-        <p className="muted">Um token dá acesso aos dados da sua família pela API, em seu nome. Use um token por integração e revogue o que não usar mais.</p>
-        <form className="inline-form" onSubmit={createToken}>
-          <Field label="Nome do token"><Input value={tokenName} onChange={(e) => setTokenName(e.target.value)} required minLength={2} maxLength={60} /></Field>
-          <Button type="submit" icon="key">Gerar token</Button>
-        </form>
-        {newToken && (
-          <div className="token-reveal" role="status">
-            <p><b>Copie agora</b> — este token não será mostrado de novo.</p>
-            <code>{newToken}</code>
-            <Button variant="ghost" onClick={() => { navigator.clipboard?.writeText(newToken); toast('Token copiado.') }}>Copiar</Button>
-          </div>
-        )}
-        {tokens.data && tokens.data.length > 0 ? (
-          <Table>
-            <thead><tr><th>Nome</th><th>Início</th><th>Criado</th><th>Último uso</th><th /></tr></thead>
-            <tbody>{tokens.data.map((t) => (
-              <tr key={t.id} className={t.revoked ? 'row-off' : ''}>
-                <td>{t.name}</td><td><code>{t.prefix}…</code></td><td>{dateBR(t.created_at)}</td><td>{t.last_used_at ? dateBR(t.last_used_at) : 'nunca'}</td>
-                <td>{t.revoked ? <Badge>Revogado</Badge> : <ConfirmButton label="Revogar" confirmLabel="Revogar" onConfirm={() => act(() => api.del<{ message: string }>(`/auth/tokens/${t.id}`), tokens.reload)} />}</td>
-              </tr>))}
-            </tbody>
-          </Table>
-        ) : tokens.data && <Empty icon="key" title="Nenhum token criado." />}
-      </Panel>
     </div>
   )
 }

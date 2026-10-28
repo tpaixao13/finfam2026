@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Badge, Button, Check, ConfirmButton, ErrorBox, Field, Input, PageHeader, Panel, Select, Spinner } from '../components/ui'
+import { ApiTokensPanel } from '../components/ApiTokensPanel'
 import { api } from '../lib/api'
 import { useApi } from '../lib/hooks'
 import { useAction } from '../lib/session'
@@ -21,7 +22,7 @@ export function TelegramPage() {
   const d = data.data
   return (
     <div className="page">
-      <PageHeader title="Telegram e IA" subtitle="Consulte contas, pague e lance gastos conversando com o bot do FinFam." />
+      <PageHeader title="Telegram e IA" subtitle="Consulte contas, pague e lance gastos conversando com o bot do FinFam, ou pelo seu assistente de IA (MCP)." />
       {data.error ? <ErrorBox message={data.error} onRetry={data.reload} /> : !d ? <Spinner /> : (
         <div className="grid-2">
           <div className="stack-lg">
@@ -29,7 +30,10 @@ export function TelegramPage() {
             <ReminderPanel d={d} reload={data.reload} />
             <BotCommandsPanel />
           </div>
-          <AiPanel />
+          <div className="stack-lg">
+            <AiPanel />
+            <ApiTokensPanel />
+          </div>
         </div>
       )}
     </div>

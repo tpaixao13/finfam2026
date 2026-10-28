@@ -170,6 +170,8 @@ pelo bot ou importando extrato, como antes.
 - Contas conectadas redesenhada: a tela fica só com o dia a dia (bancos, Atualizar agora, conferência de
   faturas); ajustes de cada banco (renomear, automático, ligar cartão, fechamento, desconectar) atrás de
   "Ajustes"; chave Pluggy, aviso no Telegram, limite e "usar o ID da conexão" em `/bank/settings`.
+- Tokens de API saíram de Perfil e acesso e foram para Telegram e IA, como "Assistente de IA no computador
+  (MCP)" (`components/ApiTokensPanel.tsx`): o bot do Telegram não usa token (usa a chave central do bot).
 - Revisão visual geral: escolher arquivo em português (`FileInput`), "Últimos lançamentos" do painel sem
   botões de editar/excluir, Perfil e acesso em duas colunas sem buraco, "O que o bot faz" com /banco e as
   perguntas sem IA, meta de limite no painel mostra "% usado" (antes mostrava 0%).
