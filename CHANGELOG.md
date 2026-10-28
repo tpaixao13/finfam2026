@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.5.0 — do gráfico de categorias para as despesas (28/10/2026)
+
+- Painel → Gastos por categoria: tocar numa fatia ou numa linha da legenda abre Despesas já filtrado pela
+  categoria, no mesmo mês e ano do painel (o total bate com a fatia). A legenda virou botões (teclado e
+  leitor de tela). `Donut` ganhou `onSelect`.
+
 ## 2026.4.0 — bot do Telegram: revisar o banco, foto do cupom, áudio, agenda, semana e metas (28/10/2026)
 
 - **Revisar o que chegou do banco no Telegram** (`/revisar`, ou o botão "📝 Revisar aqui no Telegram" no aviso

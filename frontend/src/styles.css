@@ -384,6 +384,13 @@ a.insight:hover { background: #e8edf1; }
 .donut-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; font-size: .85rem; }
 .donut-legend li { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .1rem; cursor: default; }
 .donut-legend b { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.donut-legend li:has(.donut-pick) { display: block; }
+.donut-pick { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .1rem; width: calc(100% + .7rem);
+  margin: 0 -.35rem; padding: .1rem .35rem; border: 0; border-radius: var(--radius-sm); background: none;
+  font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.donut-pick:hover, .donut-pick:focus-visible { background: var(--primary-tint); }
+.donut-pick:hover span { text-decoration: underline; text-underline-offset: 2px; }
+.donut-pick:focus-visible { outline: 2px solid var(--primary); outline-offset: 0; }
 
 /* ── Modal, toasts, estados ───────────────────────────────────── */
 .modal { border: 0; padding: 0; border-radius: 14px; width: min(640px, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); box-shadow: 0 24px 60px rgba(19, 41, 61, .3); }

@@ -143,8 +143,10 @@ export function LineChart({ labels, series, height = 220, ariaLabel }: XYProps) 
   )
 }
 
-export function Donut({ labels, data, colors, centerLabel, ariaLabel }:
-  { labels: string[]; data: number[]; colors: string[]; centerLabel?: string; ariaLabel: string }) {
+/** `onSelect`: com ele, cada fatia e cada linha da legenda viram um link (ex.: abrir as despesas da categoria). */
+export function Donut({ labels, data, colors, centerLabel, ariaLabel, onSelect, selectHint }:
+  { labels: string[]; data: number[]; colors: string[]; centerLabel?: string; ariaLabel: string
+    onSelect?: (index: number) => void; selectHint?: (label: string) => string }) {
   const [hover, setHover] = useState<number | null>(null)
   const total = data.reduce((a, b) => a + b, 0)
   const R = 70, r = 46, C = 90
@@ -166,8 +168,9 @@ export function Donut({ labels, data, colors, centerLabel, ariaLabel }:
     <figure className="donut">
       <svg viewBox="0 0 180 180" role="img" aria-label={ariaLabel} onMouseLeave={() => setHover(null)}>
         {arcs.map((a) => (
-          <path key={a.i} d={a.d} style={{ fill: a.color }} fillRule="evenodd" stroke="var(--surface)" strokeWidth={2}
-            opacity={hover === null || hover === a.i ? 1 : 0.35} onMouseEnter={() => setHover(a.i)} />
+          <path key={a.i} d={a.d} style={{ fill: a.color, cursor: onSelect ? 'pointer' : undefined }} fillRule="evenodd"
+            stroke="var(--surface)" strokeWidth={2} opacity={hover === null || hover === a.i ? 1 : 0.35}
+            onMouseEnter={() => setHover(a.i)} onClick={onSelect ? () => onSelect(a.i) : undefined} />
         ))}
         <text x={C} y={C - 4} textAnchor="middle" className="donut-label">{shown.label}</text>
         <text x={C} y={C + 16} textAnchor="middle" className="donut-value">{brl(shown.value)}</text>
@@ -175,11 +178,21 @@ export function Donut({ labels, data, colors, centerLabel, ariaLabel }:
       <ul className="donut-legend">
         {labels.map((l, i) => (
           <li key={l} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
-            <i style={{ background: colors[i] }} /><span>{l}</span>
-            <b>{total > 0 ? Math.round((data[i] / total) * 100) : 0}%</b>
+            {onSelect ? (
+              <button type="button" className="donut-pick" onClick={() => onSelect(i)} onFocus={() => setHover(i)}
+                onBlur={() => setHover(null)} title={selectHint?.(l)} aria-label={selectHint?.(l)}>
+                <i style={{ background: colors[i] }} /><span>{l}</span><b>{pct(data[i], total)}%</b>
+              </button>
+            ) : (
+              <><i style={{ background: colors[i] }} /><span>{l}</span><b>{pct(data[i], total)}%</b></>
+            )}
           </li>
         ))}
       </ul>
     </figure>
   )
+}
+
+function pct(value: number, total: number): number {
+  return total > 0 ? Math.round((value / total) * 100) : 0
 }

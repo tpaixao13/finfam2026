@@ -5,7 +5,7 @@ import { Avatar, Button, Delta, Empty, ErrorBox, Money, MonthNav, Panel, Progres
 import { api } from '../lib/api'
 import { brl } from '../lib/format'
 import { useApi, usePeriod } from '../lib/hooks'
-import { Link } from '../lib/router'
+import { Link, navigate } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
 import type { Expense, Goal, Insight, User } from '../lib/types'
 
@@ -117,7 +117,10 @@ export function DashboardPage() {
 
           <Panel title="Gastos por categoria" className="area-cats">
             {cats.data && cats.data.data.length > 0
-              ? <Donut labels={cats.data.labels} data={cats.data.data} colors={cats.data.colors} centerLabel="Gastos" ariaLabel="Gastos por categoria" />
+              ? <Donut labels={cats.data.labels} data={cats.data.data} colors={cats.data.colors} centerLabel="Gastos"
+                  ariaLabel="Gastos por categoria" selectHint={(c) => `Ver as despesas de ${c}`}
+                  onSelect={(i) => navigate(`/expenses?${new URLSearchParams({
+                    category: cats.data!.labels[i], month: String(month), year: String(year) })}`)} />
               : <Empty icon="pie-chart" title="Sem gastos neste mês." />}
           </Panel>
 
