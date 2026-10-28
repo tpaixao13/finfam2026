@@ -576,3 +576,78 @@ a.insight:hover { background: #e8edf1; }
 .file-input { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; cursor: pointer; min-width: 0; }
 .file-input .file-name { font-size: .9rem; min-width: 0; overflow-wrap: anywhere; }
 .file-input:focus-within .btn { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* ── Admin › Famílias e planos ─────────────────────────────────────────── */
+.admin .page { max-width: 1180px; margin: 0 auto; }
+.fam-filters { display: flex; flex-wrap: wrap; gap: .5rem; }
+.fam-filter {
+  display: inline-flex; align-items: baseline; gap: .45rem; padding: .55rem .9rem; border-radius: 999px;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2); font: inherit; cursor: pointer;
+}
+.fam-filter b { font-size: 1.05rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.fam-filter span { font-size: .88rem; }
+.fam-filter.warn b { color: var(--expense); }
+.fam-filter.on { background: var(--ink); border-color: var(--ink); color: #dbe6ef; }
+.fam-filter.on b { color: #fff; }
+.fam-filter:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.fam-search { max-width: 420px; }
+.fam-empty { padding: 1rem 0; }
+
+.fam-list { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); overflow: hidden; }
+.fam + .fam { border-top: 1px solid var(--line); }
+.fam-head {
+  width: 100%; display: grid; grid-template-columns: minmax(150px, 1.3fr) minmax(120px, 1fr) minmax(150px, 1fr) minmax(0, 1.4fr) 24px;
+  align-items: center; gap: 1rem; padding: .9rem 1.1rem; background: none; border: 0; font: inherit; color: inherit;
+  text-align: left; cursor: pointer; border-left: 4px solid transparent;
+}
+.fam-head:hover { background: #f7f9fa; }
+.fam-head:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+/* a cor da borda é a validade: vermelho expirou, âmbar vence em 7 dias */
+.fam-expired .fam-head { border-left-color: var(--expense); }
+.fam-soon .fam-head { border-left-color: var(--warning); }
+.fam-name b, .fam-plan b { display: block; color: var(--ink); }
+.fam-name small, .fam-people small { color: var(--ink-3); font-size: .8rem; }
+.fam-people { display: flex; align-items: center; gap: .6rem; }
+.fam-avatars { display: inline-flex; }
+.fam-avatars .avatar { border: 2px solid var(--surface); font-size: .6rem; letter-spacing: -.02em; }
+.fam-avatars .avatar + .avatar { margin-left: -6px; }
+.fam-online { color: var(--income); }
+.fam-validity { font-size: .82rem; font-weight: 600; }
+.v-expired { color: var(--expense); }
+.v-soon { color: var(--warning); }
+.v-ok, .v-life { color: var(--ink-3); font-weight: 500; }
+.fam-signals { display: flex; flex-wrap: wrap; gap: .4rem .9rem; font-size: .82rem; color: var(--ink-2); min-width: 0; }
+.fam-signal { display: inline-flex; align-items: center; gap: .3rem; }
+.fam-signal.warn { color: var(--warning); font-weight: 600; }
+.fam-toggle { color: var(--ink-3); transition: transform .15s ease; justify-self: end; }
+.fam.open .fam-toggle { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .fam-toggle { transition: none; } }
+
+.fam-body { padding: .4rem 1.1rem 1.1rem calc(1.1rem + 4px); background: #fafbfc; border-top: 1px solid var(--line); }
+.fam-body h3 { font-size: .9rem; color: var(--ink-2); margin: .8rem 0 .5rem; font-weight: 600; }
+.fam-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 1.5rem; }
+.fam-members { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+.fam-member { display: grid; gap: .5rem; padding: .75rem .85rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.fam-who { display: flex; gap: .6rem; align-items: flex-start; min-width: 0; }
+.fam-who .dot { margin-top: .45rem; }
+.fam-who small { overflow-wrap: anywhere; }
+.fam-tags { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .25rem; }
+.fam-member-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.fam-member-actions .btn { min-height: 32px; padding: .3rem .7rem; font-size: .84rem; }
+.fam-settings section { display: grid; gap: .5rem; justify-items: start; }
+.fam-settings select.input { width: 100%; max-width: 260px; }
+.fam-foot { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap;
+  margin-top: 1rem; padding-top: .9rem; border-top: 1px dashed var(--line-strong); }
+
+@media (max-width: 760px) {
+  .fam-head { grid-template-columns: minmax(0, 1fr) auto 20px; grid-template-areas: "name plan toggle" "people signals signals"; row-gap: .4rem; }
+  .fam-name { grid-area: name; } .fam-plan { grid-area: plan; text-align: right; } .fam-toggle { grid-area: toggle; }
+  .fam-people { grid-area: people; } .fam-signals { grid-area: signals; justify-content: flex-end; }
+  .fam-grid { grid-template-columns: 1fr; gap: .5rem; }
+}
+@media (max-width: 560px) {
+  .admin-top { padding: .6rem 1rem; gap: .5rem; }
+  .admin-top .btn { min-height: 34px; padding: .3rem .7rem; font-size: .85rem; }
+  .admin .page { padding: 1rem; }
+}

@@ -170,6 +170,10 @@ pelo bot ou importando extrato, como antes.
 - Contas conectadas redesenhada: a tela fica só com o dia a dia (bancos, Atualizar agora, conferência de
   faturas); ajustes de cada banco (renomear, automático, ligar cartão, fechamento, desconectar) atrás de
   "Ajustes"; chave Pluggy, aviso no Telegram, limite e "usar o ID da conexão" em `/bank/settings`.
+- Admin › Famílias e planos redesenhada: os números do topo viram filtros (Todas, Pedem atenção, Expiradas,
+  Vencem em 7 dias, por plano) + busca; cada família numa linha (pessoas, plano e validade em palavras,
+  pendências, Open Finance) que abre para gerenciar pessoas, plano, Open Finance, backup e exclusão.
+  Ordem: o que pede ação primeiro. `pages/admin/Families.tsx`.
 - Tokens de API saíram de Perfil e acesso e foram para Telegram e IA, como "Assistente de IA no computador
   (MCP)" (`components/ApiTokensPanel.tsx`): o bot do Telegram não usa token (usa a chave central do bot).
 - Revisão visual geral: escolher arquivo em português (`FileInput`), "Últimos lançamentos" do painel sem

@@ -1,31 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Badge, Button,ConfirmButton, ErrorBox, Field, Input, Modal, PageHeader, Panel, Select, Spinner, Switch, Table } from '../../components/ui'
+import { Button, ErrorBox, Field, Input, Modal, PageHeader, Spinner } from '../../components/ui'
 import { api, tokens, type ApiError } from '../../lib/api'
 import { CodeInput, DisableModal, EnableModal, type TwoFactorClient } from '../../components/TwoFactor'
-import { dateBR } from '../../lib/format'
 import { useApi } from '../../lib/hooks'
 import { navigate } from '../../lib/router'
 import { useSession } from '../../lib/session'
+import { FamiliesBoard, type AdminTenant, type Member } from './Families'
 import { FamilyDataModal } from './FamilyData'
-import type { Tenant } from '../../lib/types'
 
-interface Member {
-  id: number; name: string; email: string; last_seen: string | null; online: boolean
-  two_factor_enabled: boolean; two_factor_locked: boolean; two_factor_failures: number; email_verified?: boolean
-}
-interface AdminTenant extends Tenant {
-  code: string; created_at: string; members: Member[]; pluggy: { configured: number; errors: number }
-}
 interface AdminData {
   admin: { name: string }
   counts: Record<'tenants' | 'users' | 'trial_active' | 'expired' | 'mensal' | 'anual' | 'vitalicio' | 'expiring_soon', number>
   tenants: AdminTenant[]; online: Member[]
 }
-
-const COUNT_LABELS: [keyof AdminData['counts'], string][] = [
-  ['tenants', 'Famílias'], ['users', 'Usuários'], ['trial_active', 'Em trial'], ['mensal', 'Mensal'],
-  ['anual', 'Anual'], ['vitalicio', 'Vitalício'], ['expiring_soon', 'Vencem em 7 dias'], ['expired', 'Expiradas'],
-]
 
 const ADMIN_2FA: TwoFactorClient = { base: '/admin/2fa', post: (path, body) => api.admin.post(path, body) }
 type AdminLogin = { access_token: string } | { two_factor_required: true; challenge: string }
@@ -90,31 +77,6 @@ export function AdminLoginPage() {
   )
 }
 
-/** Liga/desliga o Open Finance (Pluggy) da família e o limite de bancos por pessoa. */
-function OpenFinanceCell({ t, run }: { t: AdminTenant; run: (fn: () => Promise<{ message: string }>) => Promise<void> }) {
-  const save = (enabled: boolean, max: number | null) =>
-    run(() => api.admin.put(`/admin/tenants/${t.id}/open-finance`, { enabled, max_items: max }))
-  const max = t.open_finance_max_items ?? null
-  return (
-    <div className="of-cell">
-      <div className="of-row">
-        <Switch label={`Open Finance da família ${t.name}`} checked={Boolean(t.open_finance)} onChange={(v) => save(v, max)} />
-        {t.open_finance && (
-          <Select aria-label={`Limite de bancos por pessoa da ${t.name}`} value={max === null ? '' : String(max)}
-            onChange={(e) => save(true, e.target.value ? Number(e.target.value) : null)}
-            options={[{ value: '', label: 'Sem limite' }, ...[1, 2, 3, 5, 10].map((n) => ({ value: String(n), label: `${n} por pessoa` }))]} />
-        )}
-      </div>
-      {t.open_finance && (
-        <small className="muted">
-          {t.pluggy.configured ? `${t.pluggy.configured} ${t.pluggy.configured === 1 ? 'chave' : 'chaves'}` : 'Nenhuma chave'}
-          {t.pluggy.errors ? ` · ${t.pluggy.errors} com erro` : ''}
-        </small>
-      )}
-    </div>
-  )
-}
-
 /** Botão no topo do painel: ativa/desativa o 2FA do próprio administrador. */
 function AdminTwoFactor() {
   const { toast } = useSession()
@@ -158,60 +120,10 @@ export function AdminPage() {
       <div className="page">
         {data.error ? <ErrorBox message={data.error} onRetry={logout} /> : !d ? <Spinner /> : (
           <>
-            <PageHeader title="Famílias e planos" subtitle={`${d.online.length} pessoa(s) online agora`} />
-            <dl className="kpis kpis-inline kpis-wrap">
-              {COUNT_LABELS.map(([k, label]) => <div key={k}><dt>{label}</dt><dd>{d.counts[k]}</dd></div>)}
-            </dl>
-            <Panel flush>
-              <Table>
-                  <thead><tr><th>Família</th><th>Pessoas</th><th>Plano</th><th>Validade</th><th>Open Finance</th><th>Ações</th></tr></thead>
-                  <tbody>
-                    {d.tenants.map((t) => (
-                      <tr key={t.id}>
-                        <td><b>{t.name}</b><small className="muted block">desde {dateBR(t.created_at)}</small></td>
-                        <td>
-                          {t.members.map((m) => (
-                            <div key={m.id} className="admin-member">
-                              <span className={`dot ${m.online ? 'dot-on' : ''}`} aria-label={m.online ? 'online' : 'offline'} />
-                              {m.name} <small className="muted">{m.email}</small>
-                              {m.two_factor_locked ? <Badge tone="danger">bloqueado (2FA)</Badge>
-                                : m.two_factor_enabled ? <Badge tone="success">2FA</Badge> : null}
-                              {m.two_factor_failures > 0 && !m.two_factor_locked && <small className="muted">{m.two_factor_failures} erro(s) 2FA</small>}
-                              {m.email_verified === false && <>
-                                <Badge tone="warning">e-mail não confirmado</Badge>
-                                <button className="link-btn" onClick={() => run(() => api.admin.post(`/admin/users/${m.id}/verify-email`))}>confirmar e-mail</button>
-                              </>}
-                              <button className="link-btn" onClick={() => { setReset(m); setNewPwd('') }}>senha</button>
-                              <button className="link-btn" onClick={() => run(() => api.admin.post(`/admin/users/${m.id}/send-reset`))}>enviar link de nova senha</button>
-                              {(m.two_factor_locked || m.two_factor_failures > 0) && (
-                                <button className="link-btn" onClick={() => run(() => api.admin.post(`/admin/users/${m.id}/2fa/unlock`))}>zerar erros 2FA</button>
-                              )}
-                              {m.two_factor_enabled && (
-                                <ConfirmButton label={`Remover 2FA de ${m.name}`} icon="shield" text="remover 2FA" confirmLabel="Confirmar remoção do 2FA"
-                                  onConfirm={() => run(() => api.admin.del(`/admin/users/${m.id}/2fa`))} />
-                              )}
-                              <ConfirmButton label={`Excluir ${m.name}`} confirmLabel="Excluir" onConfirm={() => run(() => api.admin.del(`/admin/users/${m.id}`))} />
-                            </div>
-                          ))}
-                          <small className="muted">{t.members.length}/{t.member_limit}{t.extra_members ? ` (+${t.extra_members} extra)` : ''}</small>
-                        </td>
-                        <td>
-                          <Select aria-label="Plano" value={t.plan} onChange={(e) => run(() => api.admin.post(`/admin/tenants/${t.id}/plan`, { plan: e.target.value }))}
-                            options={[{ value: 'trial', label: 'Trial' }, { value: 'mensal', label: 'Mensal' }, { value: 'anual', label: 'Anual' }, { value: 'vitalicio', label: 'Vitalício' }]} />
-                        </td>
-                        <td>{t.expires_at ? <>{dateBR(t.expires_at)} {!t.active ? <Badge tone="danger">expirado</Badge> : t.days_left !== null && t.days_left <= 7 ? <Badge tone="warning">{t.days_left}d</Badge> : null}</> : <Badge tone="success">sem prazo</Badge>}</td>
-                        <td><OpenFinanceCell t={t} run={run} /></td>
-                        <td className="actions">
-                          <Button variant="ghost" icon="cloud-upload" onClick={() => setDataFor({ id: t.id, name: t.name })}>Dados</Button>
-                          {(t.plan === 'anual' || t.plan === 'vitalicio') && <Button variant="ghost" onClick={() => run(() => api.admin.post(`/admin/tenants/${t.id}/extra-members`))}>+1 pessoa</Button>}
-                          {t.extra_members > 0 && <Button variant="ghost" onClick={() => run(() => api.admin.del(`/admin/tenants/${t.id}/extra-members`))}>−1 pessoa</Button>}
-                          <ConfirmButton label="Revogar acesso" icon="x-circle" confirmLabel="Revogar" onConfirm={() => run(() => api.admin.post(`/admin/tenants/${t.id}/revoke`))} />
-                          <ConfirmButton label="Excluir família" confirmLabel="Excluir tudo" onConfirm={() => run(() => api.admin.del(`/admin/tenants/${t.id}`))} />
-                        </td>
-                      </tr>))}
-                  </tbody>
-                </Table>
-            </Panel>
+            <PageHeader title="Famílias e planos"
+              subtitle={`${d.counts.tenants} famílias, ${d.counts.users} pessoas. ${d.online.length ? `${d.online.length} online agora.` : 'Ninguém online agora.'}`} />
+            <FamiliesBoard tenants={d.tenants} run={run} onPassword={(m) => { setReset(m); setNewPwd('') }}
+              onData={(t) => setDataFor({ id: t.id, name: t.name })} />
           </>
         )}
       </div>
