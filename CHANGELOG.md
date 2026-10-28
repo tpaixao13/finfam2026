@@ -1,10 +1,21 @@
 # Changelog
 
-## 2026.2.0 — Open Finance via Pluggy (em construção, ramo `pluggy`)
+## 2026.2.0 — Open Finance via Pluggy, e-mail da conta e revisão visual (28/10/2026)
 
 A partir desta versão o FinFam pode receber lançamentos e faturas direto dos bancos,
 via Open Finance (Pluggy). É opcional: quem não usar continua lançando à mão,
-pelo bot ou importando extrato, como antes.
+pelo bot ou importando extrato, como antes. Também traz e-mail de boas-vindas com confirmação,
+"esqueci minha senha", investimentos e saldo dos bancos, e uma revisão visual (admin, Contas conectadas).
+
+**Atualizando de 2026.1.x** (no servidor, sem sudo, exceto o restart):
+1. `git fetch --tags && git checkout main && git pull` — sem dependências novas de Python ou npm.
+2. `.env`: `PUBLIC_URL` (endereço público do site, usado no webhook e nos links dos e-mails),
+   `PLUGGY_WEBHOOK_IPS`, `PLUGGY_INCLUDE_SANDBOX` e, para e-mail, `SMTP_HOST`, `SMTP_PORT`,
+   `SMTP_SECURITY`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` (ver `.env.example`). Sem SMTP, nada muda.
+3. `cd frontend && npm run build`, depois `sudo systemctl restart finfam2026 finfam2026-bot`.
+   As tabelas e colunas novas são criadas sozinhas; contas que já existiam ficam com o e-mail confirmado.
+4. Opcional: cron de hora em hora com `scripts.pluggy_sync` (garantia caso um webhook se perca) e
+   `scripts.test_email` para testar o envio.
 
 **Etapa 1 — liberação e chave por pessoa** ✅
 - Admin: coluna "Open Finance" por família (liberar/desligar + limite de bancos por pessoa).
