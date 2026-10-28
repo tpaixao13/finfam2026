@@ -33,7 +33,7 @@ class _HideHookToken(logging.Filter):
 
 logging.getLogger('uvicorn.access').addFilter(_HideHookToken())
 
-VERSION = '2026.2.1'
+VERSION = '2026.2.2'
 
 _FIELD_LABELS = {
     'description': 'Descrição', 'amount': 'Valor', 'category': 'Categoria', 'payment_method': 'Forma de pagamento',

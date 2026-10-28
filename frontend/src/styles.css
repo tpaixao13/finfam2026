@@ -647,9 +647,9 @@ a.insight:hover { background: #e8edf1; }
 .bank-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .75rem 1.25rem; margin-top: .4rem; }
 
 /* ── Entrar / criar conta / esqueci a senha ──────────────────────────────── */
-.auth { min-height: 100vh; min-height: 100dvh; display: grid; grid-template-columns: minmax(340px, 5fr) minmax(0, 6fr); background: var(--bg); }
+.auth { min-height: 100vh; min-height: 100dvh; display: grid; grid-template-columns: minmax(360px, 600px) minmax(0, 1fr); background: var(--bg); }
 .auth-side { background: var(--ink); color: #dbe6ef; padding: 2.5rem 3rem; display: flex; flex-direction: column; gap: 2.5rem; }
-.auth-side-body { margin-top: auto; margin-bottom: auto; display: grid; gap: .9rem; max-width: 420px; }
+.auth-side-body { margin-top: auto; margin-bottom: auto; display: grid; gap: .9rem; width: 100%; max-width: 460px; }
 .auth-pitch { margin: 0; font-size: clamp(1.7rem, 2.6vw, 2.35rem); font-weight: 800; line-height: 1.12; letter-spacing: -.02em; color: #fff; text-wrap: balance; }
 .auth-sub { margin: 0 0 1rem; font-size: 1rem; line-height: 1.5; color: #a9c2d3; max-width: 34ch; }
 /* o calendário do mês: contas nos dias delas */
@@ -672,7 +672,7 @@ a.insight:hover { background: #e8edf1; }
 .k-paid::before { background: #1d8a4e; } .k-due::before { background: #d9962b; } .k-next::before { background: #0e6f7e; }
 
 .auth-main { display: grid; grid-template-rows: 1fr auto; justify-items: center; align-items: center; gap: 1rem; padding: 2.5rem 1.25rem 1rem; }
-.auth-card { width: min(420px, 100%); display: flex; flex-direction: column; gap: 1rem; background: var(--surface);
+.auth-card { width: min(440px, 100%); display: flex; flex-direction: column; gap: 1rem; background: var(--surface);
   border: 1px solid var(--line); border-radius: 16px; padding: 2rem 2rem 1.6rem; box-shadow: 0 1px 2px rgba(19, 41, 61, .05), 0 12px 32px rgba(19, 41, 61, .07); }
 .auth-card h1 { margin: 0; font-size: 1.6rem; font-weight: 800; letter-spacing: -.015em; color: var(--ink); }
 .auth-card > .muted { margin: -.4rem 0 .2rem; line-height: 1.45; }

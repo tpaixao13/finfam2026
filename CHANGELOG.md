@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.2.2 — tela de entrar em monitor largo (28/10/2026)
+
+- O painel do calendário fica com no máximo 600 px: em telas largas ele não ocupa metade do monitor
+  com o conteúdo pequeno num canto; o formulário fica um pouco maior.
+
 ## 2026.2.1 — telas de entrar, criar conta e esqueci a senha (28/10/2026)
 
 - Novo visual: à esquerda, o mês da família num calendário com as contas nos dias delas (pago, vence
