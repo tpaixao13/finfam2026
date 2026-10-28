@@ -112,11 +112,11 @@ function FamilySettings({ t, run }: { t: AdminTenant; run: Run }) {
         <h3>Plano</h3>
         <Select aria-label={`Plano da ${t.name}`} value={t.plan} options={PLANS}
           onChange={(e) => run(() => api.admin.post(`/admin/tenants/${t.id}/plan`, { plan: e.target.value }))} />
-        <p className="muted small">{t.members.length} de {t.member_limit} pessoas{t.extra_members ? ` (com ${t.extra_members} extra)` : ''}</p>
+        <p className="muted small">{t.members.length} de {t.member_limit} membros{t.extra_members ? ` (${t.extra_members} ${t.extra_members === 1 ? 'membro extra' : 'membros extras'})` : ''}</p>
         {extra && (
           <div className="row gap">
-            <Button variant="ghost" icon="plus" onClick={() => run(() => api.admin.post(`/admin/tenants/${t.id}/extra-members`))}>Vaga extra</Button>
-            {t.extra_members > 0 && <Button variant="ghost" onClick={() => run(() => api.admin.del(`/admin/tenants/${t.id}/extra-members`))}>Tirar vaga</Button>}
+            <Button variant="ghost" icon="plus" onClick={() => run(() => api.admin.post(`/admin/tenants/${t.id}/extra-members`))}>Membro extra</Button>
+            {t.extra_members > 0 && <Button variant="ghost" onClick={() => run(() => api.admin.del(`/admin/tenants/${t.id}/extra-members`))}>Tirar membro extra</Button>}
           </div>
         )}
       </section>
