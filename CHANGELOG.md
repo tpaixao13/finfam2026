@@ -170,6 +170,9 @@ pelo bot ou importando extrato, como antes.
 - Contas conectadas redesenhada: a tela fica só com o dia a dia (bancos, Atualizar agora, conferência de
   faturas); ajustes de cada banco (renomear, automático, ligar cartão, fechamento, desconectar) atrás de
   "Ajustes"; chave Pluggy, aviso no Telegram, limite e "usar o ID da conexão" em `/bank/settings`.
+- Revisão visual geral: escolher arquivo em português (`FileInput`), "Últimos lançamentos" do painel sem
+  botões de editar/excluir, Perfil e acesso em duas colunas sem buraco, "O que o bot faz" com /banco e as
+  perguntas sem IA, meta de limite no painel mostra "% usado" (antes mostrava 0%).
 - Tela de login: versão discreta no rodapé (`components/AppVersion.tsx`, lê `GET /health`).
 - 2ª revisão: `/rules/apply` com limite de chamadas; MCP encurta e trata como dado nomes vindos do banco;
   "Saldo nas contas" em `pages/BankBalances.tsx`; prévia de regras com erro visível e valor no celular.

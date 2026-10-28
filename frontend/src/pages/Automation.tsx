@@ -1,7 +1,7 @@
 // Alertas, importação de extratos e regras de categoria.
 import { useState } from 'react'
 import { Icon } from '../components/Icon'
-import { Badge, Button, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Money, MonthNav, PageHeader,
+import { Badge, Button, ConfirmButton, Empty, ErrorBox, Field, FileInput, IconButton, Input, Money, MonthNav, PageHeader,
   Panel, Select, Spinner, Table } from '../components/ui'
 import { api } from '../lib/api'
 import { brl } from '../lib/format'
@@ -158,7 +158,7 @@ export function ImportPage() {
             </Field>
             <Field label="Banco (opcional)"><Select value={bank} onChange={(e) => setBank(e.target.value)} placeholder="Detectar pelo arquivo" options={meta?.banks ?? []} /></Field>
             {fmt === 'c6pdf' && <Field label="Senha do PDF (se houver)"><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>}
-            <Field label="Arquivo"><input className="input" type="file" accept=".ofx,.csv,.pdf,.txt" onChange={(e) => setFile(e.target.files?.[0] ?? null)} required /></Field>
+            <Field label="Arquivo"><FileInput accept=".ofx,.csv,.pdf,.txt" onChange={setFile} required /></Field>
             {error && <p className="form-error" role="alert">{error}</p>}
             <Button type="submit" icon="cloud-upload" busy={busy} disabled={!file}>Ler arquivo</Button>
           </form>
@@ -166,7 +166,7 @@ export function ImportPage() {
         <Panel title="Planilha exportada pelo FinFam">
           <div className="stack">
             <p className="muted">Reimporta um .xlsx gerado em Despesas → Excel. As pessoas são identificadas pelo nome.</p>
-            <input className="input" type="file" accept=".xlsx" onChange={(e) => setXlsx(e.target.files?.[0] ?? null)} />
+            <FileInput accept=".xlsx" onChange={setXlsx} />
             <Button variant="ghost" icon="cloud-upload" disabled={!xlsx} onClick={importXlsx}>Importar planilha</Button>
           </div>
         </Panel>

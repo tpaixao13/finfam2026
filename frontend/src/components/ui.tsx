@@ -238,3 +238,18 @@ export function Panel({ title, actions, children, className = '', flush }:
     </section>
   )
 }
+
+
+/** Arquivo: botão "Escolher arquivo" + nome escolhido, em português (o campo nativo vem na língua do navegador). */
+export function FileInput({ accept, onChange, required, label = 'Escolher arquivo' }:
+  { accept?: string; onChange: (file: File | null) => void; required?: boolean; label?: string }) {
+  const [name, setName] = useState<string | null>(null)
+  return (
+    <label className="file-input">
+      <input type="file" className="sr-only" accept={accept} required={required}
+        onChange={(e) => { const f = e.target.files?.[0] ?? null; setName(f?.name ?? null); onChange(f) }} />
+      <span className="btn btn-ghost"><Icon name="cloud-upload" /> {label}</span>
+      <span className={name ? 'file-name' : 'file-name muted'}>{name ?? 'Nenhum arquivo escolhido'}</span>
+    </label>
+  )
+}

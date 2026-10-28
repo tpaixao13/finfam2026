@@ -44,7 +44,9 @@ function BotCommandsPanel() {
         <li><code>/resumo</code> resumo do mês</li>
         <li><code>/lancar</code> lançar um gasto passo a passo</li>
         <li><code>/investir</code> registrar um investimento (real, dólar, euro…)</li>
-        <li><code>/carteira</code> seus investimentos em reais</li>
+        <li><code>/carteira</code> seus investimentos (lançados e dos bancos)</li>
+        <li><code>/banco</code> bancos conectados: o que chegou, saldo e se a fatura bate</li>
+        <li>Perguntas como <i>quais meus investimentos?</i> ou <i>saldo da conta do C6?</i> respondem mesmo sem IA</li>
         <li>Com a IA ligada, é só escrever: <i>gastei 87,50 no mercado no cartão Inter em 3x</i></li>
       </ul>
       <p className="muted">Nada é lançado sem você confirmar no ✅. Cada pessoa conecta o próprio Telegram e vê só os dados da família dela.</p>

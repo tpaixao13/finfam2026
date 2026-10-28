@@ -572,3 +572,7 @@ a.insight:hover { background: #e8edf1; }
 .nowrap { white-space: nowrap; }
 .apply-preview { max-height: 50vh; overflow: auto; margin-top: .5rem; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .apply-preview .table td { overflow-wrap: anywhere; }
+/* Escolher arquivo (em português; o campo nativo fica escondido mas acessível) */
+.file-input { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; cursor: pointer; min-width: 0; }
+.file-input .file-name { font-size: .9rem; min-width: 0; overflow-wrap: anywhere; }
+.file-input:focus-within .btn { outline: 2px solid var(--primary); outline-offset: 2px; }

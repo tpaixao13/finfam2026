@@ -140,7 +140,7 @@ export function DashboardPage() {
             actions={<Link to={`/expenses?month=${month}&year=${year}`} className="panel-link">Ver despesas</Link>}>
             {d.recent.length === 0
               ? <Empty title="Nenhuma despesa neste mês."><Button icon="plus" onClick={() => openExpense()}>Lançar despesa</Button></Empty>
-              : <ExpenseList items={d.recent} onChange={reload} />}
+              : <ExpenseList items={d.recent} onChange={reload} compact />}
           </Panel>
         </div>
       )}

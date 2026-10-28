@@ -139,6 +139,7 @@ export function SettingsPage() {
     <div className="page">
       <PageHeader title="Perfil e acesso" />
       <div className="grid-2">
+        <div className="stack-lg">
         <Panel title="Foto">
           <div className="row gap">
             {me && <Avatar name={me.user.name} url={me.user.avatar_url} size={64} />}
@@ -148,6 +149,8 @@ export function SettingsPage() {
             </label>
           </div>
         </Panel>
+        <TwoFactorPanel />
+        </div>
         <Panel title="Senha">
           <form className="stack" onSubmit={(e) => { e.preventDefault(); act(() => api.post<{ message: string; access_token: string }>('/auth/change-password', pwd), (r) => {
               authTokens.setUser(r.access_token)  // a sessão antiga deixa de valer ao trocar a senha
@@ -159,7 +162,6 @@ export function SettingsPage() {
             <Button type="submit">Trocar senha</Button>
           </form>
         </Panel>
-        <TwoFactorPanel />
       </div>
       <Panel title="Tokens de API (MCP e bot do Telegram)">
         <p className="muted">Um token dá acesso aos dados da sua família pela API, em seu nome. Use um token por integração e revogue o que não usar mais.</p>

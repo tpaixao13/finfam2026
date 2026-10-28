@@ -80,7 +80,7 @@ export function GoalsPage() {
               <article key={g.id} className="goal-card">
                 <header>
                   <span className="goal-emoji" aria-hidden>{g.emoji}</span>
-                  <div><h2>{g.title}</h2><small className="muted">{g.type_label}{g.category ? ` · ${g.category}` : ''}</small></div>
+                  <div><h2>{g.title}</h2><small className="muted">{g.type_label}{g.category && <span className="nowrap"> · {g.category}</span>}</small></div>
                   <Badge tone={tone}>{g.status_label}</Badge>
                 </header>
                 <div className="goal-amounts">

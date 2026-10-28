@@ -279,6 +279,13 @@ def goals_for_alerts(goals_data: list[dict]) -> list[dict]:
     return alerts
 
 
+def _goal_value(d: dict) -> str:
+    """Número do insight: limite de gastos mostra quanto já usou (150% usado), não o que sobra."""
+    if d['goal'].type == 'spending_limit':
+        return f'{d["pct_used"]:.0f}% usado'
+    return f'{d["pct"]:.0f}%'
+
+
 def goals_for_insights(goals_data: list[dict]) -> list[dict]:
     """Converte progresso de metas em insights para o insight_service."""
     insights = []
@@ -301,7 +308,7 @@ def goals_for_insights(goals_data: list[dict]) -> list[dict]:
                 'icon': 'bi-flag',
                 'title': g.title,
                 'message': d['coaching'],
-                'value': f'{d["pct"]:.0f}%',
+                'value': _goal_value(d),
                 'link': '/goals',
             })
         elif d['status'] == 'ahead':
@@ -310,7 +317,7 @@ def goals_for_insights(goals_data: list[dict]) -> list[dict]:
                 'icon': 'bi-rocket',
                 'title': f'{g.title} — adiantado!',
                 'message': d['coaching'],
-                'value': f'{d["pct"]:.0f}%',
+                'value': _goal_value(d),
                 'link': '/goals',
             })
 
