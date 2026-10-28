@@ -651,3 +651,12 @@ a.insight:hover { background: #e8edf1; }
   .admin-top .btn { min-height: 34px; padding: .3rem .7rem; font-size: .85rem; }
   .admin .page { padding: 1rem; }
 }
+/* Contas conectadas › Ajustes: campos com rótulo */
+.bank-setting .field { max-width: 520px; }
+.bank-setting-row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.bank-setting-row .input { flex: 1 1 200px; min-width: 0; }
+.bank-setting-row .input-day { flex: 0 0 6rem; }
+.bank-setting-value { font-size: .92rem; color: var(--ink); padding: .45rem 0; }
+.no-list-arrow::-webkit-calendar-picker-indicator { display: none !important; }
+.bank-acc-settings { display: grid; gap: .35rem; padding: .9rem 0; border-top: 1px solid var(--line); }
+.bank-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .75rem 1.25rem; margin-top: .4rem; }

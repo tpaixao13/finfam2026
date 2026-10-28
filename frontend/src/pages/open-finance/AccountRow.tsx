@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Badge, Button, Input, Select } from '../../components/ui'
+import { Badge, Button, Field, Input, Select } from '../../components/ui'
 import { api } from '../../lib/api'
 import { money } from '../../lib/format'
 import { useAction } from '../../lib/session'
@@ -7,25 +7,35 @@ import type { Card } from '../../lib/types'
 import type { BankAccount } from './types'
 import { useBusy } from './useBusy'
 
-const SOURCE = { bank: 'informado pelo banco', manual: 'digitado por você', inferred: 'calculado pelas compras' } as const
 
 const accLabel = (acc: BankAccount) => acc.name || (acc.type === 'CREDIT' ? 'Cartão de crédito' : 'Conta')
 
-/** Fechamento digitado: vale enquanto o banco não informa o dele (vazio = o FinFam calcula). */
+/** Dia de fechamento: o do banco manda; sem ele, o digitado; sem os dois, o FinFam calcula pelas compras. */
 function CloseDayField({ acc, onChange }: { acc: BankAccount; onChange: () => void }) {
   const act = useAction()
   const saved = acc.manual_close_day ? String(acc.manual_close_day) : ''
   const [day, setDay] = useState(saved)
   const [busy, run] = useBusy()
+  if (acc.close_source === 'bank') {
+    return <Field label="Dia de fechamento"><span className="bank-setting-value">Dia {acc.close_day}, informado pelo banco</span></Field>
+  }
   const save = (e: React.FormEvent) => {
     e.preventDefault()
     return run(() => act(() => api.put<{ message: string }>(`/pluggy/accounts/${acc.id}/close-day`, { close_day: day ? Number(day) : null }), onChange))
   }
+  const hint = acc.close_source === 'inferred' && acc.close_day
+    ? `O banco não informa; o FinFam calculou dia ${acc.close_day} pelas compras. Digite se for outro.`
+    : acc.close_source === 'manual' ? 'Digitado por você. Vale até o banco passar a informar o dele.'
+      : 'O banco não informa. Veja no app do banco o dia em que a fatura fecha.'
   return (
-    <form className="bank-close" onSubmit={save} title="O banco não informa o fechamento. O que você digitar vale até ele passar a informar.">
-      <Input type="number" min={1} max={31} inputMode="numeric" aria-label="Dia de fechamento da fatura" placeholder="Fecha dia"
-        value={day} onChange={(e) => setDay(e.target.value)} />
-      {day !== saved && <Button type="submit" variant="ghost" icon="check2" busy={busy}>Salvar</Button>}
+    <form className="bank-setting" onSubmit={save}>
+      <Field label="Dia de fechamento" hint={hint}>
+        <div className="bank-setting-row">
+          <Input type="number" min={1} max={31} inputMode="numeric" className="input input-day" value={day}
+            placeholder={acc.close_day ? String(acc.close_day) : 'dia'} onChange={(e) => setDay(e.target.value)} />
+          <Button type="submit" variant="ghost" busy={busy} disabled={day === saved}>Salvar</Button>
+        </div>
+      </Field>
     </form>
   )
 }
@@ -36,7 +46,8 @@ function AccountSummary({ acc }: { acc: BankAccount }) {
     Fatura atual {money(acc.balance == null ? null : Math.abs(acc.balance), acc.currency)}
     {acc.credit_limit ? <> · limite {money(acc.credit_limit, acc.currency)}</> : null}
     {acc.available_limit != null ? <> · disponível {money(acc.available_limit, acc.currency)}</> : null}
-    {acc.close_day && acc.due_day ? <> · fecha dia {acc.close_day}, vence dia {acc.due_day}</> : null}
+    {acc.close_day && acc.due_day ? <> · fecha dia {acc.close_day}, vence dia {acc.due_day}</>
+      : acc.due_day ? <> · vence dia {acc.due_day}</> : null}
   </>
 }
 
@@ -57,29 +68,30 @@ export function AccountRow({ acc }: { acc: BankAccount }) {
   )
 }
 
-/** Ajustes de um cartão do banco: ligar ao cartão do FinFam, criar cartão, dia de fechamento. */
+/** Ajustes de um cartão do banco: ligar ao cartão do FinFam (ou criar), dia de fechamento. */
 export function AccountSettings({ acc, cards, onChange }: { acc: BankAccount; cards: Card[]; onChange: () => void }) {
   const act = useAction()
   const [busy, run] = useBusy()
   const label = accLabel(acc)
   return (
-    <li className="bank-acc">
-      <div className="bank-acc-main">
-        <b>{label}</b>{acc.last_digits && <span className="muted"> •••• {acc.last_digits}</span>}
-        {acc.close_day && <div className="muted small">Fechamento {SOURCE[acc.close_source ?? 'inferred']}.</div>}
-      </div>
-      <div className="bank-acc-map">
-        <Select aria-label={`Cartão do FinFam para ${label}`} value={acc.card_id ?? ''}
-          placeholder="Ligar a um cartão…"
-          options={cards.map((c) => ({ value: c.id, label: c.label }))}
-          onChange={(e) => act(() => api.put<{ message: string }>(`/pluggy/accounts/${acc.id}`,
-            { card_id: e.target.value ? Number(e.target.value) : null }), onChange)} />
-        {acc.close_source !== 'bank' && <CloseDayField acc={acc} onChange={onChange} />}
-        {!acc.card_id && acc.last_digits && (
-          <Button variant="ghost" icon="plus" busy={busy}
-            onClick={() => run(() => act(() => api.post<{ message: string }>(`/pluggy/accounts/${acc.id}/card`), onChange))}>
-            Criar cartão</Button>
-        )}
+    <li className="bank-acc-settings">
+      <b>{label}{acc.last_digits && <span className="muted"> •••• {acc.last_digits}</span>}</b>
+      {acc.due_day && <span className="muted small">Vence dia {acc.due_day}, pelas faturas do banco.</span>}
+      <div className="bank-settings-grid">
+        <Field label="Cartão do FinFam" hint={acc.card_id ? 'As compras deste cartão caem na fatura dele.' : 'Ligue para as compras caírem na fatura certa.'}>
+          <div className="bank-setting-row">
+            <Select aria-label={`Cartão do FinFam para ${label}`} value={acc.card_id ?? ''} placeholder="Escolher cartão…"
+              options={cards.map((c) => ({ value: c.id, label: c.label }))}
+              onChange={(e) => act(() => api.put<{ message: string }>(`/pluggy/accounts/${acc.id}`,
+                { card_id: e.target.value ? Number(e.target.value) : null }), onChange)} />
+            {!acc.card_id && acc.last_digits && (
+              <Button variant="ghost" icon="plus" busy={busy}
+                onClick={() => run(() => act(() => api.post<{ message: string }>(`/pluggy/accounts/${acc.id}/card`), onChange))}>
+                Criar cartão</Button>
+            )}
+          </div>
+        </Field>
+        <CloseDayField key={acc.manual_close_day ?? 'x'} acc={acc} onChange={onChange} />
       </div>
     </li>
   )

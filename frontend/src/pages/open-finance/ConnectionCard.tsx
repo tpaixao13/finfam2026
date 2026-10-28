@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Badge, Button, ConfirmButton, Input } from '../../components/ui'
+import { Badge, Button, ConfirmButton, Field, Input } from '../../components/ui'
 import { api } from '../../lib/api'
 import { useAction, useSession } from '../../lib/session'
 import type { Card } from '../../lib/types'
@@ -33,11 +33,14 @@ function RenameForm({ conn, banks, onChange }: { conn: Connection; banks: string
     return act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, { bank_name: name.trim() }), onChange)
   }
   return (
-    <form className="bank-name" onSubmit={save}>
-      <Input value={name} onChange={(e) => setName(e.target.value)} list={listId} maxLength={60} required
-        aria-label="Nome do banco nas despesas" />
+    <form className="bank-setting" onSubmit={save}>
+      <Field label="Nome do banco nas despesas" hint="Aparece como banco em cada despesa que vier daqui.">
+        <div className="bank-setting-row">
+          <Input value={name} onChange={(e) => setName(e.target.value)} list={listId} maxLength={60} required className="input no-list-arrow" />
+          <Button type="submit" variant="ghost" disabled={!name.trim() || name.trim() === saved}>Salvar</Button>
+        </div>
+      </Field>
       <datalist id={listId}>{banks.map((b) => <option key={b} value={b} />)}</datalist>
-      <Button type="submit" variant="ghost" disabled={!name.trim() || name.trim() === saved}>Renomear</Button>
     </form>
   )
 }
