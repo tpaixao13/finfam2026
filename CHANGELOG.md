@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.5.2 — bot: total e média nos gastos de vários meses (28/10/2026)
+
+- A resposta de "gastos com X nos últimos meses" termina com **Total** e **Média por mês** (todos os meses do
+  período) e, se algum mês ficou sem gasto, a média só dos meses com gasto.
+
 ## 2026.5.1 — bot: gastos com um lançamento nos últimos meses (28/10/2026)
 
 - "gastos com DEBITO PRESTACAO HAB nos últimos meses" buscava a categoria Moradia só em outubro. Agora o nome

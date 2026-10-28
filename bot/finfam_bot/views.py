@@ -174,9 +174,11 @@ def spending_months_text(q: dict, rows: list[tuple[int, int, dict]]) -> str:
             lines.append(f'• {label}: {brl(r["total_amount"])} — {h(e["description"])} ({dm(e.get("due_date") or e.get("purchase_date"))})')
         else:
             lines.append(f'• {label}: {brl(r["total_amount"])} em {r["total"]} lançamento(s)')
-    months_with = [r['total_amount'] for _, _, r in rows if r['total']]
-    if len(months_with) > 1:
-        lines += ['', f'Média nos meses com gasto: {brl(sum(months_with) / len(months_with))}']
+    with_spending = [r['total_amount'] for _, _, r in rows if r['total']]
+    lines += ['', f'💰 <b>Total</b>: {brl(total)}',
+              f'📊 <b>Média por mês</b>: {brl(total / len(rows))} ({len(rows)} meses)']
+    if len(with_spending) < len(rows):
+        lines.append(f'Só nos {len(with_spending)} meses com gasto: {brl(sum(with_spending) / len(with_spending))}')
     return '\n'.join(lines)
 
 

@@ -445,6 +445,7 @@ def test_ai_queries_spending_purchases_and_bills_days():
     asked = [(qq['month'], qq['year'], qq['search']) for path, qq in b6.api.gets if path == '/expenses']
     assert asked == [(8, 2026, 'DEBITO PRESTACAO HAB'), (9, 2026, 'DEBITO PRESTACAO HAB'), (10, 2026, 'DEBITO PRESTACAO HAB')]
     assert 'nos últimos 3 meses: <b>R$ 900,00</b> em 9' in tg.last['text'] and '• out/2026: R$ 300,00' in tg.last['text']
+    assert '<b>Total</b>: R$ 900,00' in tg.last['text'] and '<b>Média por mês</b>: R$ 300,00 (3 meses)' in tg.last['text']
 
     q2 = {**q, 'category': None, 'date_from': '2026-10-20', 'date_to': '2026-10-20'}
     b2 = Bot(tg, StubApi({'intent': 'purchases', 'query': q2, 'reply': ''}))
