@@ -79,6 +79,12 @@ def dashboard(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx))
     }
 
 
+@router.get('/dashboard/week', summary='Resumo da semana: gasto × média, 3 maiores e a categoria que mais subiu')
+def week(ctx: Ctx = Depends(get_ctx)):
+    from app.services.bot_notices import week_report
+    return week_report(ctx.uids, _date.today())
+
+
 @router.get('/alerts', summary='Alertas proativos (atrasos, limites, saldo, metas)')
 def alerts(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx)):
     items = generate_alerts(ctx.uids, period.month, period.year, ctx.tenant_id, cards=_cards(ctx))

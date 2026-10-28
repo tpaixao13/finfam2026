@@ -26,6 +26,7 @@ class TelegramIn(BaseModel):
     chat_id: str | None = Field(None, max_length=100, description='Deixe vazio para manter o atual')
     hour: int = Field(8, ge=0, le=23)
     minute: int = Field(0, ge=0, le=59)
+    alerts: bool | None = Field(None, description='Avisos automáticos do bot: resumo de domingo e metas')
 
 
 def _mask(value: str | None, visible: int = 4) -> str:
@@ -38,7 +39,7 @@ def _telegram_out(tenant, ctx: Ctx) -> dict:
     return {**link_status(ctx),
             'legacy_configured': bool(tenant.telegram_token and tenant.telegram_chat_id),
             'enabled': bool(tenant.telegram_enabled), 'hour': tenant.telegram_hour or 0,
-            'minute': tenant.telegram_minute or 0,
+            'minute': tenant.telegram_minute or 0, 'alerts': tenant.telegram_alerts is not False,
             'token_masked': _mask(decrypt_field(tenant.telegram_token)),
             'chat_id_masked': _mask(decrypt_field(tenant.telegram_chat_id)),
             'configured': bool(reminder_targets(tenant, ctx.uids))}
@@ -64,6 +65,8 @@ def save_telegram(body: TelegramIn, ctx: Ctx = Depends(get_ctx_session)):
     if body.chat_id and body.chat_id.strip():
         tenant.telegram_chat_id = encrypt_field(body.chat_id.strip())
     tenant.telegram_hour, tenant.telegram_minute = body.hour, body.minute
+    if body.alerts is not None:
+        tenant.telegram_alerts = body.alerts
     db.session.commit()
     return {'message': 'Configurações do Telegram salvas!', 'telegram': _telegram_out(tenant, ctx)}
 

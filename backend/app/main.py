@@ -6,6 +6,7 @@ ele também é servido pela mesma aplicação, então em produção basta um pro
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -33,7 +34,8 @@ class _HideHookToken(logging.Filter):
 
 logging.getLogger('uvicorn.access').addFilter(_HideHookToken())
 
-VERSION = '2026.3.1'
+VERSION = '2026.4.0'
+MAX_BODY_BYTES = 12 * 1024 * 1024
 
 _FIELD_LABELS = {
     'description': 'Descrição', 'amount': 'Valor', 'category': 'Categoria', 'payment_method': 'Forma de pagamento',
@@ -43,14 +45,31 @@ _FIELD_LABELS = {
 }
 
 
+def _scheduled_notices() -> None:
+    """Resumo de domingo e avisos de metas (cada um decide se é a hora)."""
+    from app.core.db import db
+    from app.services import bot_notices
+    now = datetime.now()
+    try:
+        for job in (bot_notices.run_weekly, bot_notices.run_goal_alerts):
+            try:
+                job(now)
+            except Exception as exc:
+                db.session.rollback()
+                log.warning('Aviso automático %s falhou: %s', job.__name__, exc)
+    finally:
+        db.session.remove()
+
+
 async def _reminder_loop():
     """Verifica a cada minuto se algum tenant deve receber o lembrete do Telegram."""
     from app.services.telegram import run_daily_reminders
     while True:
-        try:
-            await asyncio.to_thread(run_daily_reminders)
-        except Exception as exc:  # nunca derruba o loop
-            log.warning('Lembretes do Telegram falharam: %s', exc)
+        for job in (run_daily_reminders, _scheduled_notices):
+            try:
+                await asyncio.to_thread(job)
+            except Exception as exc:  # nunca derruba o loop
+                log.warning('Lembretes do Telegram falharam: %s', exc)
         await asyncio.sleep(60)
 
 
@@ -88,6 +107,14 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=False,
                        allow_methods=['*'], allow_headers=['*'], expose_headers=['Content-Disposition'])
     app.add_middleware(DBSessionMiddleware)
+
+    @app.middleware('http')
+    async def body_limit(request: Request, call_next):
+        """Corpo grande é recusado antes de ser lido (a maior entrada é a foto/áudio do bot, até 8 MB em base64)."""
+        size = request.headers.get('content-length', '')
+        if size.isdigit() and int(size) > MAX_BODY_BYTES:
+            return JSONResponse(status_code=413, content={'detail': 'Arquivo grande demais.'})
+        return await call_next(request)
 
     @app.middleware('http')
     async def security_headers(request: Request, call_next):

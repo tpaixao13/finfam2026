@@ -24,7 +24,8 @@ class Ctx:
     user: User
     tenant: Tenant | None
     members: list[User]
-    via_api_token: bool = False
+    via_api_token: bool = False   # token de API (ffk_) OU bot central
+    via_bot: bool = False         # bot central agindo pela pessoa dona da conversa
 
     @property
     def uids(self) -> list[int]:
@@ -89,7 +90,7 @@ def _resolve(creds: HTTPAuthorizationCredentials | None, chat_id: str | None = N
         if link is None or link.user is None:
             raise HTTPException(status_code=401, detail={
                 'code': 'telegram_not_linked', 'message': 'Este Telegram não está vinculado a uma conta do FinFam.'})
-        return link.user, 'api'
+        return link.user, 'bot'
     if raw.startswith(API_TOKEN_PREFIX):
         token = ApiToken.query.filter_by(token_hash=hash_api_token(raw), revoked=False).first()
         if token is None or token.user is None:
@@ -134,7 +135,8 @@ def _build_ctx(creds, allow_expired: bool, chat_id: str | None = None, request: 
         members = User.query.filter_by(tenant_id=tenant.id).order_by(User.name).all()
     else:
         members = [user]
-    return Ctx(user=user, tenant=tenant, members=members, via_api_token=(kind == 'api'))
+    return Ctx(user=user, tenant=tenant, members=members, via_api_token=kind in ('api', 'bot'),
+               via_bot=kind == 'bot')
 
 
 def get_ctx(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(bearer),
@@ -162,6 +164,16 @@ def get_ctx_session(request: Request, creds: HTTPAuthorizationCredentials | None
 def get_ctx_session_allow_expired(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(bearer),
                                   chat_id: str | None = _TelegramChat) -> Ctx:
     return _interactive(_build_ctx(creds, allow_expired=True, chat_id=chat_id, request=request))
+
+
+def get_ctx_site_or_bot(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+                        chat_id: str | None = _TelegramChat) -> Ctx:
+    """Revisar o que chegou do banco: login do site ou o bot central (pela pessoa dona da conversa,
+    que toca nos botões). Token de API (MCP/scripts) não: lá só consulta."""
+    ctx = _build_ctx(creds, allow_expired=False, chat_id=chat_id, request=request)
+    if ctx.via_api_token and not ctx.via_bot:
+        raise HTTPException(status_code=403, detail='Ação não permitida com token de API.')
+    return ctx
 
 
 def is_owner(ctx: Ctx) -> bool:

@@ -437,6 +437,35 @@ def saldo_das_contas() -> str:
 
 @mcp.tool()
 @_safe
+def agenda_da_semana(dias: int = 7) -> str:
+    """Contas a pagar dos próximos dias, dia a dia (faturas de cartão somadas num item).
+    Use para "o que vence esta semana?", "agenda de contas"."""
+    r = api.get('/expenses/agenda', days=max(1, min(dias, 31)))
+    lines = [f"Agenda ({len(r['days'])} dias): {brl(r['total'])} a pagar"]
+    for d in r['days']:
+        if d['items']:
+            lines.append(f"{d['weekday']} {dm(d['date'])} — {brl(d['total'])}")
+            lines += [f"  • {_clip(i['label'])} — {brl(i['amount'])}" + (' (vencida)' if i.get('status') == 'vencida' else '')
+                      for i in d['items']]
+    return '\n'.join(lines) if len(lines) > 1 else lines[0] + ' — nenhuma conta no período.'
+
+
+@mcp.tool()
+@_safe
+def resumo_da_semana() -> str:
+    """Gastos da semana (segunda a domingo) × média das 8 anteriores, 3 maiores gastos e a categoria
+    que mais subiu. Use para "como foi minha semana?"."""
+    r = api.get('/dashboard/week')
+    lines = [f"Semana {dm(r['start'])} a {dm(r['end'])}: {brl(r['total'])} em {r['count']} lançamento(s); "
+             f"média semanal anterior {brl(r['average'])}."]
+    lines += [f"• {_clip(t['description'])} — {brl(t['amount'])} ({t['category']})" for t in r['top']]
+    if r.get('rise'):
+        lines.append(f"Mais subiu: {r['rise']['category']} ({brl(r['rise']['amount'])}, média {brl(r['rise']['average'])}).")
+    return '\n'.join(lines)
+
+
+@mcp.tool()
+@_safe
 def alertas() -> str:
     """Alertas ativos: atrasos, limite de cartão, saldo negativo, metas em risco."""
     r = api.get('/alerts')

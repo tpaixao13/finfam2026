@@ -1003,9 +1003,11 @@ def notify_new(conn: BankConnection, before: set[int]) -> bool:
     if base.startswith('https://'):
         lines.append(f'{base}/bank/review')
     text = '\n'.join(lines)
+    # o toque chega ao bot central, que mostra um por um com ✅ Lançar / 🏷️ Trocar categoria / 🚫 Ignorar
+    buttons = [[{'text': '📝 Revisar aqui no Telegram', 'callback_data': 'rv:go:0'}]] if pending else None
     sent = False
     for chat in chats:
-        ok, err = tg.send_message(settings.telegram_bot_token, chat, text)
+        ok, err = tg.send_message(settings.telegram_bot_token, chat, text, buttons)
         sent = sent or ok
         if not ok:
             log.warning('Aviso do Open Finance não foi para o Telegram: %s', err)

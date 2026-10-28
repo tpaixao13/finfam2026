@@ -94,3 +94,24 @@ def quick_parse(text: str, today: date) -> dict:
         desc = ' '.join(rest)[:200]
         out['description'] = desc[0].upper() + desc[1:]
     return out
+
+
+def _plain(text: str) -> str:
+    return unicodedata.normalize('NFKD', text or '').encode('ascii', 'ignore').decode().lower()
+
+
+def pick_person(text: str, members: list[dict]) -> tuple[dict | None, str]:
+    """"farmácia 30 pra Greyce" → (membro Greyce, "farmácia 30"). Vale o nome completo ou o primeiro nome,
+    depois de pra/para/pro/da/do/de. Família de uma pessoa só: nada muda."""
+    if len(members) < 2:
+        return None, text
+    flat = ''.join((_plain(ch) or ' ')[:1] for ch in text)  # mesmo tamanho do original: dá para cortar nele
+    for m in sorted(members, key=lambda m: -len(m['name'])):
+        names = {_plain(m['name']).strip(), _plain(m['name']).split()[0] if m['name'].strip() else ''} - {''}
+        for name in sorted(names, key=len, reverse=True):
+            pattern = rf'\b(?:pra|para|pro|da|do|de)\s+(?:a\s+|o\s+)?{re.escape(name)}\b'
+            found = re.search(pattern, flat)
+            if found:
+                rest = (text[:found.start()] + text[found.end():]).strip()
+                return m, re.sub(r'\s{2,}', ' ', rest)
+    return None, text

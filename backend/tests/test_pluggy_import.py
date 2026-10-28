@@ -766,7 +766,7 @@ def test_invoice_check_summary_and_telegram_notice(client, family, bank, txs, mo
 
     # aviso no Telegram: só leitura sozinha (webhook/cron), com o que chegou de novo
     sent = []
-    monkeypatch.setattr(tg, 'send_message', lambda token, chat, text: (sent.append((chat, text)), (True, ''))[1])
+    monkeypatch.setattr(tg, 'send_message', lambda token, chat, text, buttons=None: (sent.append((chat, text, buttons)), (True, ''))[1])
     session.add(TelegramLink(user_id=family.user['id'], chat_id='777', username='tiago'))
     session.query(BankConnection).update({'needs_sync': True})
     session.commit()
@@ -779,6 +779,7 @@ def test_invoice_check_summary_and_telegram_notice(client, family, bank, txs, mo
     session.commit()
     assert of.sync_stale(family.user['id'], notify=True) == 1
     assert len(sent) == 1 and sent[0][0] == '777' and 'CAFE' in sent[0][1] and 'para revisar' in sent[0][1]
+    assert sent[0][2] == [[{'text': '📝 Revisar aqui no Telegram', 'callback_data': 'rv:go:0'}]]  # revisa no bot
     family.put('/pluggy/notify', json={'notify': False})
     session.query(BankConnection).update({'needs_sync': True})
     session.commit()

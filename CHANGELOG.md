@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026.4.0 — bot do Telegram: revisar o banco, foto do cupom, áudio, agenda, semana e metas (28/10/2026)
+
+- **Revisar o que chegou do banco no Telegram** (`/revisar`, ou o botão "📝 Revisar aqui no Telegram" no aviso
+  do Open Finance e no `/banco`): um lançamento por vez com ✅ Lançar (categoria sugerida), 🏷️ Trocar
+  categoria, 🚫 Ignorar e ⏭ Deixar para depois. Trocar a categoria ensina a regra, como no site.
+  `GET /pluggy/review/next`; aprovar/ignorar aceitam o bot (`get_ctx_site_or_bot`) — token de API continua
+  só consultando, e chave Pluggy/credenciais seguem só com o login do site.
+- **Foto do cupom/comprovante, PDF ou áudio**: a IA da família lê valor, loja e data e monta o rascunho, que
+  só grava no ✅. Áudio só com Gemini; foto com Gemini, Claude ou ChatGPT. `POST /ai/interpret-media`
+  (até 8 MB, tipos fixos).
+- **Lançar para outra pessoa da família**: "gastei 30 de farmácia pra Greyce" — com a IA e também sem ela.
+- **Menu com botões** no `/start`, `/ajuda` e `/menu`.
+- **/agenda**: contas dos próximos 7 dias, dia a dia (faturas somadas). `GET /expenses/agenda`.
+- **/semana** e **resumo automático de domingo às 19h**: gasto da semana × média das 8 anteriores, 3 maiores
+  gastos e a categoria que mais subiu. `GET /dashboard/week`.
+- **/metas** com barra de progresso, e **aviso quando um limite de gastos passa de 80% e de 100%** (uma vez
+  por nível no mês; checado a cada 15 min, das 8h às 22h).
+- **No lembrete diário**: "a fatura do Nubank fecha amanhã: R$ X até agora" e "vence em 2 dias: R$ Y a pagar";
+  e, só para o dono do banco conectado, "⚠️ Saldo do C6 é R$ 150 e vence conta de luz R$ 287,40 (amanhã)"
+  (casa pelo campo Banco da despesa; sem banco e com uma conta só, usa essa).
+- Telegram e IA: opção "Avisos automáticos" (resumo de domingo, metas, faturas e saldo), ligada por padrão.
+- A API recusa corpo acima de 12 MB (413) antes de ler.
+- MCP: `agenda_da_semana` e `resumo_da_semana`.
+- Banco: `tenants.telegram_alerts`, `tenants.telegram_weekly_sent`, `goals.alert_sent` (migração automática).
+
 ## 2026.3.1 — texto da tela de entrar (28/10/2026)
 
 - Frase: "Menos planilhas. Mais decisões inteligentes." e "Centralize gastos, cartões, contas e objetivos

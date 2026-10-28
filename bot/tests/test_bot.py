@@ -15,7 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'bot'))
 
-from finfam_bot.bot import Bot, parse_amount, parse_date, quick_parse  # noqa: E402
+from finfam_bot.bot import Bot, parse_amount, parse_date, pick_person, quick_parse  # noqa: E402
 from finfam_bot.http import FinFam  # noqa: E402
 
 KEY = 'chave-de-teste-do-bot-0123456789abcdefXYZ'
@@ -40,6 +40,10 @@ class FakeTelegram:
 
     def typing(self, chat_id):
         pass
+
+    def download(self, file_id, max_bytes):
+        self.downloaded = file_id
+        return b'\xff\xd8\xff-foto-do-cupom'
 
     @property
     def last(self):
@@ -315,13 +319,17 @@ class StubApi:
                 {'name': 'CDB - BANCO C6 S.A.', 'bank': 'C6 Bank', 'balance': 3839.92, 'currency': 'BRL'}]}
         if path == '/investments':
             return {'fixed': [], 'crypto': [], 'fixed_total': 0, 'crypto_total': 0}
+        if path == '/auth/me':
+            return {'user': {'id': 1, 'name': 'Tiago'}, 'members': [{'id': 1, 'name': 'Tiago'},
+                                                                   {'id': 2, 'name': 'Greyce Paixão'}]}
         assert path == '/settings/ai', path
         return {'configured': self.ai[0], 'enabled': self.ai[1], 'provider': 'gemini', 'model': None,
                 'providers': [{'id': 'gemini', 'label': 'Gemini (Google)', 'default_model': 'gemini-flash-lite-latest'}]}
 
     def post(self, chat_id, path, body=None):
-        if path == '/ai/interpret':
+        if path in ('/ai/interpret', '/ai/interpret-media'):
             self.interpreted += 1
+            self.media = body if path == '/ai/interpret-media' else None
             return self.answer
         self.posted.append((path, body))
         return {'message': 'Despesa lançada!', 'expenses': [{}]}
@@ -501,3 +509,118 @@ def test_ai_investments_intent():
     b = Bot(tg, StubApi({'intent': 'investments', 'reply': ''}), 'https://finfam.test')
     b.handle(_msg(93, 'como estão minhas economias?'))
     assert 'Total investido' in tg.last['text']
+
+
+def test_menu_agenda_goals_and_week_on_real_api(bot, api_url, family):
+    b, tg = bot
+    code = _call(api_url, 'POST', '/telegram/link-code', token=family)['code']
+    b.handle(_msg(30, f'/start {code}'))
+    b.handle(_click(30, tg.button('✅ Conectar', tg.sent[-1])))
+    assert tg.button('m:agenda')  # menu logo depois de conectar
+    b.handle(_msg(30, '/start'))
+    assert 'O que você quer ver?' in tg.last['text'] and tg.button('📝 Revisar')
+    _call(api_url, 'POST', '/expenses', {'description': 'Escola <Kids>', 'amount': '900', 'category': 'Educação',
+                                         'payment_method': 'PIX', 'date': date.today().isoformat()}, family)
+    b.handle(_click(30, 'm:agenda'))
+    assert 'Agenda da semana' in tg.last['text'] and 'Escola &lt;Kids&gt;' in tg.last['text']
+    _call(api_url, 'POST', '/goals', {'title': 'Mercado', 'type': 'spending_limit', 'target_amount': '1000',
+                                      'category': 'Educação'}, family)
+    b.handle(_msg(30, '/metas'))
+    assert 'Mercado' in tg.last['text'] and '% usado' in tg.last['text']
+    b.handle(_click(30, 'm:semana'))
+    assert 'Sua semana' in tg.last['text'] and 'Escola' in tg.last['text']
+    b.handle(_msg(30, '/revisar'))  # Open Finance não liberado para a família
+    assert 'não está liberado' in tg.last['text']
+    b.handle(_msg(30, '/desconectar'))
+
+
+def test_receipt_photo_goes_to_ai_and_waits_for_confirmation():
+    tg = FakeTelegram()
+    api = StubApi({'intent': 'expense', 'reply': '', 'draft': {
+        'description': 'Drogasil', 'amount': 42.9, 'payment_method': 'Cartão de Débito', 'category': 'Saúde',
+        'date': '2026-10-27', 'card_id': None}})
+    b = Bot(tg, api)
+    photo = {'update_id': 9, 'message': {'chat': {'id': 60, 'type': 'private'}, 'from': {'id': 60}, 'caption': 'remédio',
+                                         'photo': [{'file_id': 'small', 'file_size': 900},
+                                                   {'file_id': 'big', 'file_size': 90000}]}}
+    b.handle(photo)
+    assert tg.downloaded == 'big' and api.media['mime'] == 'image/jpeg' and api.media['caption'] == 'remédio'
+    assert api.posted == []  # nada gravado antes do ✅
+    voice = {'update_id': 10, 'message': {'chat': {'id': 61, 'type': 'private'}, 'from': {'id': 61},
+                                          'voice': {'file_id': 'v1', 'mime_type': 'audio/ogg', 'file_size': 5000}}}
+    b.handle(voice)
+    assert api.media['mime'] == 'audio/ogg'
+    huge = {'update_id': 11, 'message': {'chat': {'id': 62, 'type': 'private'}, 'from': {'id': 62},
+                                         'document': {'file_id': 'd', 'mime_type': 'application/pdf', 'file_size': 9 * 2 ** 20}}}
+    b.handle(huge)
+    assert 'grande demais' in tg.last['text']
+    off = Bot(tg, StubApi({}, ai=(False, False)))
+    off.handle(photo)
+    assert 'não consigo ler fotos' in tg.last['text']
+
+
+def test_expense_for_another_member_without_ai():
+    tg = FakeTelegram()
+    b = Bot(tg, StubApi({}, ai=(False, False)))
+    b.handle(_msg(63, 'farmácia 30 pra Greyce'))
+    data = b.flows[63]['data']
+    assert (data['user_id'], data['user_name'], data['description'], data['amount']) == (2, 'Greyce Paixão', 'Farmácia', 30.0)
+
+
+class ReviewApi(StubApi):
+    def __init__(self):
+        super().__init__({})
+        self.queue = [{'id': 7, 'date': '2026-10-26', 'description': 'IFOOD *REST', 'amount': 45.9, 'refund': False,
+                       'installment': None, 'bank_pending': False, 'bill': '11/2026', 'bank_name': 'C6 Bank',
+                       'account_type': 'CREDIT', 'account_last_digits': '0982', 'card_digits': None,
+                       'category': 'Alimentação'},
+                      {'id': 8, 'date': '2026-10-27', 'description': 'UBER', 'amount': 12.0, 'refund': False,
+                       'installment': None, 'bank_pending': True, 'bill': None, 'bank_name': 'C6 Bank',
+                       'account_type': 'BANK', 'account_last_digits': '5665', 'card_digits': None,
+                       'category': 'Transporte'}]
+
+    def get(self, chat_id, path, **query):
+        if path == '/pluggy/review/next':
+            off = query.get('offset', 0)
+            item = self.queue[off] if off < len(self.queue) else None
+            return {'total': len(self.queue), 'offset': off, 'item': item,
+                    'categories': ['Alimentação', 'Lazer', 'Transporte'] if item else []}
+        return super().get(chat_id, path, **query)
+
+    def post(self, chat_id, path, body=None):
+        self.posted.append((path, body))
+        if path == '/pluggy/transactions/approve':
+            self.queue = [t for t in self.queue if t['id'] != body['items'][0]['id']]
+            return {'message': '1 despesa(s) lançada(s) no FinFam.'}
+        if path == '/pluggy/transactions/ignore':
+            self.queue = [t for t in self.queue if t['id'] not in body['ids']]
+            return {'message': 'ok'}
+        return super().post(chat_id, path, body)
+
+
+def test_review_bank_transactions_with_buttons():
+    tg, api = FakeTelegram(), ReviewApi()
+    b = Bot(tg, api)
+    b.handle(_click(70, 'rv:go:0'))  # botão do aviso "chegou do banco"
+    assert '1 de 2' in tg.last['text'] and 'IFOOD' in tg.last['text'] and 'Alimentação' in tg.last['text']
+    b.handle(_click(70, tg.button('⏭')))  # deixa para depois
+    assert 'UBER' in tg.last['text'] and '2 de 2' in tg.last['text']
+    b.handle(_click(70, tg.button('🏷️')))
+    assert 'Qual categoria?' in tg.last['text']
+    b.handle(_click(70, tg.button('Lazer')))
+    assert api.posted[-1] == ('/pluggy/transactions/approve', {'items': [{'id': 8, 'category': 'Lazer'}]})
+    assert 'lançada' in tg.last['text'] and 'IFOOD' in tg.last['text']  # volta ao começo da fila
+    b.handle(_click(70, tg.button('🚫')))
+    assert api.posted[-1] == ('/pluggy/transactions/ignore', {'ids': [7]})
+    assert 'Nada para revisar' in tg.last['text']
+    b.reviews.clear()  # bot reiniciou: o botão antigo só atualiza a lista
+    b.handle(_click(70, 'rv:ok:7:0'))
+    assert len(api.posted) == 2 and 'Toque de novo' in tg.answers[-1]
+
+
+def test_pick_person():
+    members = [{'id': 1, 'name': 'Tiago Paixão'}, {'id': 2, 'name': 'Greyce Paixão'}]
+    assert pick_person('gastei 30 de farmácia pra Greyce', members) == (members[1], 'gastei 30 de farmácia')
+    assert pick_person('uber 20 para a greyce ontem', members) == (members[1], 'uber 20 ontem')
+    assert pick_person('conta de luz 100', members) == (None, 'conta de luz 100')
+    assert pick_person('mercado 20 pra Greyce', members[:1]) == (None, 'mercado 20 pra Greyce')

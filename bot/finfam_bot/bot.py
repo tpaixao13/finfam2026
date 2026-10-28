@@ -6,6 +6,7 @@ que só enxerga os dados da família de quem vinculou a conversa.
 Módulos: `fmt` (texto/botões), `parsers` (valores e frases), `views` (respostas),
 `flow` + `expense_flow` + `invest_flow` (passo a passo).
 """
+import base64
 import logging
 import re
 import secrets
@@ -18,9 +19,10 @@ from finfam_bot.flow import Flow
 from finfam_bot.fmt import btn, dm, h
 from finfam_bot.http import ApiError, FinFam, Telegram
 from finfam_bot.invest_flow import InvestFlow
-from finfam_bot.parsers import parse_amount, parse_date, quick_parse  # noqa: F401  (usados pelos testes)
-from finfam_bot.views import (HELP, balances_text, bank_text, bills_view, draft_text, invoices_text, portfolio_text, purchases_text,
-                              spending_text, summary_text)
+from finfam_bot.parsers import parse_amount, parse_date, pick_person, quick_parse  # noqa: F401  (usados pelos testes)
+from finfam_bot.review import Review
+from finfam_bot.views import (HELP, MENU, agenda_text, balances_text, bank_text, bills_view, draft_text, goals_text,
+                              invoices_text, portfolio_text, purchases_text, spending_text, summary_text, week_text)
 
 # perguntas sobre os bancos conectados — respondidas sem IA
 BANK_QUESTION = re.compile(
@@ -39,6 +41,10 @@ _AMOUNT = re.compile(r'(?<![a-z])\d+(?:[.,]\d{1,2})?\b', re.I)  # valor solto ("
 
 log = logging.getLogger('finfam.bot')
 
+MEDIA_MAX = 8 * 1024 * 1024  # foto de cupom / áudio (a API aceita até 8 MB)
+AUDIO_TYPES = {'audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/wav'}
+DOC_TYPES = {'image/jpeg', 'image/png', 'image/webp', 'application/pdf'}
+
 AI_DRAFT_FIELDS = ('description', 'amount', 'payment_method', 'card_id', 'card_label', 'installments', 'category',
                    'date', 'user_id', 'user_name')
 
@@ -54,7 +60,9 @@ class Bot:
         self.flows: dict[int, dict] = {}     # chat → lançamento guiado em andamento
         self.drafts: dict[str, dict] = {}    # id → rascunho aguardando ✅
         self.cache: dict[tuple, tuple[float, object]] = {}  # (chat, recurso) → (quando, dados)
+        self.reviews: dict[tuple, dict] = {}  # (chat, lançamento do banco) → categoria escolhida
         self.expense, self.invest = ExpenseFlow(self), InvestFlow(self)
+        self.review = Review(self)
         self.guided: dict[str, Flow] = {f.kind: f for f in (self.expense, self.invest)}
 
     # entrada ─────────────────────────────────────────────────────────────────
@@ -91,7 +99,7 @@ class Bot:
 
     def _expire(self) -> None:
         limit = time.time() - TTL
-        for store in (self.flows, self.drafts):
+        for store in (self.flows, self.drafts, self.reviews):
             for key, value in list(store.items()):  # list(): outras conversas mexem ao mesmo tempo
                 if value['ts'] < limit:
                     store.pop(key, None)
@@ -103,6 +111,9 @@ class Bot:
             if text.startswith('/'):
                 self.tg.send(chat_id, 'Por segurança, eu só funciono em conversa privada.')
             return
+        media = _media_of(msg)
+        if media:
+            return self.media(chat_id, *media, (msg.get('caption') or '').strip()[:500])
         if not text:
             return
         command, _, arg = text.partition(' ')
@@ -116,6 +127,9 @@ class Bot:
                     '/carteira': lambda: self.portfolio(chat_id),
                     '/banco': lambda: self.bank(chat_id),
                     '/openfinance': lambda: self.bank(chat_id), '/open_finance': lambda: self.bank(chat_id),
+                    '/agenda': lambda: self.agenda(chat_id), '/metas': lambda: self.goals(chat_id),
+                    '/semana': lambda: self.week(chat_id), '/menu': lambda: self.menu(chat_id),
+                    '/revisar': lambda: self.review.show(chat_id),
                     '/desconectar': lambda: self.unlink(chat_id)}
         if command in handlers:
             handlers[command]()
@@ -142,11 +156,11 @@ class Bot:
         try:
             status = self.ai_status(chat_id)
         except ApiError:
-            return self.tg.send(chat_id, HELP)
+            return self.tg.send(chat_id, HELP)  # não conectado: sem menu (os botões só dariam erro)
         line = (f'🤖 IA: <b>ligada</b> ({h(status["label"])})' if status['on'] else
                 '🤖 IA: <b>desligada</b> — ligue em Telegram e IA no site.' if status['reason'] == 'off' else
                 '🤖 IA: <b>não configurada</b> — o dono da família cadastra a chave em Telegram e IA no site.')
-        self.tg.send(chat_id, f'{HELP}\n\n{line}')
+        self.tg.send(chat_id, f'{HELP}\n\n{line}', MENU)
 
     def start(self, chat_id: int, code: str, sender: dict) -> None:
         if code:  # link do site: confirma de quem é a conta antes de conectar
@@ -163,7 +177,7 @@ class Bot:
                 raise
             self.tg.send(chat_id, '👋 Olá! Eu sou o bot do <b>FinFam</b>.\n\n' + self._how_to_link())
             return
-        self.tg.send(chat_id, f'👋 Olá, {h(me["user"]["name"])}!\n\n{HELP}')
+        self.tg.send(chat_id, f'👋 Olá, {h(me["user"]["name"])}! O que você quer ver?', MENU)
 
     def _link_answer(self, cq: dict, code: str, chat_id: int, message_id: int) -> None:
         self.tg.answer(cq['id'])
@@ -174,7 +188,7 @@ class Bot:
         self.cache.pop((chat_id, 'me'), None)
         family = f' (família {h(r["family"])})' if r.get('family') else ''
         self.tg.edit(chat_id, message_id, f'✅ {h(r["message"])}{family}')
-        self.tg.send(chat_id, HELP)
+        self.tg.send(chat_id, HELP, MENU)
 
     def unlink(self, chat_id: int) -> None:
         self.api.delete(chat_id, '/telegram/link')
@@ -194,8 +208,9 @@ class Bot:
                 raise
             self.tg.send(chat_id, '🏦 O Open Finance (bancos conectados) não está liberado para a sua família.')
             return
+        buttons = [[btn('📝 Revisar aqui no Telegram', 'rv:go:0')]] if summary['counts']['pending'] else None
         self.tg.send(chat_id, bank_text(summary, check, self.site_url, self.optional(chat_id, '/pluggy/balances'),
-                                        self.optional(chat_id, '/pluggy/investments')))
+                                        self.optional(chat_id, '/pluggy/investments')), buttons)
 
     def optional(self, chat_id: int, path: str) -> dict | None:
         """Complemento que pode faltar (Open Finance desligado, API antiga): sem ele, a resposta segue."""
@@ -215,6 +230,19 @@ class Bot:
 
     def summary(self, chat_id: int) -> None:
         self.tg.send(chat_id, summary_text(self.api.get(chat_id, '/dashboard')))
+
+    def menu(self, chat_id: int) -> None:
+        self.linked(chat_id)
+        self.tg.send(chat_id, 'O que você quer ver?', MENU)
+
+    def agenda(self, chat_id: int) -> None:
+        self.tg.send(chat_id, agenda_text(self.api.get(chat_id, '/expenses/agenda', days=7)))
+
+    def goals(self, chat_id: int) -> None:
+        self.tg.send(chat_id, goals_text(self.api.get(chat_id, '/goals')))
+
+    def week(self, chat_id: int) -> None:
+        self.tg.send(chat_id, week_text(self.api.get(chat_id, '/dashboard/week')))
 
     def balances(self, chat_id: int) -> None:
         self.tg.send(chat_id, balances_text(self.optional(chat_id, '/pluggy/balances')))
@@ -273,6 +301,28 @@ class Bot:
                 self.tg.send(chat_id, self.ai_off_text('missing'))
                 return
             raise
+        self.answer_ai(chat_id, r, text)
+
+    def media(self, chat_id: int, file_id: str, mime: str, size: int, caption: str) -> None:
+        """Foto do cupom/comprovante ou áudio: a IA da família lê e propõe o lançamento (confirma com ✅)."""
+        status = self.ai_status(chat_id)
+        if not status['on']:
+            return self.tg.send(chat_id, self.ai_off_text(status['reason']).replace(
+                'não consigo entender frases livres', 'não consigo ler fotos nem áudios'))
+        if size > MEDIA_MAX:
+            return self.tg.send(chat_id, '📎 Arquivo grande demais (máximo 8 MB). Mande uma foto só do cupom.')
+        self.tg.typing(chat_id)
+        data = self.tg.download(file_id, MEDIA_MAX)
+        if data is None:
+            return self.tg.send(chat_id, '📎 Não consegui baixar o arquivo do Telegram. Tente mandar de novo.')
+        r = self.api.post(chat_id, '/ai/interpret-media',
+                          {'mime': mime, 'data': base64.b64encode(data).decode(), 'caption': caption})
+        if r['intent'] == 'expense' and not r.get('draft'):
+            return self.tg.send(chat_id, '🤔 Não achei um gasto aí. Mande a foto do cupom/comprovante mais de perto.')
+        self.answer_ai(chat_id, r, caption)
+
+    def answer_ai(self, chat_id: int, r: dict, text: str) -> None:
+        """Responde ao que a IA entendeu (de texto, foto ou áudio)."""
         intent, q = r['intent'], r.get('query') or {}
         if intent == 'bills':
             self.bills(chat_id, days=q.get('days') or 7)
@@ -322,8 +372,13 @@ class Bot:
         self.expense.next(chat_id)
 
     def quick_flow(self, chat_id: int, text: str) -> bool:
-        """Frase com valor ("almoço 25 no pix") → lançamento guiado só com o que falta."""
+        """Frase com valor ("almoço 25 no pix") → lançamento guiado só com o que falta.
+        "… pra Greyce" lança para a pessoa da família com esse nome."""
+        members = self.cached(chat_id, 'me', lambda: self.api.get(chat_id, '/auth/me'), ttl=300).get('members', [])
+        person, text = pick_person(text, members)
         data = quick_parse(text, date.today())
+        if person:
+            data.update(user_id=person['id'], user_name=person['name'])
         if not data.get('amount') or not data.get('description'):
             return False
         self.expense.begin(chat_id, data, 'method')
@@ -369,12 +424,25 @@ class Bot:
         if kind == 'bills':
             self.tg.answer(cq['id'])
             return self.bills(chat_id, message_id)
+        if kind == 'm':
+            return self._menu_answer(cq, arg, chat_id)
+        if kind == 'rv':
+            return self.review.button(cq, arg, chat_id, message_id)
         if kind in ('ok', 'no'):
             return self._draft_answer(cq, kind, arg, chat_id, message_id)
         flow = next((f for f in self.guided.values() if f.prefix == kind), None)
         if flow:
             return flow.button(cq, arg, chat_id, message_id)
         self.tg.answer(cq['id'])
+
+    def _menu_answer(self, cq: dict, item: str, chat_id: int) -> None:
+        self.tg.answer(cq['id'])
+        actions = {'contas': self.bills, 'agenda': self.agenda, 'resumo': self.summary, 'semana': self.week,
+                   'metas': self.goals, 'carteira': self.portfolio, 'banco': self.bank,
+                   'revisar': self.review.show,
+                   'lancar': lambda c: self.linked(c) and self.expense.start(c)}
+        if item in actions:
+            actions[item](chat_id)
 
     def _draft_answer(self, cq, kind, draft_id, chat_id, message_id) -> None:
         draft = self.drafts.pop(draft_id, None)
@@ -400,3 +468,22 @@ class Bot:
                                                                                first.get('purchase_year')):
             return f'\nEntrou na fatura de {first["month"]:02d}/{first["year"]} (vence {dm(first.get("due_date"))}).'
         return ''
+
+
+def _media_of(msg: dict) -> tuple[str, str, int] | None:
+    """(file_id, tipo, tamanho) da foto/áudio/arquivo da mensagem, se for algo que a IA lê."""
+    if msg.get('photo'):  # várias resoluções: a maior que não passe de 8 MB
+        sizes = [p for p in msg['photo'] if (p.get('file_size') or 0) <= MEDIA_MAX] or msg['photo'][:1]
+        best = sizes[-1]
+        return best['file_id'], 'image/jpeg', best.get('file_size') or 0
+    for key in ('voice', 'audio'):
+        if msg.get(key):
+            f = msg[key]
+            mime = f.get('mime_type') or 'audio/ogg'
+            mime = 'audio/mpeg' if mime == 'audio/mp3' else mime
+            if mime in AUDIO_TYPES:
+                return f['file_id'], mime, f.get('file_size') or 0
+    doc = msg.get('document')
+    if doc and doc.get('mime_type') in DOC_TYPES:
+        return doc['file_id'], doc['mime_type'], doc.get('file_size') or 0
+    return None

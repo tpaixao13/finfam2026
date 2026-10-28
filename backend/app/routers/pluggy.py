@@ -17,7 +17,7 @@ import hmac
 import logging
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -26,7 +26,7 @@ from app.core import ratelimit
 from app.core.config import settings
 from app.core.deps import _LOCAL_HOSTS
 from app.core.db import db
-from app.core.deps import Ctx, Period, get_ctx, get_ctx_session, get_period
+from app.core.deps import Ctx, Period, get_ctx, get_ctx_session, get_ctx_site_or_bot, get_period
 from app.core.security import decrypt_field, encrypt_field
 from app.core.types import utcnow
 from app.models import BankAccount, BankInvestment, Expense, BankConnection, BankTransaction, CreditCard, PluggyConfig, Tenant, User
@@ -489,6 +489,17 @@ def list_transactions(status: Literal['pending', 'duplicate', 'ignored', 'import
             'items': [_tx_out(t, ctx) for t in rows]}
 
 
+@router.get('/review/next', summary='Próximo lançamento do banco para revisar (um por vez, para o bot)')
+def review_next(offset: int = Query(0, ge=0, le=500), ctx: Ctx = Depends(get_ctx_site_or_bot)):
+    """Mais antigos primeiro; `offset` pula os que a pessoa deixou para depois."""
+    _enabled_tenant(ctx)
+    q = BankTransaction.query.filter_by(user_id=ctx.user.id, status='pending')
+    total = q.count()
+    tx = q.order_by(BankTransaction.date, BankTransaction.id).offset(offset).first() if offset < total else None
+    return {'total': total, 'offset': offset, 'item': _tx_out(tx, ctx) if tx else None,
+            'categories': tenant_categories(ctx.uids) if tx else []}
+
+
 class ApproveItem(BaseModel):
     id: int
     category: str = Field(min_length=1, max_length=50, description='Da lista ou uma nova')
@@ -501,7 +512,7 @@ class ApproveIn(BaseModel):
 
 
 @router.post('/transactions/approve', summary='Lança como despesa os lançamentos escolhidos')
-def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_session)):
+def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_site_or_bot)):
     _enabled_tenant(ctx)
     rows = {t.id: t for t in _my_tx(ctx, [i.id for i in body.items])}
     allowed = tenant_categories(ctx.uids)
@@ -537,7 +548,7 @@ class IdsIn(BaseModel):
 
 
 @router.post('/transactions/ignore', summary='Ignora os lançamentos escolhidos (não viram despesa)')
-def ignore_transactions(body: IdsIn, ctx: Ctx = Depends(get_ctx_session)):
+def ignore_transactions(body: IdsIn, ctx: Ctx = Depends(get_ctx_site_or_bot)):
     _enabled_tenant(ctx)
     n = 0
     for tx in _my_tx(ctx, body.ids):

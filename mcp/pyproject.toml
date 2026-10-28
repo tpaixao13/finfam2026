@@ -1,6 +1,6 @@
 [project]
 name = "finfam-mcp"
-version = "2026.3.1"
+version = "2026.4.0"
 description = "Servidor MCP do FinFam: contas a pagar, lançamentos, faturas e resumo do mês."
 requires-python = ">=3.10"
 dependencies = ["mcp>=1.10"]

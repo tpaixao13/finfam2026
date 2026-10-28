@@ -64,6 +64,7 @@ class _KeepAlive:
 
 class Telegram:
     def __init__(self, token: str):
+        self.token = token
         self.path = f'/bot{token}/'
         self.send_conn = _KeepAlive('api.telegram.org')   # mensagens, botões
         self.poll_conn = _KeepAlive('api.telegram.org')   # getUpdates (fica parado esperando)
@@ -106,6 +107,21 @@ class Telegram:
 
     def typing(self, chat_id):
         return self.call('sendChatAction', chat_id=chat_id, action='typing')
+
+    def download(self, file_id: str, max_bytes: int) -> bytes | None:
+        """Baixa o arquivo (foto, áudio) que a pessoa mandou. None se falhar ou passar de max_bytes."""
+        info = self.call('getFile', file_id=file_id)
+        path = (info or {}).get('file_path')
+        if not path or (info.get('file_size') or 0) > max_bytes:
+            return None
+        url = f'https://api.telegram.org/file/bot{self.token}/{urllib.parse.quote(path)}'
+        try:
+            with urllib.request.urlopen(url, timeout=30) as resp:  # roda na thread da conversa (Dispatcher)
+                data = resp.read(max_bytes + 1)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            log.warning('Telegram: não consegui baixar o arquivo: %s', type(exc).__name__)  # a URL tem o token
+            return None
+        return data if len(data) <= max_bytes else None
 
 
 class FinFam:

@@ -158,6 +158,12 @@ def calendar(period: Period = Depends(get_period), user_id: int | None = None, c
     return svc.calendar(ctx.uids, period.year, period.month, _date.today(), user_id)
 
 
+@router.get('/agenda', summary='Contas a pagar dos próximos dias, dia a dia (faturas de cartão somadas)')
+def agenda(days: int = Query(7, ge=1, le=31), ctx: Ctx = Depends(get_ctx)):
+    from app.services.bot_notices import agenda as build
+    return build(ctx.uids, _date.today(), days)
+
+
 @router.get('/bills', summary='Contas a pagar: em atraso, hoje e próximos dias')
 def bills(days_ahead: int = Query(7, ge=0, le=90), include_overdue: bool = True,
           user_id: int | None = None, ctx: Ctx = Depends(get_ctx)):

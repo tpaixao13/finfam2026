@@ -75,22 +75,33 @@ class AIClient:
         return cls(provider=cfg.provider, api_key=decrypt_field(cfg.api_key) or '',
                    model=cfg.model or PROVIDERS[cfg.provider]['default_model'], base_url=cfg.base_url or None)
 
-    def complete_json(self, system: str, user: str) -> dict:
-        text = getattr(self, f'_{self.provider}')(system, user)
+    def complete_json(self, system: str, user: str, media: dict | None = None) -> dict:
+        """`media`: {'mime': 'image/jpeg'|'audio/ogg'|…, 'data': base64} — foto de cupom ou áudio."""
+        if media is not None:
+            kind = media['mime'].split('/')[0]
+            if kind not in MEDIA_SUPPORT[self.provider]:
+                raise AIError(MEDIA_UNSUPPORTED[kind])
+        text = getattr(self, f'_{self.provider}')(system, user, media)
         return parse_json(text)
 
     # ── um método por provedor ──
-    def _anthropic(self, system: str, user: str) -> str:
+    def _anthropic(self, system: str, user: str, media: dict | None = None) -> str:
+        content = user
+        if media:
+            block = 'document' if media['mime'] == 'application/pdf' else 'image'
+            content = [{'type': block, 'source': {'type': 'base64', 'media_type': media['mime'], 'data': media['data']}},
+                       {'type': 'text', 'text': user}]
         r = _post('https://api.anthropic.com/v1/messages',
                   {'x-api-key': self.api_key, 'anthropic-version': '2023-06-01'},
                   {'model': self.model, 'max_tokens': 600, 'system': system,
-                   'messages': [{'role': 'user', 'content': user}]})
+                   'messages': [{'role': 'user', 'content': content}]})
         return ''.join(b.get('text', '') for b in r.get('content', []) if b.get('type') == 'text')
 
-    def _gemini(self, system: str, user: str) -> str:
+    def _gemini(self, system: str, user: str, media: dict | None = None) -> str:
         url = f'https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent'
+        parts = [{'inline_data': {'mime_type': media['mime'], 'data': media['data']}}] if media else []
         body = {'systemInstruction': {'parts': [{'text': system}]},
-                'contents': [{'role': 'user', 'parts': [{'text': user}]}],
+                'contents': [{'role': 'user', 'parts': parts + [{'text': user}]}],
                 'generationConfig': {'responseMimeType': 'application/json',
                                      # pensar pouco: tarefa simples, e o padrão leva >30 s no Gemini 3
                                      'thinkingConfig': _gemini_thinking(self.model)}}
@@ -104,9 +115,13 @@ class AIClient:
         parts = (r.get('candidates') or [{}])[0].get('content', {}).get('parts', [])
         return ''.join(p.get('text', '') for p in parts if not p.get('thought'))
 
-    def _openai(self, system: str, user: str) -> str:
+    def _openai(self, system: str, user: str, media: dict | None = None) -> str:
+        content = user
+        if media:
+            content = [{'type': 'image_url', 'image_url': {'url': f'data:{media["mime"]};base64,{media["data"]}'}},
+                       {'type': 'text', 'text': user}]
         body = {'model': self.model, 'messages': [{'role': 'system', 'content': system},
-                                                  {'role': 'user', 'content': user}]}
+                                                  {'role': 'user', 'content': content}]}
         if not self.base_url:  # nem todo "compatível" aceita response_format
             body['response_format'] = {'type': 'json_object'}
         if self.base_url:
@@ -114,6 +129,25 @@ class AIClient:
         r = _post(f'{(self.base_url or OPENAI_URL).rstrip("/")}/chat/completions',
                   {'Authorization': f'Bearer {self.api_key}'}, body, custom=bool(self.base_url))
         return ((r.get('choices') or [{}])[0].get('message') or {}).get('content') or ''
+
+
+# o que cada provedor lê além de texto (o áudio do Telegram é OGG/Opus: só o Gemini entende direto)
+MEDIA_SUPPORT = {'gemini': ('image', 'audio', 'application'), 'anthropic': ('image', 'application'),
+                 'openai': ('image',)}
+MEDIA_UNSUPPORTED = {
+    'audio': 'A IA configurada não entende áudio. Use o Gemini em Telegram e IA, ou escreva a mensagem.',
+    'image': 'A IA configurada não lê fotos. Use Gemini, Claude ou ChatGPT em Telegram e IA.',
+    'application': 'A IA configurada não lê PDF. Mande uma foto do cupom, ou use Gemini/Claude.',
+}
+MEDIA_PROMPT = {
+    'image': ('A mensagem traz uma FOTO (cupom fiscal, nota, comprovante de PIX/cartão ou boleto). Leia o valor TOTAL '
+              'pago, o nome da loja/empresa (vira description, curto) e a data da compra; a forma de pagamento se '
+              'aparecer. intent = "expense". Se não for um comprovante de gasto, intent = "chat" e explique em reply.'),
+    'application': ('A mensagem traz um PDF (nota fiscal, comprovante ou boleto). Leia o valor TOTAL, a empresa '
+                    '(description) e a data. intent = "expense".'),
+    'audio': ('A mensagem é um ÁUDIO em português. Entenda o que a pessoa falou e responda como se ela tivesse '
+              'escrito a frase (pode ser um gasto para lançar ou uma pergunta).'),
+}
 
 
 def _gemini_thinking(model: str) -> dict:
@@ -229,7 +263,8 @@ Regras:
 - installments: nº de parcelas só no crédito ("em 3x" → 3). Senão null.
 - category: uma de {categories}, ou null se não tiver certeza.
 - date: hoje é {today} ({weekday}); "ontem", "sexta" etc. viram data. Sem data → null.
-- person_id: só se a pessoa disser que o gasto é de outro membro. Senão null.
+- person_id: id da lista de Membros quando o gasto é de OUTRO membro ("pra Greyce", "da Greyce", "a Greyce gastou").
+  Use o nome mais parecido da lista (apelido ou só o primeiro nome vale). Senão null.
 - "bills": quer ver contas a pagar/vencimentos. query.days = quantos dias à frente ("próximos 5 dias" → 5; padrão 7).
 - "spending": pergunta QUANTO gastou com algo ("quanto gastei de alimentação/mercado este mês?").
   query.category = uma de {categories} se der para mapear ("alimento", "comida" → Alimentação); senão null e
@@ -341,9 +376,13 @@ def to_draft(raw: dict | None, *, today: date, categories: list[str], methods: l
                  user_id=person if person in member_ids else None)
 
 
-def interpret(client: AIClient, text: str, system_prompt: str) -> dict:
-    """{'intent', 'expense'/'query' (crus, conferir com to_draft/to_query), 'reply'}."""
-    data = client.complete_json(system_prompt, text)
+def interpret(client: AIClient, text: str, system_prompt: str, media: dict | None = None) -> dict:
+    """{'intent', 'expense'/'query' (crus, conferir com to_draft/to_query), 'reply'}.
+    `media`: foto/áudio/PDF ({'mime', 'data' base64}); `text` vira a legenda (pode ser vazia)."""
+    if media is not None:
+        system_prompt = f"{system_prompt}\n{MEDIA_PROMPT[media['mime'].split('/')[0]]}"
+        text = text or '(sem legenda)'
+    data = client.complete_json(system_prompt, text, media)
     intent = data.get('intent') if data.get('intent') in INTENTS else 'chat'
     reply = str(data.get('reply') or '').strip()[:500]
     return {'intent': intent, 'expense': data.get('expense'), 'query': data.get('query'), 'reply': reply}

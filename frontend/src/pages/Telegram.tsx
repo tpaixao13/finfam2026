@@ -9,6 +9,7 @@ interface TelegramData {
   bot_configured: boolean; bot_username: string | null; linked: boolean; telegram_username: string | null
   members: { id: number; name: string; linked: boolean }[]
   enabled: boolean; hour: number; minute: number; configured: boolean; legacy_configured: boolean
+  alerts: boolean
 }
 interface AiProvider { id: string; label: string; default_model: string; key_url: string }
 interface AiData { configured: boolean; enabled: boolean; provider: string | null; model: string | null; base_url: string | null; key_masked: string; providers: AiProvider[]; can_edit: boolean }
@@ -44,12 +45,16 @@ function BotCommandsPanel() {
   return (
     <Panel title="O que o bot faz">
       <ul className="plain-list">
-        <li><code>/contas</code> contas a pagar, com botão para marcar como paga</li>
-        <li><code>/resumo</code> resumo do mês</li>
+        <li><code>/menu</code> botões com tudo o que o bot faz</li>
+        <li><code>/contas</code> contas a pagar, com botão para marcar como paga · <code>/agenda</code> as da semana, dia a dia</li>
+        <li><code>/resumo</code> resumo do mês · <code>/semana</code> como foi a semana · <code>/metas</code> progresso das metas</li>
         <li><code>/lancar</code> lançar um gasto passo a passo</li>
         <li><code>/investir</code> registrar um investimento (real, dólar, euro…)</li>
         <li><code>/carteira</code> seus investimentos (lançados e dos bancos)</li>
         <li><code>/banco</code> bancos conectados: o que chegou, saldo e se a fatura bate</li>
+        <li><code>/revisar</code> revisar o que chegou do banco ali mesmo: lançar, trocar categoria ou ignorar</li>
+        <li>Com a IA ligada: mande a <b>foto do cupom</b> ou um <b>áudio</b> (áudio só com Gemini) e confirme com ✅</li>
+        <li><i>gastei 30 de farmácia pra Greyce</i> lança para outra pessoa da família</li>
         <li>Perguntas como <i>quais meus investimentos?</i> ou <i>saldo da conta do C6?</i> respondem mesmo sem IA</li>
         <li>Com a IA ligada, é só escrever: <i>gastei 87,50 no mercado no cartão Inter em 3x</i></li>
       </ul>
@@ -99,26 +104,30 @@ function TelegramLinkPanel({ d, reload }: { d: TelegramData; reload: () => void 
 
 function ReminderPanel({ d, reload }: { d: TelegramData; reload: () => void }) {
   const act = useAction()
-  const [f, setF] = useState<{ enabled: boolean; hour: string; minute: string } | null>(null)
-  const form = f ?? { enabled: d.enabled, hour: String(d.hour), minute: String(d.minute) }
+  const [f, setF] = useState<{ enabled: boolean; hour: string; minute: string; alerts: boolean } | null>(null)
+  const form = f ?? { enabled: d.enabled, hour: String(d.hour), minute: String(d.minute), alerts: d.alerts }
   return (
-    <Panel title="Lembrete diário">
+    <Panel title="Lembretes e avisos">
       <form className="stack" onSubmit={(e) => {
         e.preventDefault()
-        act(() => api.put<Done>('/settings/telegram', { enabled: form.enabled, hour: Number(form.hour), minute: Number(form.minute) }),
+        act(() => api.put<Done>('/settings/telegram', { enabled: form.enabled, hour: Number(form.hour), minute: Number(form.minute), alerts: form.alerts }),
           () => { setF(null); reload() })
       }}>
-        <p className="muted">Todo dia, no horário escolhido, quem conectou o Telegram recebe as contas do dia, as atrasadas e os alertas da família.</p>
+        <p className="muted">Todo dia, no horário escolhido, quem conectou o Telegram recebe as contas do dia, as atrasadas
+          e os alertas da família. Com os avisos automáticos, também a fatura que fecha amanhã ou vence em 2 dias e — só
+          para quem conectou o banco — a conta que vence maior que o saldo.</p>
         <Check label="Enviar lembrete todos os dias" checked={form.enabled} onChange={(v) => setF({ ...form, enabled: v })} />
         <div className="row gap">
           <Field label="Hora"><Select value={form.hour} onChange={(e) => setF({ ...form, hour: e.target.value })} options={HOURS} /></Field>
           <Field label="Minuto"><Select value={form.minute} onChange={(e) => setF({ ...form, minute: e.target.value })} options={MINUTES} /></Field>
         </div>
+        <Check label="Avisos automáticos: resumo da semana (domingo, 19h), metas de limite em 80% e 100%, faturas e saldo"
+          checked={form.alerts} onChange={(v) => setF({ ...form, alerts: v })} />
         {d.legacy_configured && !d.members.some((m) => m.linked) && (
           <p className="muted">Enquanto ninguém conectar o Telegram, o lembrete continua saindo pelo bot próprio configurado no FinFam antigo.</p>
         )}
         <div className="row gap">
-          <Button type="submit">Salvar lembrete</Button>
+          <Button type="submit">Salvar</Button>
           <Button type="button" variant="ghost" icon="telegram" disabled={!d.configured}
             title={d.configured ? undefined : 'Conecte o Telegram primeiro'}
             onClick={() => act(() => api.post<Done>('/settings/telegram/test'))}>Enviar teste agora</Button>

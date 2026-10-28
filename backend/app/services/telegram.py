@@ -27,12 +27,17 @@ def _h(text) -> str:
     return html.escape(str(text or ''), quote=False)
 
 
-def send_message(token: str, chat_id: str, text_html: str) -> tuple[bool, str]:
-    """Envia mensagem pelo Bot API. Retorna (sucesso, erro)."""
+def send_message(token: str, chat_id: str, text_html: str,
+                 buttons: list[list[dict]] | None = None) -> tuple[bool, str]:
+    """Envia mensagem pelo Bot API. Retorna (sucesso, erro). `buttons`: teclado inline
+    ([[{'text', 'callback_data'}]]) — o toque chega ao bot central, que responde."""
     url = f'https://api.telegram.org/bot{token}/sendMessage'
     if len(text_html) > 4000:  # limite do Telegram é 4096: corta numa quebra de linha
         text_html = text_html[:3900].rsplit('\n', 1)[0] + '\n\n… lista cortada. Veja tudo no site.'
-    payload = json.dumps({'chat_id': chat_id, 'text': text_html, 'parse_mode': 'HTML'}).encode()
+    body = {'chat_id': chat_id, 'text': text_html, 'parse_mode': 'HTML', 'disable_web_page_preview': True}
+    if buttons:
+        body['reply_markup'] = {'inline_keyboard': buttons}
+    payload = json.dumps(body).encode()
     req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'}, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=10, context=_ssl_context()) as resp:
@@ -122,6 +127,15 @@ def _tenant_message(tenant: Tenant, now: datetime) -> str | None:
             msg = f'{msg}\n\n{alert_msg}' if msg else alert_msg
     except Exception as exc:
         log.warning('Alertas do tenant %s falharam: %s', tenant.id, exc)
+    if settings.telegram_bot_token and tenant.telegram_alerts is not False and linked_chats([u.id for u in users]):
+        try:  # fatura que fecha amanhã / vence em 2 dias (só no bot central: lá tem /contas e /agenda)
+            from app.services.bot_notices import card_notices
+            cards = card_notices([u.id for u in users], now.date())
+            if cards:
+                block = '💳 <b>Cartões</b>\n' + '\n'.join(cards)
+                msg = f'{msg}\n\n{block}' if msg else f'📅 <b>FinFam — {now.strftime("%d/%m/%Y")}</b>\n\n{block}'
+        except Exception as exc:
+            log.warning('Avisos de cartão do tenant %s falharam: %s', tenant.id, exc)
     return msg
 
 
@@ -149,6 +163,12 @@ def run_daily_reminders(now: datetime | None = None) -> int:
             db.session.commit()
             if claimed.rowcount == 0:
                 continue
+            try:  # conta que vence × saldo do banco: vai só para o dono do banco
+                from app.services.bot_notices import run_personal_notices
+                if settings.telegram_bot_token and tenant.telegram_alerts is not False:
+                    sent += run_personal_notices(tenant, today)
+            except Exception as exc:
+                log.warning('Avisos de saldo do tenant %s falharam: %s', tenant.id, exc)
             msg = _tenant_message(tenant, now)
             if not msg:
                 continue

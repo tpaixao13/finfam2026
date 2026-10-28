@@ -71,8 +71,13 @@ Um bot só, para todas as famílias. Cada pessoa conecta o próprio Telegram em
 O bot age pela pessoa com `Bearer ffbot_<BOT_API_KEY>` + `X-Telegram-Chat`, com o mesmo
 isolamento por família do site, e nunca altera conta, senha, tokens ou chave de IA.
 
-- `/contas` (com botão ✅ para pagar), `/resumo`, `/lancar` (passo a passo), `/investir` (real, dólar, euro…),
-  `/carteira`, `/desconectar`. Frases simples como *"almoço 25 no pix"* funcionam mesmo sem IA.
+- `/menu` (botões), `/contas` (com botão ✅ para pagar), `/agenda` (semana dia a dia), `/resumo`, `/semana`,
+  `/metas`, `/lancar` (passo a passo), `/investir` (real, dólar, euro…), `/carteira`, `/banco`, `/revisar`
+  (lançamentos do banco: ✅ Lançar / 🏷️ Trocar categoria / 🚫 Ignorar), `/desconectar`. Frases simples como
+  *"almoço 25 no pix"* ou *"farmácia 30 pra Greyce"* funcionam mesmo sem IA.
+- Com IA: foto do cupom/comprovante (ou PDF) e áudio (Gemini) viram rascunho de lançamento.
+- Avisos: resumo da semana no domingo às 19h, metas de limite em 80%/100%, fatura que fecha amanhã ou vence
+  em 2 dias e conta maior que o saldo do banco (só para o dono do banco). Desligáveis em Telegram e IA.
 - Com IA configurada pela família (Claude, Gemini ou OpenAI/compatível, **chave da própria família**,
   guardada criptografada), basta escrever: *"gastei 87,50 no mercado no Inter em 3x"*. A IA só propõe;
   nada é gravado sem o ✅.

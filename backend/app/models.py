@@ -69,6 +69,9 @@ class Tenant(Base):
     telegram_hour = Column(Integer, default=8)
     telegram_minute = Column(Integer, default=0)
     telegram_last_sent = Column(Date, nullable=True)
+    # avisos automáticos do bot central: resumo de domingo e metas de limite (80%/100%)
+    telegram_alerts = Column(Boolean, default=True, server_default='1', nullable=False)
+    telegram_weekly_sent = Column(Date, nullable=True)
     trial_expires_at = Column(DateTime, nullable=True)
     plan = Column(Text, default='trial', nullable=False)
     extra_members = Column(Integer, default=0, nullable=False)
@@ -549,6 +552,8 @@ class Goal(Base):
     created_at = Column(DateTime, default=utcnow)
     completed_at = Column(DateTime, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
+    # último aviso de limite enviado no Telegram: 'AAAA-MM:80' ou 'AAAA-MM:100'
+    alert_sent = Column(Text, nullable=True)
 
     @property
     def emoji(self) -> str:

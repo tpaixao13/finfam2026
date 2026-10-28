@@ -6,11 +6,14 @@ from finfam_bot.fmt import btn, brl, dec, dm, h, money, num, rows
 
 HELP = ('<b>O que eu faço</b>\n'
         '/contas — contas a pagar (com botão para pagar)\n'
-        '/resumo — resumo do mês\n'
+        '/agenda — contas desta semana, dia a dia\n'
+        '/resumo — resumo do mês · /semana — como foi a semana\n'
+        '/metas — progresso das metas\n'
         '/lancar — lançar um gasto passo a passo\n'
         '/investir — registrar um investimento (real, dólar, euro…)\n'
         '/carteira — seus investimentos (lançados e dos bancos)\n'
         '/banco ou /openfinance — bancos conectados: o que chegou, saldo, investimentos e se a fatura bate\n'
+        '/revisar — revisar aqui o que chegou do banco (lançar, trocar categoria, ignorar)\n'
         '/cancelar — cancela o lançamento em andamento\n'
         '/desconectar — desliga este Telegram da sua conta\n\n'
         'Com a IA configurada no site, é só escrever, por exemplo:\n'
@@ -18,7 +21,15 @@ HELP = ('<b>O que eu faço</b>\n'
         '<i>quanto gastei de alimentação este mês?</i>\n'
         '<i>o que comprei dia 20/10?</i> · <i>contas dos próximos 5 dias</i>\n'
         '<i>qual o valor da fatura do cartão de novembro?</i> · <i>chegou algo do banco?</i>\n'
-        '<i>quais os meus investimentos?</i> · <i>qual o saldo da conta do C6?</i>')
+        '<i>quais os meus investimentos?</i> · <i>qual o saldo da conta do C6?</i>\n'
+        '<i>gastei 30 de farmácia pra Greyce</i> (lança para outra pessoa da família)\n\n'
+        '📸 Mande a <b>foto do cupom</b> ou um <b>áudio</b> contando o gasto: eu leio e você confirma com ✅.')
+
+MENU = [[btn('📅 Contas', 'm:contas'), btn('🗓 Agenda', 'm:agenda')],
+        [btn('📊 Resumo do mês', 'm:resumo'), btn('📈 Semana', 'm:semana')],
+        [btn('🎯 Metas', 'm:metas'), btn('💼 Carteira', 'm:carteira')],
+        [btn('🏦 Banco', 'm:banco'), btn('📝 Revisar do banco', 'm:revisar')],
+        [btn('➕ Lançar um gasto', 'm:lancar')]]
 
 
 def draft_text(d: dict, title: str = 'Confere o lançamento?') -> str:
@@ -222,4 +233,92 @@ def bank_text(summary: dict, check: dict, site_url: str = '', balances: dict | N
                   for a in accounts]
     if (investments or {}).get('items'):
         lines += ['', f"📈 <b>Investimentos nos bancos</b>: {brl(investments['total'])} ({len(investments['items'])}) · detalhes em /carteira"]
+    return '\n'.join(lines)
+
+
+WEEKDAY_SHORT = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
+
+
+def agenda_text(r: dict) -> str:
+    """/agenda: contas a pagar dia a dia (faturas de cartão somadas num item)."""
+    lines = [f'🗓 <b>Agenda da semana</b> — {brl(r["total"])} a pagar']
+    empty = []
+    for d in r['days']:
+        day = date.fromisoformat(d['date'])
+        label = 'Hoje' if d['date'] == r['start'] else f'{WEEKDAY_SHORT[day.weekday()]} {dm(d["date"])}'
+        if not d['items']:
+            empty.append(label)
+            continue
+        lines += ['', f'<b>{label}</b> — {brl(d["total"])}']
+        for i in d['items'][:10]:
+            late = ' ⚠️ vencida' if i.get('status') == 'vencida' else ''
+            who = f' · {h(i["user_name"])}' if i.get('user_name') else ''
+            extra = f' ({i["count"]} compras)' if i.get('type') == 'invoice' else ''
+            lines.append(f'• {h(i["label"])}{extra} — {brl(i["amount"])}{who}{late}')
+    if len(empty) == len(r['days']):
+        lines.append('\nNenhuma conta nos próximos 7 dias. 🎉')
+    elif empty:
+        lines.append(f'\nSem contas: {", ".join(empty)}.')
+    return '\n'.join(lines)
+
+
+def _bar(pct: float) -> str:
+    full = max(0, min(10, round(pct / 10)))
+    return '▓' * full + '░' * (10 - full)
+
+
+def goals_text(r: dict) -> str:
+    """/metas: progresso de cada meta ativa."""
+    if not r['goals']:
+        return '🎯 Nenhuma meta ativa. Crie em <b>Metas</b> no site (economizar, limite de gastos ou quitar dívida).'
+    lines = [f'🎯 <b>Metas</b> — {MONTHS[r["month"] - 1]}/{r["year"]}']
+    for g in r['goals']:
+        lines.append('')
+        what = f' ({h(g["category"])})' if g.get('category') else ''
+        lines.append(f'{g["emoji"]} <b>{h(g["title"])}</b>{what}')
+        if g['type'] == 'spending_limit':
+            lines.append(f'{_bar(g["pct_used"])} {g["pct_used"]:.0f}% usado · {brl(g["current"])} de {brl(g["target_amount"])}')
+            lines.append(f'{h(g["status_label"])} · ' + (f'passou {brl(g["over_amount"])}' if g['over_amount']
+                                                         else f'restam {brl(g["remaining"])}'))
+        else:
+            lines.append(f'{_bar(g["pct"])} {g["pct"]:.0f}% · {brl(g["current"])} de {brl(g["target_amount"])}')
+            due = f' · até {dm(g["due_date"])}/{g["due_date"][:4]}' if g.get('due_date') else ''
+            lines.append(f'{h(g["status_label"])}{due}')
+    return '\n'.join(lines)
+
+
+def week_text(r: dict) -> str:
+    """/semana e o resumo automático de domingo."""
+    lines = [f'📈 <b>Sua semana</b> ({dm(r["start"])} a {dm(r["end"])})', '']
+    if not r['count']:
+        return lines[0] + '\n\nNenhum gasto lançado nesta semana.'
+    lines.append(f'Gastos: <b>{brl(r["total"])}</b> em {r["count"]} lançamento(s)')
+    if r['average']:
+        diff = r['total'] - r['average']
+        pct = abs(diff) / r['average'] * 100
+        trend = f'🔺 {pct:.0f}% acima' if diff > 0 else f'🔻 {pct:.0f}% abaixo' if diff < 0 else 'igual'
+        lines.append(f'Média das semanas anteriores: {brl(r["average"])} ({trend})')
+    lines += ['', '<b>Maiores gastos</b>']
+    lines += [f'• {h(t["description"])} — {brl(t["amount"])} ({h(t["category"])})' for t in r['top']]
+    if r.get('rise'):
+        x = r['rise']
+        lines += ['', f'📊 <b>{h(x["category"])}</b> foi a que mais subiu: {brl(x["amount"])} '
+                      f'(média {brl(x["average"])}/semana)']
+    return '\n'.join(lines)
+
+
+def review_text(item: dict, total: int, offset: int, category: str, note: str = '') -> str:
+    """Um lançamento do banco para revisar (/revisar)."""
+    head = f'{note}\n\n' if note else ''
+    digits = item.get('card_digits') or item.get('account_last_digits')
+    where = item['bank_name'] + ((' · cartão' + (f' •••• {digits}' if digits else ''))
+                                 if item['account_type'] == 'CREDIT' else ' · conta')
+    lines = [f'{head}🏦 <b>Revisar do banco</b> — {offset + 1} de {total}', '',
+             f'<b>{h(item["description"])}</b> — {brl(item["amount"])}' + (' ↩️ estorno' if item.get('refund') else ''),
+             f'{dm(item["date"])} · {h(where)}' + (f' · fatura {h(item["bill"])}' if item.get('bill') else '')]
+    if item.get('installment'):
+        lines.append(f'Parcela {item["installment"]["number"]}/{item["installment"]["total"]}')
+    if item.get('bank_pending'):
+        lines.append('⏳ Ainda pendente no banco')
+    lines.append(f'Categoria: <b>{h(category)}</b>')
     return '\n'.join(lines)

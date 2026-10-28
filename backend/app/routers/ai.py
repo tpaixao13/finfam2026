@@ -1,4 +1,6 @@
 """IA com a chave da própria família: configuração e interpretação de mensagens."""
+import base64
+import binascii
 import threading
 import time
 from collections import deque
@@ -178,8 +180,7 @@ def draft_out(d: ai.Draft, cards: dict[int, CreditCard], ctx: Ctx) -> dict:
             'user_id': d.user_id, 'user_name': person, 'missing': d.missing, 'body': d.as_body()}
 
 
-@router.post('/ai/interpret', summary='Entende uma frase ("gastei 50 no mercado no crédito") — não grava nada')
-def interpret(body: InterpretIn, ctx: Ctx = Depends(get_ctx)):
+def _interpret(ctx: Ctx, text: str, media: dict | None = None) -> dict:
     client = _client(ctx)
     today = date.today()
     categories = svc.tenant_categories(ctx.uids)
@@ -190,7 +191,7 @@ def interpret(body: InterpretIn, ctx: Ctx = Depends(get_ctx)):
                              members=[{'id': u.id, 'name': u.name} for u in ctx.members], me=ctx.user.name)
     try:
         with _ai_slot(_tenant_id(ctx)):
-            result = ai.interpret(client, body.text.strip(), prompt)
+            result = ai.interpret(client, text, prompt, media)
     except ai.AIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
@@ -207,3 +208,35 @@ def interpret(body: InterpretIn, ctx: Ctx = Depends(get_ctx)):
                             cards=card_list, member_ids=ctx.uids, suggest=suggest)
         out['draft'] = draft_out(draft, cards, ctx)
     return out
+
+
+@router.post('/ai/interpret', summary='Entende uma frase ("gastei 50 no mercado no crédito") — não grava nada')
+def interpret(body: InterpretIn, ctx: Ctx = Depends(get_ctx)):
+    return _interpret(ctx, body.text.strip())
+
+
+MEDIA_MAX_BYTES = 8 * 1024 * 1024  # foto de cupom ou áudio curto; o Telegram já comprime
+MediaType = Literal['image/jpeg', 'image/png', 'image/webp', 'audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/wav',
+                    'application/pdf']
+
+
+class MediaIn(BaseModel):
+    mime: MediaType
+    data: str = Field(min_length=16, max_length=MEDIA_MAX_BYTES * 4 // 3 + 4, description='Arquivo em base64')
+    caption: str = Field('', max_length=500, description='Legenda da foto (opcional)')
+
+
+def _check_base64(data: str) -> None:
+    try:
+        size = len(base64.b64decode(data, validate=True))
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=422, detail='Arquivo inválido (base64).') from None
+    if size > MEDIA_MAX_BYTES:
+        raise HTTPException(status_code=413, detail='Arquivo grande demais (máximo 8 MB).')
+
+
+@router.post('/ai/interpret-media', summary='Foto de cupom/comprovante ou áudio → lançamento proposto (não grava nada)')
+def interpret_media(body: MediaIn, ctx: Ctx = Depends(get_ctx)):
+    _client(ctx)  # sem IA configurada: recusa antes de decodificar o arquivo
+    _check_base64(body.data)
+    return _interpret(ctx, body.caption.strip(), {'mime': body.mime, 'data': body.data})

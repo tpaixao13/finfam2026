@@ -74,7 +74,7 @@ def test_unlink_from_bot_and_cascade_on_member_delete(client, family):
 
 def test_reminder_goes_to_linked_chats(client, family, monkeypatch):
     sent = []
-    monkeypatch.setattr(tg_service, 'send_message', lambda token, chat, msg: (sent.append((token, chat)) or (True, '')))
+    monkeypatch.setattr(tg_service, 'send_message', lambda token, chat, msg, buttons=None: (sent.append((token, chat)) or (True, '')))
     family.post('/expenses', json={'description': 'Luz', 'amount': '90', 'category': 'Moradia',
                                    'payment_method': 'PIX', 'date': '2026-01-05'})  # em atraso
     assert family.put('/settings/telegram', json={'enabled': True, 'hour': 8, 'minute': 0}).status_code == 200
@@ -92,7 +92,7 @@ def test_reminder_goes_to_linked_chats(client, family, monkeypatch):
 def fake_ai(monkeypatch):
     calls = {}
 
-    def complete_json(self, system, user):
+    def complete_json(self, system, user, media=None):
         calls.update(system=system, user=user, provider=self.provider, key=self.api_key, model=self.model)
         return calls.get('answer', {})
     monkeypatch.setattr(ai_service.AIClient, 'complete_json', complete_json)
