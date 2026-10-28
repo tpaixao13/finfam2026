@@ -143,10 +143,6 @@ input[type='file'].input { padding: .35rem; }
 .switch-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
 .switch[aria-checked="true"] .switch-knob { transform: translateX(18px); }
 @media (prefers-reduced-motion: reduce) { .switch, .switch-knob { transition: none; } }
-.of-cell { display: flex; flex-direction: column; gap: .3rem; align-items: flex-start; }
-.of-row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
-.of-row select.input { width: auto; min-height: 32px; padding-top: .2rem; padding-bottom: .2rem; font-size: .82rem; }
-@media (max-width: 700px) { .of-row select.input { min-height: 40px; } }
 .checks { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; }
 .segmented { display: inline-flex; max-width: 100%; background: var(--bg); border-radius: 9px; padding: 3px; gap: 2px; flex-wrap: wrap; }
 .segmented button { border: 0; background: none; padding: .4rem .85rem; border-radius: 7px; font: 600 .85rem var(--font); color: var(--ink-2); cursor: pointer; }
@@ -209,7 +205,6 @@ input[type='file'].input { padding: .35rem; }
 .kpis-inline dd { color: var(--ink); }
 .kpis-inline .money.pos { color: var(--income); }
 .kpis-inline .money.neg { color: var(--expense); }
-.kpis-wrap { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 
 .grid-dash {
   display: grid; gap: 1.25rem; grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -428,7 +423,6 @@ a.insight:hover { background: #e8edf1; }
 .auth-admin .auth-card { background: var(--surface); padding: 1.6rem; border-radius: 14px; }
 .admin-top { display: flex; justify-content: space-between; align-items: center; background: var(--ink); color: #fff; padding: .7rem 1.5rem; }
 .admin .page { padding: 1.5rem; }
-.admin-member { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; font-size: .88rem; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); display: inline-block; }
 .dot-on { background: var(--income); }
 
@@ -505,16 +499,12 @@ a.insight:hover { background: #e8edf1; }
 .bank-conn p { margin: 0; }
 .bank-conn header { align-items: center; flex-wrap: wrap; }
 .bank-name { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; min-width: 0; }
-.bank-name .input { flex: 1 1 12rem; min-width: 0; }
 .bank-settings { display: grid; gap: .75rem; padding-top: .75rem; border-top: 1px solid var(--line); }
 .bank-auto { display: flex; align-items: flex-start; gap: .65rem; padding: .55rem .7rem; border-radius: var(--radius-sm); background: var(--bg); }
 .bank-auto .switch { margin-top: .1rem; }
 .bank-accs { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
 .bank-acc { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem .75rem; padding: .55rem 0; border-top: 1px solid var(--line); }
 .bank-acc-main { min-width: 0; flex: 1 1 14rem; overflow-wrap: anywhere; }
-.bank-acc-map { flex: 0 1 16rem; min-width: 0; max-width: 100%; display: grid; gap: .4rem; }
-.bank-close { display: flex; gap: .4rem; align-items: center; }
-.bank-close input { width: 7.5rem; max-width: 100%; }
 .btn .badge { margin-left: .4rem; }
 
 /* Open Finance: conferência das faturas */

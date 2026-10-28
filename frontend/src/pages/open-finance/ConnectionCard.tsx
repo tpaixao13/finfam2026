@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Badge, Button, ConfirmButton, Field, Input } from '../../components/ui'
+import { Badge, Button, ConfirmButton, Input } from '../../components/ui'
 import { api } from '../../lib/api'
 import { useAction, useSession } from '../../lib/session'
 import type { Card } from '../../lib/types'
@@ -7,7 +7,8 @@ import { AccountRow, AccountSettings } from './AccountRow'
 import { openConnect } from './connect'
 import { ToggleRow } from './ToggleRow'
 import type { Connection } from './types'
-import { useBusy } from './useBusy'
+import { SaveField } from './SaveField'
+import { useBusy, useBusyAction } from './useBusy'
 
 const STATUS: Record<string, { label: string; tone: 'success' | 'info' | 'warning' | 'danger'; fix?: boolean }> = {
   UPDATED: { label: 'Atualizado', tone: 'success' },
@@ -24,24 +25,18 @@ function when(iso: string | null) {
 
 /** Nome do banco (o Meu Pluggy vem como "MeuPluggy"): vai nas despesas lançadas. */
 function RenameForm({ conn, banks, onChange }: { conn: Connection; banks: string[]; onChange: () => void }) {
-  const act = useAction()
+  const [busy, act] = useBusyAction()
   const saved = conn.bank_name ?? ''
   const [name, setName] = useState(saved)
   const listId = `banks-${conn.id}`
-  const save = (e: React.FormEvent) => {
-    e.preventDefault()
-    return act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, { bank_name: name.trim() }), onChange)
-  }
+  const clean = name.trim()
   return (
-    <form className="bank-setting" onSubmit={save}>
-      <Field label="Nome do banco nas despesas" hint="Aparece como banco em cada despesa que vier daqui.">
-        <div className="bank-setting-row">
-          <Input value={name} onChange={(e) => setName(e.target.value)} list={listId} maxLength={60} required className="input no-list-arrow" />
-          <Button type="submit" variant="ghost" disabled={!name.trim() || name.trim() === saved}>Salvar</Button>
-        </div>
-      </Field>
+    <SaveField label="Nome do banco nas despesas" hint="Aparece como banco em cada despesa que vier daqui."
+      dirty={!!clean && clean !== saved} busy={busy}
+      onSave={() => act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, { bank_name: clean }), onChange)}>
+      <Input value={name} onChange={(e) => setName(e.target.value)} list={listId} maxLength={60} required className="input no-list-arrow" />
       <datalist id={listId}>{banks.map((b) => <option key={b} value={b} />)}</datalist>
-    </form>
+    </SaveField>
   )
 }
 
@@ -49,6 +44,7 @@ export function ConnectionCard({ conn, cards, banks, onChange }: { conn: Connect
   const act = useAction()
   const { toast } = useSession()
   const [busy, run] = useBusy()
+  const [refreshing, refresh] = useBusyAction()
   const [open, setOpen] = useState(false)
   const st = STATUS[conn.status ?? ''] ?? { label: conn.status ?? '—', tone: 'info' as const }
   const bank = conn.bank_name ?? 'banco'
@@ -77,8 +73,8 @@ export function ConnectionCard({ conn, cards, banks, onChange }: { conn: Connect
       <div className="row gap">
         {st.fix
           ? <Button icon="key" busy={busy} onClick={reconnect}>Reconectar</Button>
-          : <Button variant="ghost" icon="arrow-repeat" busy={busy}
-              onClick={() => run(() => act(() => api.post<{ message: string }>(`/pluggy/items/${conn.id}/refresh`), onChange))}>
+          : <Button variant="ghost" icon="arrow-repeat" busy={refreshing}
+              onClick={() => refresh(() => api.post<{ message: string }>(`/pluggy/items/${conn.id}/refresh`), onChange)}>
               Atualizar agora</Button>}
         <Button variant="ghost" icon="gear" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>
           Ajustes</Button>

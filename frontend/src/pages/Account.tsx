@@ -124,16 +124,16 @@ export function SettingsPage() {
       <PageHeader title="Perfil e acesso" />
       <div className="grid-2">
         <div className="stack-lg">
-        <Panel title="Foto">
-          <div className="row gap">
-            {me && <Avatar name={me.user.name} url={me.user.avatar_url} size={64} />}
-            <label className="btn btn-ghost">
-              Trocar foto
-              <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={(e) => e.target.files?.[0] && uploadAvatar(e.target.files[0])} />
-            </label>
-          </div>
-        </Panel>
-        <TwoFactorPanel />
+          <Panel title="Foto">
+            <div className="row gap">
+              {me && <Avatar name={me.user.name} url={me.user.avatar_url} size={64} />}
+              <label className="btn btn-ghost">
+                Trocar foto
+                <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={(e) => e.target.files?.[0] && uploadAvatar(e.target.files[0])} />
+              </label>
+            </div>
+          </Panel>
+          <TwoFactorPanel />
         </div>
         <Panel title="Senha">
           <form className="stack" onSubmit={(e) => { e.preventDefault(); act(() => api.post<{ message: string; access_token: string }>('/auth/change-password', pwd), (r) => {

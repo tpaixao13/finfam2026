@@ -118,6 +118,19 @@ def _auto_card(conn: BankConnection, acc: BankAccount) -> None:
         acc.card_id = cards[0].id
 
 
+def same_bill_cards(card: CreditCard) -> list[CreditCard]:
+    """Cartões que caem na mesma fatura do cartão ligado: os da mesma conta de crédito (limite
+    compartilhado) e os de crédito do mesmo dono no mesmo banco (virtual). Cartão de outra pessoa
+    da família só entra se estiver na mesma conta de crédito — não mexe no que ela configurou."""
+    rows = {card.id: card}
+    if card.account_id:
+        rows.update({c.id: c for c in CreditCard.query.filter_by(account_id=card.account_id).all()})
+    if card.bank:
+        rows.update({c.id: c for c in CreditCard.query.filter_by(user_id=card.user_id).all()
+                     if (c.bank or '').casefold() == card.bank.casefold()})
+    return [c for c in rows.values() if c.card_type == 'credit' or c.supports_credit]
+
+
 def _apply_days(acc: BankAccount, card: CreditCard) -> bool:
     """Vencimento e melhor dia (= fechamento) do banco no cartão do FinFam. O FinFam guarda "melhor dia <
     vencimento" no mesmo mês; fecha 28/vence 5 fica só pelo mês da fatura. Sem fechamento, só o vencimento."""
@@ -143,10 +156,8 @@ def apply_card_limit(acc: BankAccount) -> bool:
     if card is None:
         return False
     changed = False
-    for cid in card_family(card.id):
-        sibling = db.session.get(CreditCard, cid)
-        if sibling is not None and (sibling.card_type == 'credit' or sibling.supports_credit):
-            changed = _apply_days(acc, sibling) or changed
+    for sibling in same_bill_cards(card):
+        changed = _apply_days(acc, sibling) or changed
     if not acc.credit_limit:
         return changed
     limit = Decimal(str(acc.credit_limit))

@@ -1,5 +1,6 @@
 """Painel do administrador: famílias, planos, membros extras, usuários online e 2FA."""
 import hmac
+import logging
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -18,6 +19,8 @@ from app.services import family_backup as fb
 from app.services import open_finance as of
 from app.services import two_factor as tfa
 from app.services.serializers import iso, tenant_out
+
+log = logging.getLogger('finfam.admin')
 
 router = APIRouter(prefix='/admin', tags=['admin'])
 
@@ -192,14 +195,16 @@ def _family_user(user_id: int) -> User:
 
 
 @router.post('/users/{user_id}/send-reset', summary='Manda à pessoa o e-mail com o link para criar uma nova senha')
-def admin_send_reset(user_id: int, admin: User = Depends(get_admin)):
+def admin_send_reset(user_id: int, request: Request, admin: User = Depends(get_admin)):
     user = get_or_404(User.query.filter_by(id=user_id, is_admin=False), 'Usuário não encontrado.')
+    ratelimit.check(request, 'admin-reset', str(user.id), limit=3, window=3600)
     if not mailer.enabled():
         raise HTTPException(status_code=422, detail='O e-mail não está configurado (SMTP e PUBLIC_URL no .env). '
                                                     'Use "senha" para definir uma nova.')
     if not user.email:
         raise HTTPException(status_code=422, detail='Esta pessoa não tem e-mail cadastrado.')
     account_mail.send_reset(user)
+    log.info('Admin %s mandou link de nova senha para o usuário %s.', admin.id, user.id)
     return {'message': f'Link de nova senha enviado para {user.email} (vale 1 hora).'}
 
 
