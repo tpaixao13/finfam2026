@@ -67,7 +67,11 @@ export function FamilyPage() {
               {d.members.map((m) => (
                 <li key={m.id}>
                   <Avatar name={m.name} url={m.avatar_url} color={m.color} />
-                  <div><b>{m.name}</b>{m.id === me?.user.id && <Badge tone="info">você</Badge>}<small className="muted block">{m.email}</small></div>
+                  <div><b>{m.name}</b>{m.id === me?.user.id && <Badge tone="info">você</Badge>}<small className="muted block">{m.email}</small>
+                    {m.email_verified === false && <span className="small">
+                      <Badge tone="warning">aguardando confirmar o e-mail</Badge>{' '}
+                      <button type="button" className="link-btn" onClick={() => act(() => api.post<{ message: string }>(`/family/members/${m.id}/resend`))}>reenviar</button>
+                    </span>}</div>
                   <span className="actions">
                     <IconButton icon="pencil" label="Editar" onClick={() => openMember(m)} />
                     {m.id !== me?.user.id && iAmOwner && <ConfirmButton label="Remover" confirmLabel="Remover e apagar dados"

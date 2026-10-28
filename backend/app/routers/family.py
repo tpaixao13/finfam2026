@@ -1,11 +1,13 @@
 """Família (tenant): nome do grupo e membros, respeitando o limite do plano."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
+from app.core import ratelimit
 from app.core.types import Email
 from app.core.db import db, get_or_404
 from app.core.deps import Ctx, get_ctx, get_ctx_session, is_owner
 from app.models import User
+from app.services import account_mail
 from app.services.finance import user_color_map
 from app.services.serializers import tenant_out, user_out
 
@@ -73,7 +75,7 @@ def rename(body: RenameIn, ctx: Ctx = Depends(get_ctx_session)):
 
 
 @router.post('/members', status_code=201, summary='Adiciona um membro')
-def add_member(body: MemberIn, ctx: Ctx = Depends(get_ctx_session)):
+def add_member(body: MemberIn, request: Request, ctx: Ctx = Depends(get_ctx_session)):
     tenant = _require_tenant(ctx)
     if len(ctx.members) >= tenant.member_limit:
         raise HTTPException(status_code=403, detail=(
@@ -85,12 +87,28 @@ def add_member(body: MemberIn, ctx: Ctx = Depends(get_ctx_session)):
     user = User(name=body.name.strip(), email=email, tenant_id=tenant.id)
     user.set_password(body.password)
     db.session.add(user)
+    db.session.flush()
+    sent = account_mail.start(user, request, invited_by=ctx.user.name)
     db.session.commit()
-    return {'message': f'{user.name} adicionado com sucesso!', 'member': user_out(user)}
+    msg = f'{user.name} adicionado com sucesso!'
+    if sent:
+        msg += f' Enviamos um e-mail de boas-vindas para {email}: {user.name} entra depois de confirmar.'
+    return {'message': msg, 'member': user_out(user)}
+
+
+@router.post('/members/{user_id}/resend', summary='Manda de novo o e-mail de confirmação de um membro')
+def resend_member(user_id: int, request: Request, ctx: Ctx = Depends(get_ctx_session)):
+    tenant = _require_tenant(ctx)
+    user = get_or_404(User.query.filter_by(id=user_id, tenant_id=tenant.id), 'Membro não encontrado.')
+    if not account_mail.needs_verification(user):
+        return {'message': f'O e-mail de {user.name} já está confirmado.'}
+    ratelimit.check(request, 'member-resend', str(user.id), limit=3, window=3600)
+    account_mail.send_verification(user, request, invited_by=ctx.user.name)
+    return {'message': f'E-mail de confirmação reenviado para {user.email}.'}
 
 
 @router.put('/members/{user_id}', summary='Edita nome, e-mail e (opcional) senha de um membro')
-def edit_member(user_id: int, body: MemberUpdate, ctx: Ctx = Depends(get_ctx_session)):
+def edit_member(user_id: int, body: MemberUpdate, request: Request, ctx: Ctx = Depends(get_ctx_session)):
     tenant = _require_tenant(ctx)
     user = get_or_404(User.query.filter_by(id=user_id, tenant_id=tenant.id), 'Membro não encontrado.')
     email = body.email.strip().lower()
@@ -103,11 +121,19 @@ def edit_member(user_id: int, body: MemberUpdate, ctx: Ctx = Depends(get_ctx_ses
     other = User.query.filter_by(email=email).first()
     if other and other.id != user.id:
         raise HTTPException(status_code=409, detail='E-mail já está em uso por outro membro.')
+    email_changed = email != (user.email or '')
     user.name = body.name.strip()
     user.email = email
     revoked = user.change_password(body.new_password) if body.new_password else 0
+    sent = account_mail.start(user, request, invited_by=None if user.id == ctx.user.id else ctx.user.name) \
+        if email_changed else False
     db.session.commit()
-    return {'message': f'Dados de {user.name} atualizados!' + (' Telegram e tokens de API foram desconectados: conecte de novo.' if revoked else ''), 'member': user_out(user)}
+    msg = f'Dados de {user.name} atualizados!'
+    if revoked:
+        msg += ' Telegram e tokens de API foram desconectados: conecte de novo.'
+    if sent:
+        msg += f' Enviamos um link para confirmar o novo e-mail ({email}); o próximo login só vale depois de confirmar.'
+    return {'message': msg, 'member': user_out(user)}
 
 
 @router.delete('/members/{user_id}', summary='Remove um membro (e todos os dados dele)')

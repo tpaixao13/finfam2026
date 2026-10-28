@@ -117,6 +117,7 @@ class User(Base):
     totp_failures = Column(Integer, default=0, server_default='0', nullable=False)
     totp_locked = Column(Boolean, default=False, server_default='0', nullable=False)
     totp_last_step = Column(Integer, nullable=True)  # impede reusar o mesmo código
+    email_verified_at = Column(DateTime, nullable=True)  # confirmou o e-mail (link enviado no cadastro)
 
     salaries = relationship('Salary', backref='user', lazy='dynamic', cascade='all, delete-orphan')
     expenses = relationship('Expense', backref='user', lazy='dynamic', cascade='all, delete-orphan')

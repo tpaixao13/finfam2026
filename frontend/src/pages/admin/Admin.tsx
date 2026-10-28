@@ -11,7 +11,7 @@ import type { Tenant } from '../../lib/types'
 
 interface Member {
   id: number; name: string; email: string; last_seen: string | null; online: boolean
-  two_factor_enabled: boolean; two_factor_locked: boolean; two_factor_failures: number
+  two_factor_enabled: boolean; two_factor_locked: boolean; two_factor_failures: number; email_verified?: boolean
 }
 interface AdminTenant extends Tenant {
   code: string; created_at: string; members: Member[]; pluggy: { configured: number; errors: number }
@@ -177,6 +177,10 @@ export function AdminPage() {
                               {m.two_factor_locked ? <Badge tone="danger">bloqueado (2FA)</Badge>
                                 : m.two_factor_enabled ? <Badge tone="success">2FA</Badge> : null}
                               {m.two_factor_failures > 0 && !m.two_factor_locked && <small className="muted">{m.two_factor_failures} erro(s) 2FA</small>}
+                              {m.email_verified === false && <>
+                                <Badge tone="warning">e-mail não confirmado</Badge>
+                                <button className="link-btn" onClick={() => run(() => api.admin.post(`/admin/users/${m.id}/verify-email`))}>confirmar e-mail</button>
+                              </>}
                               <button className="link-btn" onClick={() => { setReset(m); setNewPwd('') }}>senha</button>
                               {(m.two_factor_locked || m.two_factor_failures > 0) && (
                                 <button className="link-btn" onClick={() => run(() => api.admin.post(`/admin/users/${m.id}/2fa/unlock`))}>zerar erros 2FA</button>

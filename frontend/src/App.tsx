@@ -9,6 +9,7 @@ import { ReviewImportsPage } from './pages/ReviewImports'
 import { FamilyPage, SettingsPage, UpgradePage } from './pages/Account'
 import { TelegramPage } from './pages/Telegram'
 import { AdminLoginPage, AdminPage } from './pages/admin/Admin'
+import { ConfirmEmailPage, ForgotPasswordPage, ResetPasswordPage } from './pages/AccountEmail'
 import { LoginPage, RegisterPage } from './pages/Auth'
 import { AlertsPage, ImportPage, RulesPage } from './pages/Automation'
 import { CardsPage, InvoicePage } from './pages/Cards'
@@ -43,6 +44,7 @@ const TITLES: Record<string, string> = {
   '/investments': 'Investimentos', '/goals': 'Metas', '/alerts': 'Alertas', '/import': 'Importar extrato',
   '/rules': 'Regras de categoria', '/family': 'Família', '/settings': 'Perfil e acesso', '/telegram': 'Telegram e IA', '/bank': 'Contas conectadas', '/bank/review': 'Revisar importados',
   '/upgrade': 'Planos', '/login': 'Entrar', '/register': 'Criar conta',
+  '/esqueci-senha': 'Esqueci minha senha', '/redefinir-senha': 'Nova senha', '/confirmar-email': 'Confirmar e-mail',
 }
 
 function NotFound() {
@@ -59,12 +61,17 @@ export function App() {
 
   if (pathname === '/admin/login') return <><AdminLoginPage /><Toasts /></>
   if (pathname === '/admin') return <><AdminPage /><Toasts /></>
+  // links do e-mail: valem logado ou não
+  if (pathname === '/confirmar-email') return <><ConfirmEmailPage /><Toasts /></>
+  if (pathname === '/redefinir-senha') return <><ResetPasswordPage /><Toasts /></>
 
-  const isPublic = pathname === '/login' || pathname === '/register'
+  const isPublic = pathname === '/login' || pathname === '/register' || pathname === '/esqueci-senha'
   if (loading) return <Spinner label="Abrindo o FinFam…" />
   if (!me) {
     if (!isPublic) { navigate('/login', { replace: true }); return null }
-    return <>{pathname === '/register' ? <RegisterPage /> : <LoginPage />}<Toasts /></>
+    const publicPage = pathname === '/register' ? <RegisterPage />
+      : pathname === '/esqueci-senha' ? <ForgotPasswordPage /> : <LoginPage />
+    return <>{publicPage}<Toasts /></>
   }
   if (isPublic) { navigate('/', { replace: true }); return null }
 

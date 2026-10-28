@@ -64,6 +64,13 @@ class Settings:
     public_url: str = ''           # https://finfam.net.br — endereço público, para o webhook da Pluggy
     pluggy_webhook_ips: tuple = ('52.67.145.81',)
     pluggy_include_sandbox: bool = True  # mostra os bancos de teste da Pluggy no Connect
+    # e-mail (boas-vindas, confirmação, esqueci a senha). Sem SMTP_HOST: e-mail desligado e conta já confirmada.
+    smtp_host: str = ''
+    smtp_port: int = 465
+    smtp_user: str = ''
+    smtp_password: str = ''
+    smtp_from: str = ''            # "FinFam <noreply@finfam.net.br>"
+    smtp_security: str = 'ssl'     # ssl (porta 465) | starttls (587) | none
     api_prefix: str = '/api/v1'
     extra: dict = field(default_factory=dict)
 
@@ -106,6 +113,12 @@ def load_settings() -> Settings:
         bot_api_key=_env('BOT_API_KEY', '') or '',
         public_url=(_env('PUBLIC_URL', '') or '').rstrip('/'),
         pluggy_include_sandbox=_bool('PLUGGY_INCLUDE_SANDBOX', True),
+        smtp_host=(_env('SMTP_HOST', '') or '').strip(),
+        smtp_port=int(_env('SMTP_PORT', 465)),
+        smtp_user=(_env('SMTP_USER', '') or '').strip(),
+        smtp_password=_env('SMTP_PASSWORD', '') or '',
+        smtp_from=(_env('SMTP_FROM', '') or '').strip(),
+        smtp_security=(_env('SMTP_SECURITY', 'ssl') or 'ssl').strip().lower(),
         pluggy_webhook_ips=tuple(ip.strip() for ip in (_env('PLUGGY_WEBHOOK_IPS', '52.67.145.81') or '').split(',')
                                  if ip.strip()),
     )

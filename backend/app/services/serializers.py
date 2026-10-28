@@ -20,7 +20,7 @@ def avatar_url(user: User) -> str | None:
 
 def user_out(user: User, color: str | None = None) -> dict:
     data = {'id': user.id, 'name': user.name, 'email': user.email, 'avatar_url': avatar_url(user),
-            'two_factor_enabled': bool(user.totp_enabled)}
+            'two_factor_enabled': bool(user.totp_enabled), 'email_verified': user.email_verified_at is not None}
     if color:
         data['color'] = color
     return data

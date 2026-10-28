@@ -40,7 +40,7 @@ def _user_row(u: User, now: datetime) -> dict:
     return {'id': u.id, 'name': u.name, 'email': u.email, 'last_seen': iso(u.last_seen),
             'online': bool(u.last_seen and now - u.last_seen <= ONLINE_THRESHOLD),
             'two_factor_enabled': bool(u.totp_enabled), 'two_factor_locked': bool(u.totp_locked),
-            'two_factor_failures': u.totp_failures or 0}
+            'two_factor_failures': u.totp_failures or 0, 'email_verified': u.email_verified_at is not None}
 
 
 @router.post('/login', summary='Login do administrador')
@@ -188,6 +188,14 @@ def _family_user(user_id: int) -> User:
     if user.is_admin:
         raise HTTPException(status_code=403, detail='2FA de administrador: use o comando no servidor (scripts.reset_2fa).')
     return user
+
+
+@router.post('/users/{user_id}/verify-email', summary='Confirma o e-mail do usuário à mão (ex.: e-mail não chegou)')
+def admin_verify_email(user_id: int, admin: User = Depends(get_admin)):
+    user = get_or_404(User.query.filter_by(id=user_id, is_admin=False), 'Usuário não encontrado.')
+    user.email_verified_at = user.email_verified_at or utcnow()
+    db.session.commit()
+    return {'message': f'E-mail de {user.name} confirmado.'}
 
 
 @router.post('/users/{user_id}/2fa/unlock', summary='Zera os erros do 2FA e desbloqueia o usuário')

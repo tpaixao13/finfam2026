@@ -4,11 +4,13 @@ import { Button, Field, Input } from '../components/ui'
 import { api, type ApiError } from '../lib/api'
 import { Link, navigate } from '../lib/router'
 import { useSession } from '../lib/session'
+import { CheckEmail, ResendConfirmation } from './AccountEmail'
 
 interface SessionResponse { access_token: string }
 type LoginResponse = SessionResponse | { two_factor_required: true; challenge: string }
+type RegisterResponse = SessionResponse | { verify_required: true; email: string; message: string }
 
-function AuthShell({ title, lead, children, footer }: { title: string; lead: string; children: React.ReactNode; footer: React.ReactNode }) {
+export function AuthShell({ title, lead, children, footer }: { title: string; lead: string; children: React.ReactNode; footer: React.ReactNode }) {
   return (
     <div className="auth">
       <div className="auth-side">
@@ -35,12 +37,17 @@ export function LoginPage() {
   const [challenge, setChallenge] = useState<string | null>(null)  // senha certa, falta o código do app
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [unverified, setUnverified] = useState(false)  // senha certa, falta confirmar o e-mail
   const [busy, setBusy] = useState(false)
 
   async function attempt(task: () => Promise<void>) {
     setBusy(true)
     setError(null)
-    try { await task() } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
+    setUnverified(false)
+    try { await task() } catch (err) {
+      setError((err as Error).message)
+      setUnverified((err as ApiError).code === 'email_not_verified')
+    } finally { setBusy(false) }
   }
 
   const finish = async (r: SessionResponse) => { await login(r.access_token); navigate('/', { replace: true }) }
@@ -89,7 +96,9 @@ export function LoginPage() {
         <Field label="E-mail"><Input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></Field>
         <Field label="Senha"><Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
         {error && <p className="form-error" role="alert">{error}</p>}
+        {unverified && <ResendConfirmation email={email} />}
         <Button type="submit" busy={busy} className="btn-block">Entrar</Button>
+        <Link to="/esqueci-senha" className="auth-forgot">Esqueci minha senha</Link>
       </form>
     </AuthShell>
   )
@@ -100,6 +109,7 @@ export function RegisterPage() {
   const [form, setForm] = useState({ name: '', email: '', password: '', confirm_password: '' })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [sentTo, setSentTo] = useState<string | null>(null)  // conta criada: falta confirmar o e-mail
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   async function submit(e: React.FormEvent) {
@@ -108,7 +118,8 @@ export function RegisterPage() {
     setBusy(true)
     setError(null)
     try {
-      const r = await api.post<SessionResponse>('/auth/register', form)
+      const r = await api.post<RegisterResponse>('/auth/register', form)
+      if ('verify_required' in r) { setSentTo(r.email); return }
       await login(r.access_token)
       navigate('/', { replace: true })
     } catch (err) {
@@ -117,6 +128,8 @@ export function RegisterPage() {
       setBusy(false)
     }
   }
+
+  if (sentTo) return <CheckEmail email={sentTo} />
 
   return (
     <AuthShell title="Criar conta" lead="Você começa com 90 dias de avaliação. Depois pode convidar a família."

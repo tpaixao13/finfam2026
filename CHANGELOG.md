@@ -149,6 +149,15 @@ pelo bot ou importando extrato, como antes.
   máquina, limita tentativas erradas por IP e não grava o token no log de acesso; restauração do backup só
   aceita lançamentos de contas da própria família; backup sem código de convite/chat do Telegram e com
   permissão 0600; `POST /rules/learn` só pelo site; MCP trata descrição do banco como dado.
+- Conta e e-mail (SMTP, ex.: Locaweb — `SMTP_*` no .env, teste com `scripts.test_email`):
+  - Cadastro manda e-mail de boas-vindas com link de confirmação (48 h); o login só entra depois de
+    confirmar (`email_not_verified`, com "Reenviar"). Contas que já existiam ficam confirmadas.
+  - Membro adicionado pela família recebe as boas-vindas ("Fulano adicionou você…"); trocar o e-mail
+    pede confirmação de novo. Família mostra "aguardando confirmar" com reenviar; admin pode confirmar à mão.
+  - "Esqueci minha senha": link de 1 h e uso único (amarrado à senha atual); trocar desconecta sessões,
+    Telegram e tokens. Resposta igual exista ou não a conta; limite de pedidos.
+  - Sem SMTP configurado, nada muda (conta entra direto). `services/mailer.py`, `services/account_mail.py`,
+    `users.email_verified_at`; telas `/confirmar-email`, `/esqueci-senha`, `/redefinir-senha`.
 - Categoria do banco: a classificação da Pluggy (em inglês, ~100 categorias) é traduzida e encaixada na
   categoria da família que mais se aproxima (Supermercado/Restaurantes/Delivery → Alimentação, Táxi/Posto →
   Transporte…); sem parecida, vira categoria nova em português (ex.: Vestuário, Tarifas bancárias).

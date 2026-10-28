@@ -102,6 +102,18 @@ def _exec_each(conn, statements):
             conn.rollback()  # coluna já existe
 
 
+def _add_email_verified(conn) -> None:
+    """Coluna nova users.email_verified_at: quem já tinha conta antes da confirmação por e-mail
+    fica confirmado (só na primeira vez — depois a coluna já existe e nada muda)."""
+    try:
+        conn.execute(text('ALTER TABLE users ADD COLUMN email_verified_at DATETIME'))
+    except Exception:
+        conn.rollback()
+        return
+    conn.execute(text('UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE email_verified_at IS NULL'))
+    conn.commit()
+
+
 def _dedupe_admins(conn):
     """O FinFam original perdeu o UNIQUE de users.email numa migração antiga e passou a
     inserir um admin novo a cada reinício. Mantém só o admin mais antigo de cada e-mail
@@ -204,6 +216,7 @@ def run_migrations() -> None:
         return  # migrações legadas são específicas do SQLite
     with engine.connect() as conn:
         _exec_each(conn, _ALTERS)
+        _add_email_verified(conn)
         try:
             _migrate_credit_accounts(conn)
         except Exception as exc:  # não impede a API de subir

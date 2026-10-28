@@ -17,6 +17,7 @@ from app.core.deps import (Ctx, Period, get_ctx, get_ctx_allow_expired, get_ctx_
 from app.core.security import (create_access_token, decode_access_token, new_api_token, session_fingerprint,
                                verify_password)
 from app.models import ApiToken, Tenant, User
+from app.services import account_mail, mailer
 from app.services import two_factor as tfa
 from app.services.alert_service import quick_alert_count
 from app.services.serializers import iso, tenant_out, user_out
@@ -76,6 +77,10 @@ def login(body: LoginIn, request: Request):
     ratelimit.reset(request, 'login', body.email)
     if user.is_admin:
         raise HTTPException(status_code=403, detail='Esta conta é de administrador. Acesse em /admin.')
+    if account_mail.needs_verification(user):
+        raise HTTPException(status_code=403, detail={
+            'code': 'email_not_verified',
+            'message': 'Confirme seu e-mail para entrar: abra o link que enviamos para ' + user.email + '.'})
     if user.totp_locked:
         raise HTTPException(status_code=423, detail={'code': '2fa_locked', 'message': str(tfa.TwoFactorError(tfa._LOCKED))})
     if user.totp_enabled:
@@ -125,8 +130,91 @@ def register(body: RegisterIn, request: Request):
     user = User(name=body.name.strip(), email=email, tenant_id=tenant.id)
     user.set_password(body.password)
     db.session.add(user)
+    db.session.flush()
+    must_confirm = account_mail.start(user, request)
     db.session.commit()
+    if must_confirm:  # entra só depois de clicar no link do e-mail de boas-vindas
+        return {'verify_required': True, 'email': email,
+                'message': f'Conta criada! Enviamos um e-mail para {email}: abra o link para confirmar e entrar.'}
     return _session_payload(user, tenant)
+
+
+class TokenOnlyIn(BaseModel):
+    token: str = Field(min_length=10, max_length=2000)
+
+
+class EmailOnlyIn(BaseModel):
+    email: Email
+
+
+class ResetIn(BaseModel):
+    token: str = Field(min_length=10, max_length=2000)
+    password: str = Field(min_length=8)
+    confirm_password: str
+
+    @model_validator(mode='after')
+    def _passwords_match(self):
+        if self.password != self.confirm_password:
+            raise ValueError('As senhas não coincidem.')
+        return self
+
+
+@router.post('/auth/verify', summary='Confirma o e-mail pelo link das boas-vindas (e já entra)')
+def verify_email(body: TokenOnlyIn, request: Request):
+    ratelimit.check(request, 'verify', limit=60, window=900)
+    user = account_mail.verify(body.token)
+    if user is None:
+        raise HTTPException(status_code=400, detail={
+            'code': 'link_invalid', 'message': 'Este link de confirmação expirou ou não vale mais. Peça outro.'})
+    db.session.commit()
+    if user.totp_enabled:  # com 2FA, entra pelo login normal (o link não pula o código do app)
+        return {'message': 'E-mail confirmado! Entre com seu e-mail e senha.'}
+    tenant = db.session.get(Tenant, user.tenant_id) if user.tenant_id else None
+    return {'message': 'E-mail confirmado! Bem-vindo ao FinFam.', **_session_payload(user, tenant)}
+
+
+_GENERIC_RESEND = 'Se o e-mail estiver cadastrado e ainda não confirmado, enviamos um novo link. Veja também o spam.'
+
+
+@router.post('/auth/verify/resend', summary='Manda de novo o link de confirmação do e-mail')
+def resend_verification(body: EmailOnlyIn, request: Request):
+    email = body.email.strip().lower()
+    ratelimit.check(request, 'verify-resend', email, limit=3, window=3600)
+    user = User.query.filter_by(email=email).first()
+    if user is not None and account_mail.needs_verification(user):
+        account_mail.send_verification(user, request)
+    return {'message': _GENERIC_RESEND}
+
+
+_GENERIC_FORGOT = ('Se o e-mail estiver cadastrado, enviamos um link para criar uma nova senha. '
+                   'Ele vale por 1 hora. Veja também a caixa de spam.')
+
+
+@router.post('/auth/forgot-password', summary='Esqueci minha senha: manda o link para criar uma nova')
+def forgot_password(body: EmailOnlyIn, request: Request):
+    if not mailer.enabled():
+        raise HTTPException(status_code=503, detail='A recuperação por e-mail não está configurada. '
+                                                    'Peça ao administrador para redefinir sua senha.')
+    email = body.email.strip().lower()
+    ratelimit.check(request, 'forgot', limit=30, window=3600)
+    ratelimit.check(request, 'forgot', email, limit=3, window=3600)
+    user = User.query.filter_by(email=email).first()
+    if user is not None and not user.is_admin and user.password_hash:
+        account_mail.send_reset(user, request)
+    return {'message': _GENERIC_FORGOT}  # mesma resposta exista ou não a conta
+
+
+@router.post('/auth/reset-password', summary='Cria a nova senha com o link do e-mail')
+def reset_password(body: ResetIn, request: Request):
+    ratelimit.check(request, 'reset', limit=30, window=900)
+    user = account_mail.reset_user(body.token)
+    if user is None:
+        raise HTTPException(status_code=400, detail={
+            'code': 'link_invalid', 'message': 'Este link expirou ou já foi usado. Peça outro em "Esqueci minha senha".'})
+    user.change_password(body.password)  # desliga sessões, tokens de API e Telegram antigos
+    user.email_verified_at = user.email_verified_at or utcnow()  # recebeu o e-mail: é dele
+    db.session.commit()
+    return {'message': 'Senha alterada! Entre com a nova senha.'}
 
 
 @router.get('/auth/me', summary='Usuário logado, família, plano e contador de alertas')
