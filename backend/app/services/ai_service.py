@@ -252,7 +252,7 @@ Interprete a mensagem do usuário e responda SOMENTE com um objeto JSON, sem tex
              "installments": int|null, "category": str|null, "date": "AAAA-MM-DD"|null, "person_id": int|null} | null,
  "query": {"days": int|null, "category": str|null, "text": str|null, "payment_method": str|null,
            "card_id": int|null, "bank": str|null,
-           "month": int|null, "year": int|null,
+           "month": int|null, "year": int|null, "months": int|null,
            "date_from": "AAAA-MM-DD"|null, "date_to": "AAAA-MM-DD"|null} | null,
  "reply": str}
 Regras:
@@ -271,6 +271,11 @@ Regras:
   query.text = a palavra buscada ("uber", "ifood"). query.month/year = o mês perguntado (padrão: o mês atual).
   Se a pessoa falar da FORMA de pagamento ("no débito", "no PIX"), use query.payment_method (uma de {methods})
   e deixe text null.
+  Se ela citar um NOME de lançamento/estabelecimento como aparece no extrato ("DEBITO PRESTACAO HAB", "Sabesp",
+  "Netflix", "uber"), use query.text com esse nome EXATO e category null — mesmo que pareça de uma categoria.
+  category só quando ela falar da categoria em si (alimentação, moradia, saúde…).
+  Período de vários meses ("nos últimos meses", "últimos 3 meses", "este ano"): query.months = quantos meses
+  até o mês atual (sem número: 6; "este ano": o nº do mês atual). Um mês só: months null.
 - "invoices": pergunta o valor da FATURA do cartão de crédito ("qual o valor do cartão de crédito de novembro?",
   "quanto vem a fatura?"). query.month/year = mês da fatura (padrão: o mês atual). Se citar um cartão ou banco
   ("da Caixa", "do cartão roxo", "final 1234"): query.card_id = id da lista de cartões, se der para identificar;
@@ -409,13 +414,28 @@ def match_bank(value, banks: list[str]) -> str | None:
     return hits[0] if len(set(hits)) == 1 else None
 
 
+_EXTRACT_NAME = re.compile(r'\b[A-ZÀ-Ú0-9*]{2,}(?:\s+[A-ZÀ-Ú0-9*]{2,})+\b')
+
+
+def quoted_name(message: str | None, categories: list[str]) -> str | None:
+    """Nome de lançamento como vem do extrato, em MAIÚSCULAS ("DEBITO PRESTACAO HAB"): a pessoa quer esse
+    lançamento, não a categoria que a IA achou parecida."""
+    found = _EXTRACT_NAME.search(message or '')
+    if not found or found.group(0).isdigit():
+        return None
+    name = found.group(0).strip()
+    return None if match_category(name, categories) else name
+
+
 def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str],
-             methods: list[str] | None = None, cards: list[dict] | None = None) -> dict:
+             methods: list[str] | None = None, cards: list[dict] | None = None, message: str | None = None) -> dict:
     """Confere os filtros da consulta: números em faixa, categoria real, datas plausíveis."""
     raw = raw if isinstance(raw, dict) else {}
     days = _int(raw.get('days'))
     category = match_category(raw.get('category'), categories)
-    text = re.sub(r'[^\w\s.-]', '', str(raw.get('text') or ''))[:60].strip() or None
+    text = re.sub(r'[^\w\s.*-]', '', str(raw.get('text') or ''))[:60].strip() or None
+    if intent == 'spending' and (name := quoted_name(message, categories)):
+        category, text = None, name[:60]
     method = str(raw.get('payment_method') or '')
     method = method if method in (methods or []) else _METHOD_ALIASES.get(_norm(method))
     if method and _norm(text or '') in (_norm(method), 'cartao de credito', 'credito', 'debito', 'pix', 'cartao'):
@@ -437,7 +457,9 @@ def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str
     bank = None if card_id else match_bank(raw.get('bank'), sorted({c['bank'] for c in cards if c.get('bank')}))
     if bank and text and match_bank(text, [bank]):
         text = None  # "da Caixa" é o banco, não um nome de lançamento
+    months = _int(raw.get('months'))
     return {'days': days if days and 0 <= days <= 90 else 7, 'category': category, 'payment_method': method,
+            'months': months if months and 2 <= months <= 24 else None,
             'card_id': card_id, 'bank': bank,
             'text': None if category else text, 'month': month, 'year': year,
             'date_from': start.isoformat() if start else None, 'date_to': end.isoformat() if end else None}

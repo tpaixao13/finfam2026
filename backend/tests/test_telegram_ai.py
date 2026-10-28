@@ -288,6 +288,13 @@ def test_interpret_queries_are_checked(client, family, fake_ai):
     fake_ai['answer'] = {'intent': 'spending', 'query': {'category': 'Inexistente', 'text': 'uber<b>'}}
     q = family.post('/ai/interpret', json={'text': 'quanto gastei de uber'}).json()['query']
     assert q['category'] is None and q['text'] == 'uberb'
+    # nome do extrato em maiúsculas: busca o lançamento, não a categoria que a IA achou parecida
+    fake_ai['answer'] = {'intent': 'spending', 'query': {'category': 'Moradia', 'months': 6}}
+    q = family.post('/ai/interpret', json={'text': 'liste nos últimos meses os gastos com DEBITO PRESTACAO HAB'}).json()['query']
+    assert (q['category'], q['text'], q['months']) == (None, 'DEBITO PRESTACAO HAB', 6)
+    fake_ai['answer'] = {'intent': 'spending', 'query': {'category': 'Moradia', 'months': 99}}
+    q = family.post('/ai/interpret', json={'text': 'quanto gastei de MORADIA'}).json()['query']
+    assert (q['category'], q['text'], q['months']) == ('Moradia', None, None)
     fake_ai['answer'] = {'intent': 'bills', 'query': {'days': 5}}
     assert family.post('/ai/interpret', json={'text': 'contas dos próximos 5 dias'}).json()['query']['days'] == 5
     fake_ai['answer'] = {'intent': 'bills', 'query': {'days': 9999}}

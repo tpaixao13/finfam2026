@@ -148,6 +148,38 @@ def spending_text(q: dict, r: dict) -> str:
     return '\n'.join(lines)
 
 
+def months_back(month: int, year: int, count: int) -> list[tuple[int, int]]:
+    """Os `count` meses até month/year, do mais antigo ao mais novo."""
+    out = []
+    for _ in range(count):
+        out.append((month, year))
+        month, year = (12, year - 1) if month == 1 else (month - 1, year)
+    return out[::-1]
+
+
+def spending_months_text(q: dict, rows: list[tuple[int, int, dict]]) -> str:
+    """Resposta de "gastos com X nos últimos N meses": um total por mês."""
+    what = q.get('category') or q.get('text') or ('no ' + q['payment_method'] if q.get('payment_method') else 'tudo')
+    total = sum(r['total_amount'] for _, _, r in rows)
+    count = sum(r['total'] for _, _, r in rows)
+    if not count:
+        return f'🔎 Nenhum gasto com <b>{h(what)}</b> nos últimos {len(rows)} meses.'
+    lines = [f'🔎 <b>{h(what)}</b> nos últimos {len(rows)} meses: <b>{brl(total)}</b> em {count} lançamento(s)', '']
+    for m, y, r in rows:
+        label = f'{MONTHS[m - 1][:3]}/{y}'
+        if not r['total']:
+            lines.append(f'• {label}: —')
+        elif r['total'] == 1 and r['items']:
+            e = r['items'][0]
+            lines.append(f'• {label}: {brl(r["total_amount"])} — {h(e["description"])} ({dm(e.get("due_date") or e.get("purchase_date"))})')
+        else:
+            lines.append(f'• {label}: {brl(r["total_amount"])} em {r["total"]} lançamento(s)')
+    months_with = [r['total_amount'] for _, _, r in rows if r['total']]
+    if len(months_with) > 1:
+        lines += ['', f'Média nos meses com gasto: {brl(sum(months_with) / len(months_with))}']
+    return '\n'.join(lines)
+
+
 def purchases_text(q: dict, r: dict) -> str:
     """Resposta de "o que comprei dia X / no período"."""
     period = dm(q['date_from']) if q['date_from'] == q['date_to'] else f'{dm(q["date_from"])} a {dm(q["date_to"])}'

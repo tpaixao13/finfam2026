@@ -439,6 +439,13 @@ def test_ai_queries_spending_purchases_and_bills_days():
     assert '<b>Alimentação</b> em outubro/2026: <b>R$ 300,00</b> em 3' in tg.last['text']
     assert 'Mercado &lt;Extra&gt;' in tg.last['text'] and 'e mais 2' in tg.last['text']
 
+    q6 = {**q, 'category': None, 'text': 'DEBITO PRESTACAO HAB', 'months': 3}
+    b6 = Bot(tg, StubApi({'intent': 'spending', 'query': q6, 'reply': ''}))
+    b6.handle(_msg(73, 'gastos com DEBITO PRESTACAO HAB nos últimos meses'))
+    asked = [(qq['month'], qq['year'], qq['search']) for path, qq in b6.api.gets if path == '/expenses']
+    assert asked == [(8, 2026, 'DEBITO PRESTACAO HAB'), (9, 2026, 'DEBITO PRESTACAO HAB'), (10, 2026, 'DEBITO PRESTACAO HAB')]
+    assert 'nos últimos 3 meses: <b>R$ 900,00</b> em 9' in tg.last['text'] and '• out/2026: R$ 300,00' in tg.last['text']
+
     q2 = {**q, 'category': None, 'date_from': '2026-10-20', 'date_to': '2026-10-20'}
     b2 = Bot(tg, StubApi({'intent': 'purchases', 'query': q2, 'reply': ''}))
     b2.handle(_msg(71, 'o que comprei dia 20/10'))

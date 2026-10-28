@@ -22,7 +22,8 @@ from finfam_bot.invest_flow import InvestFlow
 from finfam_bot.parsers import parse_amount, parse_date, pick_person, quick_parse  # noqa: F401  (usados pelos testes)
 from finfam_bot.review import Review
 from finfam_bot.views import (HELP, MENU, agenda_text, balances_text, bank_text, bills_view, draft_text, goals_text,
-                              invoices_text, portfolio_text, purchases_text, spending_text, summary_text, week_text)
+                              invoices_text, months_back, portfolio_text, purchases_text, spending_months_text,
+                              spending_text, summary_text, week_text)
 
 # perguntas sobre os bancos conectados — respondidas sem IA
 BANK_QUESTION = re.compile(
@@ -355,6 +356,11 @@ class Bot:
         return self.api.get(chat_id, '/expenses', per_page=15, **clean)
 
     def spending(self, chat_id: int, q: dict) -> None:
+        if (q.get('months') or 1) > 1:  # "nos últimos meses": um total por mês
+            rows = [(m, y, self._search(chat_id, month=m, year=y, category=q.get('category'), search=q.get('text'),
+                                        payment_method=q.get('payment_method')))
+                    for m, y in months_back(q['month'], q['year'], q['months'])]
+            return self.tg.send(chat_id, spending_months_text(q, rows))
         r = self._search(chat_id, month=q['month'], year=q['year'], category=q.get('category'), search=q.get('text'),
                          payment_method=q.get('payment_method'))
         self.tg.send(chat_id, spending_text(q, r))

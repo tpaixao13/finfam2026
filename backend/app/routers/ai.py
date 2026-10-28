@@ -202,7 +202,7 @@ def _interpret(ctx: Ctx, text: str, media: dict | None = None) -> dict:
     out = {'intent': result['intent'], 'reply': result['reply'], 'draft': None, 'query': None}
     if result['intent'] in ai.QUERY_INTENTS:
         out['query'] = ai.to_query(result['query'], intent=result['intent'], today=today, categories=categories,
-                                  methods=PAYMENT_METHODS, cards=card_list)
+                                  methods=PAYMENT_METHODS, cards=card_list, message=text)
     if result['intent'] == 'expense':
         draft = ai.to_draft(result['expense'], today=today, categories=categories, methods=PAYMENT_METHODS,
                             cards=card_list, member_ids=ctx.uids, suggest=suggest)

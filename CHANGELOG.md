@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.5.1 — bot: gastos com um lançamento nos últimos meses (28/10/2026)
+
+- "gastos com DEBITO PRESTACAO HAB nos últimos meses" buscava a categoria Moradia só em outubro. Agora o nome
+  como vem do extrato (em MAIÚSCULAS) é buscado como texto, e "últimos meses" / "últimos 3 meses" /
+  "este ano" responde com o total de cada mês (sem número: 6 meses) e a média.
+
 ## 2026.5.0 — do gráfico de categorias para as despesas (28/10/2026)
 
 - Painel → Gastos por categoria: tocar numa fatia ou numa linha da legenda abre Despesas já filtrado pela
