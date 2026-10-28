@@ -341,7 +341,7 @@ def add_extra(tenant_id: int, _: User = Depends(get_admin)):
         raise HTTPException(status_code=422, detail='Slot extra só pode ser concedido para planos Anual ou Vitalício.')
     tenant.extra_members = (tenant.extra_members or 0) + 1
     db.session.commit()
-    return {'message': f'+1 slot extra para "{tenant.name}" (limite: {tenant.member_limit}).',
+    return {'message': f'Membro extra liberado para "{tenant.name}" (agora cabem {tenant.member_limit}).',
             'tenant': tenant_out(tenant)}
 
 
@@ -351,7 +351,7 @@ def remove_extra(tenant_id: int, _: User = Depends(get_admin)):
     if (tenant.extra_members or 0) > 0:
         tenant.extra_members -= 1
         db.session.commit()
-    return {'message': f'Slot extra removido de "{tenant.name}" (limite: {tenant.member_limit}).',
+    return {'message': f'Membro extra retirado de "{tenant.name}" (agora cabem {tenant.member_limit}).',
             'tenant': tenant_out(tenant)}
 
 
