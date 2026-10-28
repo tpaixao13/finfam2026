@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.3.1 — texto da tela de entrar (28/10/2026)
+
+- Frase: "Menos planilhas. Mais decisões inteligentes." e "Centralize gastos, cartões, contas e objetivos
+  financeiros da sua família em um único lugar."
+
 ## 2026.3.0 — calendário de contas a pagar (28/10/2026)
 
 - Contas a pagar ganhou a visão **Calendário** (botão Lista | Calendário, `?ver=calendario`): cada conta no

@@ -41,8 +41,8 @@ export function AuthAside() {
     <aside className="auth-side">
       <div className="brand brand-lg"><img src="/logo.svg" alt="" width={40} height={40} /><span>FinFam</span></div>
       <div className="auth-side-body">
-        <p className="auth-pitch">O mês da família, conta por conta.</p>
-        <p className="auth-sub">Gastos, cartões, contas a pagar e metas de quem mora junto, num lugar só.</p>
+        <p className="auth-pitch"><span>Menos planilhas.</span> <span>Mais decisões inteligentes.</span></p>
+        <p className="auth-sub">Centralize gastos, cartões, contas e objetivos financeiros da sua família em um único lugar.</p>
         <MonthGrid />
       </div>
     </aside>

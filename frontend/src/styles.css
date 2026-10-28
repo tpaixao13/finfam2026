@@ -754,3 +754,4 @@ a.insight:hover { background: #e8edf1; }
   .cal-item { grid-template-columns: minmax(0, 1fr) auto; }
   .cal-item .badge { grid-column: 1 / -1; justify-self: start; }
 }
+.auth-pitch span { display: block; }
