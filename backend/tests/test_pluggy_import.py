@@ -896,7 +896,7 @@ def test_manual_close_day_until_bank_informs(client, family, bank, txs, monkeypa
         if p.startswith('/bills?') else inner(m, p, b, k))(pg._http))
     _post_item(family)
     cc_out = next(a for c in family.get('/pluggy/items').json()['items'] for a in c['accounts'] if a['type'] == 'CREDIT')
-    assert cc_out['close_day'] is None and cc_out['due_day'] == 15
+    assert (cc_out['close_day'], cc_out['close_source'], cc_out['due_day']) == (3, 'card', 15)  # melhor dia do cartão
     r = family.put(f"/pluggy/accounts/{cc_out['id']}/close-day", json={'close_day': 9})
     assert r.status_code == 200, r.text
     assert (r.json()['account']['close_day'], r.json()['account']['close_source']) == (9, 'manual')

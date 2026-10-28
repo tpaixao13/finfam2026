@@ -22,6 +22,8 @@ function CloseDayField({ acc, onChange }: { acc: BankAccount; onChange: () => vo
   const save = () => act(() => api.put<{ message: string }>(`/pluggy/accounts/${acc.id}/close-day`, { close_day: day ? Number(day) : null }), onChange)
   const hint = acc.close_source === 'inferred' && acc.close_day
     ? `O banco não informa; o FinFam calculou dia ${acc.close_day} pelas compras. Digite se for outro.`
+    : acc.close_source === 'card' && acc.close_day
+      ? `Usando o melhor dia de compra do cartão ligado (dia ${acc.close_day}). Digite só se a fatura fechar em outro dia.`
     : acc.close_source === 'manual' ? 'Digitado por você. Vale até o banco passar a informar o dele.'
       : 'O banco não informa. Veja no app do banco o dia em que a fatura fecha.'
   return (

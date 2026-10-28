@@ -11,7 +11,7 @@ export interface BankAccount {
   id: number; type: 'BANK' | 'CREDIT'; subtype: string | null; name: string | null; last_digits: string | null
   currency: string; balance: number | null; credit_limit: number | null; card_id: number | null; card_label: string | null
   available_limit: number | null; close_day: number | null; due_day: number | null
-  close_source: 'bank' | 'manual' | 'inferred' | null; manual_close_day: number | null
+  close_source: 'bank' | 'manual' | 'inferred' | 'card' | null; manual_close_day: number | null
 }
 export interface Connection {
   id: number; item_id: string; bank_name: string | null; connector_name: string | null; auto_import: boolean; bank_color: string | null; status: string | null

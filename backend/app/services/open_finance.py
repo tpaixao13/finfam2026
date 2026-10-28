@@ -198,12 +198,16 @@ def sync_bills(acc: BankAccount, client: pg.PluggyClient) -> None:
 
 
 def apply_close_day(acc: BankAccount, source: str | None) -> None:
-    """Fechamento do cartão: o que o banco informa manda; sem isso, o que a pessoa digitou; sem os
-    dois, o FinFam calcula pelas compras (infer_close_day, na leitura dos lançamentos)."""
+    """Fechamento do cartão, nesta ordem: o que o banco informa; o que a pessoa digitou nos Ajustes;
+    o que as compras do banco mostram (infer_close_day, na leitura dos lançamentos); sem isso, o
+    "melhor dia de compra" do cartão do FinFam ligado (que é o dia em que a fatura fecha)."""
+    card = db.session.get(CreditCard, acc.card_id) if acc.card_id else None
     if source == 'bank' and acc.close_day:
         acc.close_source = 'bank'
     elif acc.manual_close_day:
         acc.close_day, acc.close_source = acc.manual_close_day, 'manual'
+    elif acc.type == 'CREDIT' and card is not None and card.best_buy_day:
+        acc.close_day, acc.close_source = card.best_buy_day, 'card'
     else:
         acc.close_day, acc.close_source = None, None
 
@@ -211,8 +215,8 @@ def apply_close_day(acc: BankAccount, source: str | None) -> None:
 def infer_close_day(acc: BankAccount, raws: list[dict]) -> int | None:
     """Banco que não informa o fechamento (C6, Santander pelo Meu Pluggy): descobre o dia de
     corte pelas compras que vêm com o código da fatura. Só usa se explica 90%+ delas."""
-    if acc.type != 'CREDIT' or acc.close_day or not acc.due_day:
-        return None
+    if acc.type != 'CREDIT' or (acc.close_day and acc.close_source != 'card') or not acc.due_day:
+        return None  # o do banco e o digitado mandam; o melhor dia do cartão cede ao que as compras mostram
     due_of = {b.pluggy_id: b.due_date for b in acc.bills.all()}
     samples = []
     for r in raws:

@@ -170,6 +170,8 @@ pelo bot ou importando extrato, como antes.
 - Contas conectadas redesenhada: a tela fica só com o dia a dia (bancos, Atualizar agora, conferência de
   faturas); ajustes de cada banco (renomear, automático, ligar cartão, fechamento, desconectar) atrás de
   "Ajustes"; chave Pluggy, aviso no Telegram, limite e "usar o ID da conexão" em `/bank/settings`.
+- Fechamento do cartão sem informação do banco: usa o "melhor dia de compra" do cartão do FinFam ligado
+  (`close_source = card`). Ordem: banco → digitado nos Ajustes → calculado pelas compras → melhor dia do cartão.
 - Revisão final de segurança e Unix: "enviar link de nova senha" do admin com limite (3/h por pessoa) e
   registro no log; os dias do banco só vão para cartões da mesma conta de crédito ou do mesmo dono (não
   mexe no cartão que outro membro configurou); limpeza do CSS sem uso e do padrão "campo + Salvar"

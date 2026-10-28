@@ -377,6 +377,9 @@ def map_account(account_id: int, body: AccountIn, ctx: Ctx = Depends(get_ctx_ses
         if not (card.card_type == 'credit' or card.supports_credit):
             raise HTTPException(status_code=422, detail='Cartão: escolha um cartão de crédito.')
     acc.card_id = body.card_id
+    if acc.close_source != 'bank':  # o melhor dia do cartão ligado vira o fechamento (se ninguém digitou)
+        of.apply_close_day(acc, None)
+        acc.connection.needs_sync = True  # refaz o mês da fatura das compras na próxima leitura
     limit = of.apply_card_limit(acc)
     db.session.commit()
     msg = 'Cartão ligado.' + (' O limite agora vem do banco.' if limit else '') if body.card_id else 'Cartão desligado.'
