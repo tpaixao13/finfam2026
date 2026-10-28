@@ -71,14 +71,15 @@ def apply(body: ApplyIn, request: Request, ctx: Ctx = Depends(get_ctx_session)):
     ratelimit.check(request, 'rules-apply', str(ctx.user.id), limit=30, window=60)  # percorre todas as despesas
     changes = rule_changes(ctx.uids, _tid(ctx), body.only_others)
     sample = [{'id': e.id, 'description': e.description, 'date': f'{e.purchase_year or e.year}-{(e.purchase_month or e.month):02d}-{e.day:02d}',
-               'amount': float(e.amount), 'from': e.category, 'to': cat, 'keyword': rule.keyword}
+               'amount': float(e.amount), 'from': e.category, 'to': cat, 'keyword': rule.keyword if rule else None}
               for e, cat, rule in changes[:200]]
     if body.dry_run:
         return {'count': len(changes), 'sample': sample,
                 'message': f'{len(changes)} despesa(s) mudariam de categoria.' if changes else 'Nenhuma despesa muda com as regras atuais.'}
     for e, cat, rule in changes:
         e.category = cat
-        rule.match_count = (rule.match_count or 0) + 1
+        if rule is not None:
+            rule.match_count = (rule.match_count or 0) + 1
     db.session.commit()
     return {'count': len(changes), 'sample': sample, 'message': f'{len(changes)} despesa(s) atualizada(s) pelas regras.'}
 

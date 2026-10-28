@@ -149,6 +149,11 @@ pelo bot ou importando extrato, como antes.
   máquina, limita tentativas erradas por IP e não grava o token no log de acesso; restauração do backup só
   aceita lançamentos de contas da própria família; backup sem código de convite/chat do Telegram e com
   permissão 0600; `POST /rules/learn` só pelo site; MCP trata descrição do banco como dado.
+- Categoria do banco: a classificação da Pluggy (em inglês, ~100 categorias) é traduzida e encaixada na
+  categoria da família que mais se aproxima (Supermercado/Restaurantes/Delivery → Alimentação, Táxi/Posto →
+  Transporte…); sem parecida, vira categoria nova em português (ex.: Vestuário, Tarifas bancárias).
+  Ordem da sugestão: regras → histórico → banco → descrição. `services/bank_categories.py`. Na revisão aparece
+  "banco: Supermercado"; "Aplicar às despesas" também recategoriza importados antigos que ficaram em "Outros".
 - Tela de login: versão discreta no rodapé (`components/AppVersion.tsx`, lê `GET /health`).
 - 2ª revisão: `/rules/apply` com limite de chamadas; MCP encurta e trata como dado nomes vindos do banco;
   "Saldo nas contas" em `pages/BankBalances.tsx`; prévia de regras com erro visível e valor no celular.

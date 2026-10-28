@@ -1016,3 +1016,39 @@ def test_apply_rules_to_existing_expenses(client, family):
     assert cats == {'UBER TRIP 1': 'Transporte', 'UBER TRIP 2': 'Transporte'}
     assert Expense.query.filter_by(description='PADARIA X').one().category == 'Outros'
     session.remove()
+
+
+def test_bank_category_maps_to_closest_family_category(client, family, bank, txs):  # noqa: F811
+    from app.services.bank_categories import to_finfam, translate
+    base = ['Alimentação', 'Lazer', 'Outros', 'Saúde', 'Transporte']
+    assert to_finfam('Groceries', base) == 'Alimentação'
+    assert to_finfam('Taxi and ride-hailing', base) == 'Transporte'
+    assert to_finfam('Pharmacy', base) == 'Saúde'
+    assert to_finfam('Travel', base) == 'Lazer'
+    assert to_finfam('Clothing', base) == 'Vestuário'                       # nada parecido: nome em português
+    assert to_finfam('Clothing', base + ['Roupas']) == 'Roupas'             # a família já tem uma parecida
+    assert to_finfam('Eating out', base + ['Restaurantes']) == 'Restaurantes'  # mesma da Pluggy: usa ela
+    assert to_finfam('Credit card fees', base) == 'Tarifas bancárias'
+    assert to_finfam('Transfer - PIX', base) is None and to_finfam('Other', base) is None
+    assert translate('Eating out') == 'Restaurantes'
+    acc, cc, _ = _connect(client, family, bank, txs)
+    txs[cc] += [{'id': 'g1', 'type': 'DEBIT', 'amount': 33.96, 'date': day(2), 'description': 'COOP DIADEMA BRA',
+                 'category': 'Groceries'},
+                {'id': 'g2', 'type': 'DEBIT', 'amount': 120.0, 'date': day(2), 'description': 'LOJA XYZ', 'category': 'Clothing'}]
+    _post_item(family)
+    items = {t['description']: t for t in family.get('/pluggy/transactions').json()['items']}
+    assert (items['COOP DIADEMA BRA']['category'], items['COOP DIADEMA BRA']['bank_category']) == ('Alimentação', 'Supermercado')
+    assert items['LOJA XYZ']['category'] == 'Vestuário'
+    session.remove()
+
+
+def test_apply_uses_bank_category_for_old_imports(client, family, bank, txs):  # noqa: F811
+    acc, cc, _ = _connect(client, family, bank, txs)
+    txs[cc].append({'id': 'old1', 'type': 'DEBIT', 'amount': 33.96, 'date': day(2), 'description': 'LOJA SEM NOME',
+                    'category': 'Groceries'})
+    _post_item(family)
+    [t] = family.get('/pluggy/transactions').json()['items']
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': t['id'], 'category': 'Outros'}]})
+    prev = family.post('/rules/apply', json={'only_others': True, 'dry_run': True}).json()
+    assert [(c['to'], c['keyword']) for c in prev['sample']] == [('Alimentação', None)]
+    session.remove()

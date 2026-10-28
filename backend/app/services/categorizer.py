@@ -186,20 +186,32 @@ def learn_from_history(uids: list, tenant_id: int, min_count: int = 3, share: fl
     return created
 
 
-def rule_changes(uids: list, tenant_id: int, only_others: bool = True) -> list[tuple[Expense, str, CategoryRule]]:
+def rule_changes(uids: list, tenant_id: int, only_others: bool = True) -> list[tuple[Expense, str, CategoryRule | None]]:
     """Despesas da família que as regras mudariam: (despesa, categoria nova, regra). A 1ª regra que casa
-    vale, na mesma ordem da sugestão. only_others: só as que estão em "Outros" (ou sem categoria)."""
+    vale, na mesma ordem da sugestão. Sem regra, uma despesa que veio do banco em "Outros" recebe a
+    categoria que o banco deu (regra None). only_others: só as em "Outros" (ou sem categoria)."""
+    from app.models import BankTransaction
+    from app.services import bank_categories
+    from app.services.expense_service import tenant_categories
     rules = (CategoryRule.query.filter_by(tenant_id=tenant_id)
              .order_by(CategoryRule.match_count.desc(), CategoryRule.keyword).all())
-    if not rules:
-        return []
     q = Expense.query.filter(Expense.user_id.in_(uids or [0]))
     if only_others:
         q = q.filter((Expense.category == 'Outros') | (Expense.category.is_(None)) | (Expense.category == ''))
+    expenses = q.all()
+    from_bank = dict(db.session.query(BankTransaction.expense_id, BankTransaction.pluggy_category)
+                     .filter(BankTransaction.expense_id.in_([e.id for e in expenses] or [0]),
+                             BankTransaction.kind != 'refund').all())
+    family = tenant_categories(uids) if from_bank else []
     out = []
-    for e in q.all():
+    for e in expenses:
         desc = (e.description or '').upper()
         rule = next((r for r in rules if r.keyword.upper() in desc), None)
-        if rule is not None and rule.category != e.category:
-            out.append((e, rule.category, rule))
+        if rule is not None:
+            if rule.category != e.category:
+                out.append((e, rule.category, rule))
+        elif e.category in (None, '', 'Outros') and e.id in from_bank:
+            cat = bank_categories.to_finfam(from_bank[e.id], family)
+            if cat and cat != e.category:
+                out.append((e, cat, None))
     return out

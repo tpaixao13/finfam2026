@@ -199,7 +199,7 @@ export function RulesPage() {
         subtitle="Se a descrição contém a palavra, o FinFam sugere a categoria no lançamento, na importação e no Open Finance."
         actions={<>
           <Button variant="ghost" icon="lightning" onClick={() => act(() => api.post<{ message: string }>('/rules/learn'), rules.reload)}>Criar pelo histórico</Button>
-          <Button icon="arrow-repeat" disabled={!rules.data?.length} onClick={() => setApplying(true)}>Aplicar às despesas</Button>
+          <Button icon="arrow-repeat" onClick={() => setApplying(true)}>Aplicar às despesas</Button>
         </>} />
       <ApplyRulesModal open={applying} onClose={() => setApplying(false)} onDone={rules.reload} />
       <Panel>

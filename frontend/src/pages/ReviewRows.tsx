@@ -10,7 +10,7 @@ export interface BankTx {
   bank_name: string | null; account_type: 'BANK' | 'CREDIT'; account_name: string | null
   account_last_digits: string | null; card_id: number | null; card_digits: string | null
   expense: { id: number; description: string; amount: number; date: string } | null
-  category?: string; payment_method?: string
+  category?: string; payment_method?: string; bank_category?: string | null
 }
 export interface TxList { counts: Record<Status, number>; categories: string[]; items: BankTx[] }
 export interface Draft { selected: boolean; category: string; description: string; payment_method: string }
@@ -24,6 +24,7 @@ function Source({ tx }: { tx: BankTx }) {
       {(tx.card_digits || tx.account_last_digits) && ` •••• ${tx.card_digits || tx.account_last_digits}`}
       {tx.installment && ` · parcela ${tx.installment.number}/${tx.installment.total}`}
       {tx.bill && ` · fatura ${tx.bill}`}
+      {tx.bank_category && ` · banco: ${tx.bank_category}`}
       {tx.refund && ' · estorno (abate a fatura)'}
       {tx.bank_pending && ' · ainda pendente no banco'}
     </span>

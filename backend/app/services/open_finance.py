@@ -16,9 +16,10 @@ from app.core.db import db
 from app.core.security import decrypt_field
 from app.core.types import utcnow
 from app.models import BankAccount, BankBill, BankConnection, BankInvestment, BankTransaction, CreditCard, Expense, PluggyConfig, User
+from app.services import bank_categories
 from app.services import pluggy as pg
 from app.services.categorizer import categorize
-from app.services.expense_service import ExpenseData, create_expense
+from app.services.expense_service import ExpenseData, create_expense, tenant_categories
 from app.services.finance import CATEGORIES, CREDIT, DEBIT, brl
 
 log = logging.getLogger('finfam.pluggy')
@@ -1025,6 +1026,20 @@ def guess_category(tx: BankTransaction) -> str | None:
     return None
 
 
+_cats_cache: dict[tuple, tuple[float, list[str]]] = {}
+
+
+def _family_categories(uids: list) -> list[str]:
+    """Categorias da família, guardadas por 10 s (a lista de revisão pergunta uma vez por lançamento)."""
+    key, now = tuple(sorted(uids)), time.monotonic()
+    hit = _cats_cache.get(key)
+    if hit is None or now - hit[0] > 10:
+        if len(_cats_cache) > 500:
+            _cats_cache.clear()
+        hit = _cats_cache[key] = (now, tenant_categories(uids))
+    return hit[1]
+
+
 def suggestion(tx: BankTransaction, uids: list, tenant_id: int | None) -> dict:
     """Categoria e forma de pagamento sugeridas: regras e histórico da família primeiro; sem
     nada, pela descrição e pela categoria que o banco manda."""
@@ -1035,10 +1050,14 @@ def suggestion(tx: BankTransaction, uids: list, tenant_id: int | None) -> dict:
                 .order_by(Expense.year.desc(), Expense.month.desc()).first())
         if orig is not None:
             category, source = orig.category, 'compra'
+    if not category and tx.kind != 'refund':  # a classificação do banco, na categoria da família mais parecida
+        category = bank_categories.to_finfam(tx.pluggy_category, _family_categories(uids))
+        source = 'banco' if category else None
     if not category:
         category = guess_category(tx)
         source = 'banco' if category else None
-    return {'category': category or 'Outros', 'category_source': source, 'payment_method': suggested_method(tx)}
+    return {'category': category or 'Outros', 'category_source': source, 'payment_method': suggested_method(tx),
+            'bank_category': bank_categories.translate(tx.pluggy_category)}
 
 
 def approve(tx: BankTransaction, uids: list, category: str, description: str | None = None,
