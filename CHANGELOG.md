@@ -170,6 +170,9 @@ pelo bot ou importando extrato, como antes.
 - Contas conectadas redesenhada: a tela fica só com o dia a dia (bancos, Atualizar agora, conferência de
   faturas); ajustes de cada banco (renomear, automático, ligar cartão, fechamento, desconectar) atrás de
   "Ajustes"; chave Pluggy, aviso no Telegram, limite e "usar o ID da conexão" em `/bank/settings`.
+- Dias do cartão vindos do banco: o vencimento (o dia mais comum nas últimas faturas) vai para o cartão
+  ligado mesmo sem fechamento informado; com fechamento (do banco, digitado ou calculado), o melhor dia
+  também. Vale para os cartões da mesma fatura (virtual, adicional do mesmo banco).
 - "Conferir com o banco" mudou de Contas conectadas para Cartões: segue o mês da tela e só aparece com
   cartão conectado pelo Open Finance.
 - Admin › Famílias e planos redesenhada: os números do topo viram filtros (Todas, Pedem atenção, Expiradas,

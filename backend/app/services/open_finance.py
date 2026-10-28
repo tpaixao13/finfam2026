@@ -118,20 +118,35 @@ def _auto_card(conn: BankConnection, acc: BankAccount) -> None:
         acc.card_id = cards[0].id
 
 
+def _apply_days(acc: BankAccount, card: CreditCard) -> bool:
+    """Vencimento e melhor dia (= fechamento) do banco no cartão do FinFam. O FinFam guarda "melhor dia <
+    vencimento" no mesmo mês; fecha 28/vence 5 fica só pelo mês da fatura. Sem fechamento, só o vencimento."""
+    close, due = acc.close_day, acc.due_day
+    if close and due and close < due:
+        if (card.best_buy_day, card.due_day) != (close, due):
+            card.best_buy_day, card.due_day = close, due
+            return True
+        return False
+    if due and card.due_day != due and (card.best_buy_day or 0) < due:
+        card.due_day = due
+        return True
+    return False
+
+
 def apply_card_limit(acc: BankAccount) -> bool:
     """Cartão do FinFam ligado ao do banco: limite, vencimento e melhor dia (= fechamento) vêm do
-    banco. O limite vai na conta de crédito quando o cartão divide limite. Devolve True se mudou."""
+    banco. Os dias valem também para os cartões que caem na mesma fatura (virtual, adicional do mesmo
+    banco). O limite vai na conta de crédito quando o cartão divide limite. Devolve True se mudou."""
     if acc.type != 'CREDIT' or not acc.card_id:
         return False
     card = db.session.get(CreditCard, acc.card_id)
     if card is None:
         return False
     changed = False
-    # o FinFam guarda "melhor dia < vencimento" no mesmo mês; fecha 28/vence 5 fica só pelo mês da fatura
-    if acc.close_day and acc.due_day and acc.close_day < acc.due_day and \
-            (card.best_buy_day, card.due_day) != (acc.close_day, acc.due_day):
-        card.best_buy_day, card.due_day = acc.close_day, acc.due_day
-        changed = True
+    for cid in card_family(card.id):
+        sibling = db.session.get(CreditCard, cid)
+        if sibling is not None and (sibling.card_type == 'credit' or sibling.supports_credit):
+            changed = _apply_days(acc, sibling) or changed
     if not acc.credit_limit:
         return changed
     limit = Decimal(str(acc.credit_limit))
@@ -165,9 +180,10 @@ def sync_bills(acc: BankAccount, client: pg.PluggyClient) -> None:
             continue
         bill.due_date, bill.total = due, money(b.get('totalAmount'))
     db.session.flush()
-    latest = acc.bills.order_by(BankBill.due_date.desc()).first()
-    if latest is not None and not acc.due_day:
-        acc.due_day = latest.due_date.day
+    if not acc.due_day:  # o dia que mais se repete nas últimas faturas (fim de semana empurra uma ou outra)
+        days = [b.due_date.day for b in acc.bills.order_by(BankBill.due_date.desc()).limit(6).all()]
+        if days:
+            acc.due_day = max(sorted(set(days)), key=days.count)  # empate: o dia mais cedo
 
 
 def apply_close_day(acc: BankAccount, source: str | None) -> None:
@@ -802,6 +818,7 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
     for acc in conn.accounts.all():
         # cartão: o período conta por FATURA (compra de setembro que vence em outubro entra em "desde outubro")
         sync_bills(acc, client)
+        apply_card_limit(acc)  # o vencimento pode ter vindo agora, pelas faturas
         by_bill = acc.type == 'CREDIT' and bool((acc.close_day and acc.due_day) or acc.bills.count())
         acc_since = since
         if by_bill:

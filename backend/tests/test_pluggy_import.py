@@ -1052,3 +1052,24 @@ def test_apply_uses_bank_category_for_old_imports(client, family, bank, txs):  #
     prev = family.post('/rules/apply', json={'only_others': True, 'dry_run': True}).json()
     assert [(c['to'], c['keyword']) for c in prev['sample']] == [('Alimentação', None)]
     session.remove()
+
+
+def test_bank_days_go_to_linked_card_and_same_bill_cards(client, family, bank, txs, monkeypatch):  # noqa: F811
+    """Vencimento das faturas do banco vai para o cartão ligado e para o virtual do mesmo banco; com o
+    fechamento (digitado), o melhor dia também. Fim de semana numa fatura não muda o dia."""
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    virtual = family.post('/cards', json={'supports_credit': True, 'last_digits': '9034', 'bank': 'Nubank',
+                                          'due_day': 10, 'best_buy_day': 3, 'is_virtual': True}).json()['card']
+    base = date(TODAY.year, TODAY.month, 1)
+    dues = [of.add_months(base, -k).replace(day=14) for k in (1, 2, 3)] + [of.add_months(base, -4).replace(day=16)]
+    monkeypatch.setattr(pg, '_http', (lambda inner: lambda m, p, b=None, k=None: {'results': [
+        {'id': f'b{i}', 'dueDate': f'{d.isoformat()}T03:00:00Z', 'totalAmount': 10.0} for i, d in enumerate(dues)]}
+        if p.startswith('/bills?') else inner(m, p, b, k))(pg._http))
+    _post_item(family)
+    cards = {c['id']: c for c in family.get('/cards?light=true').json()['cards']}
+    assert cards[card['id']]['due_day'] == 14 and cards[virtual['id']]['due_day'] == 14
+    cc_id = next(a['id'] for c in family.get('/pluggy/items').json()['items'] for a in c['accounts'] if a['type'] == 'CREDIT')
+    family.put(f'/pluggy/accounts/{cc_id}/close-day', json={'close_day': 7})
+    cards = {c['id']: c for c in family.get('/cards?light=true').json()['cards']}
+    assert (cards[virtual['id']]['best_buy_day'], cards[virtual['id']]['due_day']) == (7, 14)
+    session.remove()
