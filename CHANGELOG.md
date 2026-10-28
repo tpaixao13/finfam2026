@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.3.0 — calendário de contas a pagar (28/10/2026)
+
+- Contas a pagar ganhou a visão **Calendário** (botão Lista | Calendário, `?ver=calendario`): cada conta no
+  dia em que vence; compras no crédito somadas numa linha "Fatura <banco>" no vencimento do cartão
+  (cartões da mesma conta de crédito juntos). Cores: pago, a pagar, vencida; hoje marcado; totais do mês
+  (pago, a pagar, vencido). Tocar num dia lista as contas dele; tocar na fatura abre a fatura do cartão,
+  na despesa abre a edição. No celular, os dias mostram um ponto colorido.
+- `GET /expenses/calendar?month&year` (`expense_service.calendar`), `components/BillsCalendar.tsx`.
+
 ## 2026.2.2 — tela de entrar em monitor largo (28/10/2026)
 
 - O painel do calendário fica com no máximo 600 px: em telas largas ele não ocupa metade do monitor

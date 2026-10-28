@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func
 
 from app.core.db import db, get_or_404
-from app.core.deps import Ctx, get_ctx
+from app.core.deps import Ctx, Period, get_ctx, get_period
 from app.models import Expense, InstallmentGroup, RecurringGroup
 from app.services import expense_service as svc
 from app.services.categorizer import categorize
@@ -149,6 +149,13 @@ def list_expenses(f: dict = Depends(_filters), page: int = Query(1, ge=1),
 def options(ctx: Ctx = Depends(get_ctx)):
     return {'categories': svc.tenant_categories(ctx.uids), 'banks': svc.tenant_banks(ctx.uids),
             'payment_methods': PAYMENT_METHODS}
+
+
+@router.get('/calendar', summary='Contas do mês pelo dia de vencimento (faturas de cartão somadas)')
+def calendar(period: Period = Depends(get_period), user_id: int | None = None, ctx: Ctx = Depends(get_ctx)):
+    if user_id:
+        ctx.member(user_id)
+    return svc.calendar(ctx.uids, period.year, period.month, _date.today(), user_id)
 
 
 @router.get('/bills', summary='Contas a pagar: em atraso, hoje e próximos dias')

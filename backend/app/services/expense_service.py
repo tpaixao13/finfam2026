@@ -269,6 +269,57 @@ def bills(uids: list, today: _date | None = None, days_ahead: int = 7,
     return groups
 
 
+def calendar(uids: list, year: int, month: int, today: _date | None = None, user_id: int | None = None) -> dict:
+    """Contas do mês pelo dia em que vencem. Compras no crédito viram UMA linha por fatura (cartões que
+    dividem a mesma conta de crédito somam juntos), no dia de vencimento do cartão; o resto, uma linha
+    por despesa. Devolve {days: {"AAAA-MM-DD": [itens]}, totals}."""
+    from app.services.serializers import expense_due_date, expense_status
+    today = today or _date.today()
+    q = Expense.query.filter(Expense.user_id.in_(uids), Expense.year == year, Expense.month == month)
+    if user_id:
+        q = q.filter(Expense.user_id == user_id)
+    days: dict[str, list] = {}
+    bills: dict[tuple, dict] = {}
+    totals = {'total': 0.0, 'paid': 0.0, 'pending': 0.0, 'overdue': 0.0}
+
+    def count(amount: float, status: str) -> None:
+        totals['total'] += amount
+        totals['paid' if status == 'pago' else 'overdue' if status == 'vencida' else 'pending'] += amount
+
+    for e in q.order_by(Expense.day, Expense.id).all():
+        due = expense_due_date(e)
+        amount = float(e.amount)
+        if e.payment_method == CREDIT and e.card_id and e.credit_card is not None:
+            card = e.credit_card
+            key = (('acc', card.account_id) if card.account_id else ('card', card.id), due)
+            bill = bills.get(key)
+            if bill is None:
+                name = card.bank or card.nickname or 'Cartão'
+                bill = bills[key] = {'type': 'invoice', 'card_id': card.id, 'label': f'Fatura {name}',
+                                     'detail': f'•••• {card.last_digits}', 'amount': 0.0, 'count': 0,
+                                     'all_paid': True, 'due': due}
+                days.setdefault(due.isoformat(), []).append(bill)
+            bill['amount'] += amount
+            bill['count'] += 1
+            bill['all_paid'] = bill['all_paid'] and bool(e.paid)
+            continue
+        status = expense_status(e, today)
+        count(amount, status)
+        days.setdefault(due.isoformat(), []).append({
+            'type': 'expense', 'id': e.id, 'label': e.description, 'detail': e.category,
+            'amount': round(amount, 2), 'status': status,
+            'user_name': e.user.name if e.user else None})
+    for bill in bills.values():
+        due = bill.pop('due')
+        status = 'pago' if bill.pop('all_paid') else ('vencida' if due < today else 'pendente')
+        bill['status'], bill['amount'] = status, round(bill['amount'], 2)
+        count(bill['amount'], status)
+    for items in days.values():  # faturas primeiro, depois as maiores
+        items.sort(key=lambda i: (i['type'] != 'invoice', -i['amount']))
+    return {'year': year, 'month': month, 'today': today.isoformat(), 'days': days,
+            'totals': {k: round(v, 2) for k, v in totals.items()}}
+
+
 # ── Apoio ────────────────────────────────────────────────────────────────────
 
 def tenant_categories(uids: list) -> list[str]:

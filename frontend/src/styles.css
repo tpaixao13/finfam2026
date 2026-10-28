@@ -699,3 +699,58 @@ a.insight:hover { background: #e8edf1; }
   .brand-lg img { width: 32px; height: 32px; }
 }
 .auth.auth-admin { grid-template-columns: 1fr; grid-template-rows: 1fr; background: var(--ink); }
+
+/* ── Contas a pagar › Calendário ──────────────────────────────────────── */
+.cal-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.cal-totals { display: flex; gap: 1.5rem; margin: 0; flex-wrap: wrap; }
+.cal-totals dt { font-size: .78rem; color: var(--ink-3); }
+.cal-totals dd { margin: 0; font-weight: 700; color: var(--ink); }
+.cal-totals .t-paid { color: var(--income); }
+.cal-totals .t-overdue { color: var(--expense); }
+.cal { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .8rem; }
+.cal-week, .cal-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cal-week span { font-size: .75rem; font-weight: 600; color: var(--ink-3); text-align: center; padding-bottom: .3rem; }
+.cal-day {
+  position: relative; min-height: 96px; display: flex; flex-direction: column; align-items: stretch; gap: 3px;
+  padding: 6px; border-radius: 8px; border: 1px solid var(--line); background: #fafbfc; font: inherit; text-align: left;
+  cursor: pointer; min-width: 0;
+}
+.cal-day:hover { border-color: var(--line-strong); }
+.cal-day:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.cal-blank { background: transparent; border-color: transparent; cursor: default; }
+.cal-num { font-size: .8rem; font-weight: 600; color: var(--ink-2); }
+.cal-day.is-today .cal-num { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--ink); color: #fff; }
+.cal-day.is-picked { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); background: var(--primary-tint); }
+.cal-day.tone-vencida { background: var(--expense-tint); }
+.cal-day.tone-vencida.is-picked { background: var(--expense-tint); }
+.cal-chip { font-size: .7rem; font-weight: 600; line-height: 1.25; padding: 2px 5px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-chip.s-pago { background: var(--income-tint); color: var(--income); }
+.cal-chip.s-pendente { background: var(--primary-tint); color: var(--primary-ink); }
+.cal-chip.s-vencida { background: var(--expense); color: #fff; }
+.cal-more { font-size: .7rem; color: var(--ink-3); padding-left: 2px; }
+.cal-dot { display: none; }
+.cal-legend { display: flex; gap: 1.1rem; margin-top: .7rem; font-size: .78rem; color: var(--ink-2); }
+.cal-legend span::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: .35rem; }
+.l-paid::before { background: var(--income); } .l-pending::before { background: var(--primary); } .l-overdue::before { background: var(--expense); }
+.cal-list { list-style: none; margin: 0; padding: 0; }
+.cal-list li + li { border-top: 1px solid var(--line); }
+.cal-item { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .8rem;
+  padding: .75rem 1.1rem; background: none; border: 0; font: inherit; text-align: left; cursor: pointer; color: inherit; }
+.cal-item:hover { background: #f7f9fa; }
+.cal-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.cal-item-main { display: grid; min-width: 0; }
+.cal-item-main b, .cal-item-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-item-amount { font-weight: 700; }
+.cal-empty { padding: 1rem 1.1rem; margin: 0; }
+@media (max-width: 700px) {
+  .cal { padding: .5rem; }
+  .cal-week, .cal-days { gap: 3px; }
+  .cal-week span { font-size: .68rem; }
+  .cal-day { min-height: 48px; padding: 4px; align-items: center; }
+  .cal-chip, .cal-more { display: none; }
+  .cal-day .cal-dot { display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); margin-top: auto; }
+  .cal-day.tone-vencida .cal-dot { background: var(--expense); }
+  .cal-day.tone-pago .cal-dot { background: var(--income); }
+  .cal-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .cal-item .badge { grid-column: 1 / -1; justify-self: start; }
+}

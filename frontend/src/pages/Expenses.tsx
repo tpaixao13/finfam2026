@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import { BillsCalendar } from '../components/BillsCalendar'
 import { ExpenseList } from '../components/ExpenseList'
-import { Button, Empty, ErrorBox, Field, IconButton, Input, Money, PageHeader, Panel, Select, Spinner } from '../components/ui'
+import { Button, Empty, ErrorBox, Field, IconButton, Input, Money, PageHeader, Panel, Segmented, Select, Spinner } from '../components/ui'
 import { api } from '../lib/api'
 import { brl, MONTHS } from '../lib/format'
-import { useApi } from '../lib/hooks'
+import { useApi, usePeriod } from '../lib/hooks'
 import { Link, useSearchParams } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
 import type { Expense } from '../lib/types'
@@ -133,8 +134,12 @@ interface Bills {
 export function BillsPage() {
   const { dataVersion } = useSession()
   const act = useAction()
+  const [params, setParams] = useSearchParams()
+  const view = params.get('ver') === 'calendario' ? 'calendario' : 'lista'
+  const { month, year, setPeriod } = usePeriod()
   const [days, setDays] = useState(7)
-  const bills = useApi(() => api.get<Bills>('/expenses/bills', { days_ahead: days }), [days, dataVersion])
+  const bills = useApi(() => view === 'lista' ? api.get<Bills>('/expenses/bills', { days_ahead: days }) : Promise.resolve(null),
+    [days, dataVersion, view])
   const b = bills.data
   const payAll = (items: Expense[]) => act(() => api.post<{ message: string }>('/expenses/pay', { ids: items.map((e) => e.id) }), bills.reload)
 
@@ -148,9 +153,14 @@ export function BillsPage() {
   return (
     <div className="page">
       <PageHeader title="Contas a pagar" subtitle="Pelo vencimento real: compras no crédito vencem no dia da fatura."
-        actions={<Select value={String(days)} onChange={(e) => setDays(Number(e.target.value))} aria-label="Período"
-          options={[{ value: '7', label: 'Próximos 7 dias' }, { value: '15', label: 'Próximos 15 dias' }, { value: '30', label: 'Próximos 30 dias' }]} />} />
-      {bills.error ? <ErrorBox message={bills.error} onRetry={bills.reload} /> : !b ? <Spinner /> : (
+        actions={<>
+          <Segmented ariaLabel="Ver como" value={view} onChange={(v) => setParams({ ver: v === 'lista' ? null : v })}
+            options={[{ value: 'lista', label: 'Lista' }, { value: 'calendario', label: 'Calendário' }]} />
+          {view === 'lista' && <Select value={String(days)} onChange={(e) => setDays(Number(e.target.value))} aria-label="Período"
+            options={[{ value: '7', label: 'Próximos 7 dias' }, { value: '15', label: 'Próximos 15 dias' }, { value: '30', label: 'Próximos 30 dias' }]} />}
+        </>} />
+      {view === 'calendario' ? <BillsCalendar month={month} year={year} onPeriod={setPeriod} />
+        : bills.error ? <ErrorBox message={bills.error} onRetry={bills.reload} /> : !b ? <Spinner /> : (
         <div className="stack-lg">
           {section('Em atraso', b.overdue, b.totals.overdue, 'danger')}
           {section('Vencem hoje', b.today, b.totals.today, 'warning')}

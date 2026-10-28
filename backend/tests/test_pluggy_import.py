@@ -1073,3 +1073,24 @@ def test_bank_days_go_to_linked_card_and_same_bill_cards(client, family, bank, t
     cards = {c['id']: c for c in family.get('/cards?light=true').json()['cards']}
     assert (cards[virtual['id']]['best_buy_day'], cards[virtual['id']]['due_day']) == (7, 14)
     session.remove()
+
+
+def test_bills_calendar_groups_card_invoice(client, family, other_family):
+    card = family.post('/cards', json={'supports_credit': True, 'last_digits': '4821', 'bank': 'Nubank',
+                                       'due_day': 10, 'best_buy_day': 3}).json()['card']
+    m, y = TODAY.month, TODAY.year
+    for desc, amt, method in (('Luz', 120, 'PIX'), ('Mercado', 80, 'Cartão de Crédito'), ('Farmácia', 20, 'Cartão de Crédito')):
+        body = {'description': desc, 'amount': amt, 'category': 'Outros', 'payment_method': method, 'day': 5, 'month': m, 'year': y}
+        if method != 'PIX':
+            body['card_id'] = card['id']
+        family.post('/expenses', json=body)
+    other_family.post('/expenses', json={'description': 'Alheia', 'amount': 999, 'category': 'Outros',
+                                         'payment_method': 'PIX', 'day': 5, 'month': m, 'year': y})
+    r = family.get(f'/expenses/calendar?month={m}&year={y}').json()
+    items = [i for day in r['days'].values() for i in day]
+    assert not any(i['label'] == 'Alheia' for i in items)
+    assert any(i['type'] == 'expense' and i['label'] == 'Luz' for i in items)
+    inv = [i for i in items if i['type'] == 'invoice']
+    assert sum(i['amount'] for i in inv) + sum(i['amount'] for i in items if i['type'] == 'expense') == r['totals']['total']
+    assert all(i['label'] == 'Fatura Nubank' for i in inv)
+    session.remove()
