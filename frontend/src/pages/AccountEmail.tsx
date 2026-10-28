@@ -1,6 +1,6 @@
 // Telas de e-mail da conta: confira seu e-mail, confirmar e-mail (link), esqueci / nova senha.
 import { useEffect, useRef, useState } from 'react'
-import { Button, Field, Input, Spinner } from '../components/ui'
+import { Button, Field, Input, PasswordInput, Spinner } from '../components/ui'
 import { api } from '../lib/api'
 import { useTask } from '../lib/hooks'
 import { Link, navigate, useSearchParams } from '../lib/router'
@@ -30,11 +30,11 @@ export function PasswordFields({ value, onChange, label = 'Senha', autoFocus = f
   return (
     <>
       <Field label={label} hint="Mínimo de 8 caracteres">
-        <Input type="password" autoComplete="new-password" value={value.password} minLength={8} required autoFocus={autoFocus}
+        <PasswordInput autoComplete="new-password" value={value.password} minLength={8} required autoFocus={autoFocus}
           onChange={(e) => set('password', e.target.value)} />
       </Field>
       <Field label={`Confirmar ${label.toLowerCase()}`}>
-        <Input type="password" autoComplete="new-password" value={value.confirm_password} required
+        <PasswordInput autoComplete="new-password" value={value.confirm_password} required
           onChange={(e) => set('confirm_password', e.target.value)} />
       </Field>
     </>

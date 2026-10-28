@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.2.1 — telas de entrar, criar conta e esqueci a senha (28/10/2026)
+
+- Novo visual: à esquerda, o mês da família num calendário com as contas nos dias delas (pago, vence
+  logo, a pagar) e a frase "O mês da família, conta por conta."; à direita, o formulário num cartão.
+  No tablet e no celular, a marca vira uma faixa no topo (antes sumia e a tela ficava vazia).
+- Campo de senha com "Mostrar/Esconder" (entrar, criar conta, nova senha).
+- "Criar conta da família" com os 90 dias de teste explicados. `components/AuthAside.tsx`, `PasswordInput`.
+
 ## 2026.2.0 — Open Finance via Pluggy, e-mail da conta e revisão visual (28/10/2026)
 
 A partir desta versão o FinFam pode receber lançamentos e faturas direto dos bancos,

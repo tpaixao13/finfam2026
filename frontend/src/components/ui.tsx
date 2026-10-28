@@ -56,6 +56,19 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input className="input" {...props} />
 }
 
+/** Senha com botão de mostrar/esconder (ajuda quem digita no celular). */
+export function PasswordInput(props: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  const [shown, setShown] = useState(false)
+  return (
+    <span className="password-input">
+      <input className="input" type={shown ? 'text' : 'password'} {...props} />
+      <button type="button" className="password-toggle" aria-pressed={shown} onClick={() => setShown((v) => !v)}>
+        {shown ? 'Esconder' : 'Mostrar'}
+      </button>
+    </span>
+  )
+}
+
 export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea className="input" {...props} />
 }
