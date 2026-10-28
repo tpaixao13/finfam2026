@@ -10,7 +10,6 @@ import { useAction, useSession } from '../lib/session'
 import type { Card } from '../lib/types'
 import { openConnect } from './open-finance/connect'
 import { ConnectionCard } from './open-finance/ConnectionCard'
-import { InvoiceCheck } from './open-finance/InvoiceCheck'
 import type { Connection, PluggyConfig } from './open-finance/types'
 import { useBusy } from './open-finance/useBusy'
 import { WindowModal } from './open-finance/WindowModal'
@@ -69,7 +68,7 @@ function Connections({ version, onChange }: { version: number; onChange: () => v
           </div>
         )}
       </Panel>
-      {!!list?.length && <InvoiceCheck />}
+      {!!list?.length && <p className="muted small">A conferência das faturas com o banco fica em <Link to="/cards">Cartões</Link>, no mês de cada fatura.</p>}
     </>
   )
 }

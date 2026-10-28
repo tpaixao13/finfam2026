@@ -4,6 +4,7 @@ import { ExpenseList } from '../components/ExpenseList'
 import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton, Input, Modal, Money, MonthNav,
   PageHeader, Panel, Progress, Segmented, Select, Spinner } from '../components/ui'
 import { api } from '../lib/api'
+import { InvoiceCheck } from './open-finance/InvoiceCheck'
 import { brl, parseMoney } from '../lib/format'
 import { useApi, useFormState, usePeriod } from '../lib/hooks'
 import { Link, navigate } from '../lib/router'
@@ -162,6 +163,7 @@ export function CardsPage() {
                 onDelete={() => act(() => api.del<{ message: string }>(`/cards/${c.id}`), data.reload)} />
             ))}
           </div>
+          <InvoiceCheck month={month} year={year} />
           {d.history && (
             <Panel title="Últimos 6 meses por cartão">
               <BarChart ariaLabel="Gastos por cartão nos últimos 6 meses" labels={d.history.labels} series={d.history.series} />

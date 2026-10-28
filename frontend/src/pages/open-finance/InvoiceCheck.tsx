@@ -73,20 +73,23 @@ function CheckCard({ c }: { c: CheckRow }) {
   )
 }
 
-/** Fatura do banco × FinFam, por cartão conectado, no mês escolhido. */
-export function InvoiceCheck() {
+/** Fatura do banco × FinFam, por cartão conectado. Com `month`/`year`, segue o mês da tela (Cartões);
+ *  sem eles, tem o próprio seletor. Sem Open Finance ou sem cartão do banco, não aparece. */
+export function InvoiceCheck({ month, year }: { month?: number; year?: number }) {
   const today = new Date()
-  const [period, setPeriod] = useState({ month: today.getMonth() + 1, year: today.getFullYear() })
-  const data = useApi(() => api.get<{ cards: CheckRow[] }>(`/pluggy/invoice-check?month=${period.month}&year=${period.year}`),
-    [period.month, period.year])
+  const [own, setOwn] = useState({ month: today.getMonth() + 1, year: today.getFullYear() })
+  const period = month && year ? { month, year } : own
+  const data = useApi(() => api.get<{ cards: CheckRow[] }>(`/pluggy/invoice-check?month=${period.month}&year=${period.year}`)
+    .catch(() => ({ cards: [] as CheckRow[] })), [period.month, period.year])
+  if (data.data && data.data.cards.length === 0) return null
   return (
-    <Panel title="Conferir faturas com o banco" actions={
-      <MonthNav month={period.month} year={period.year} onChange={(month, year) => setPeriod({ month, year })} />}>
+    <Panel title="Conferir com o banco" actions={month && year ? undefined :
+      <MonthNav month={own.month} year={own.year} onChange={(m, y) => setOwn({ month: m, year: y })} />}>
       {data.error ? <ErrorBox message={data.error} onRetry={data.reload} /> : !data.data ? <Spinner /> : (
         <ul className="check-rows">{data.data.cards.map((c) => <CheckCard key={c.account_id} c={c} />)}</ul>
       )}
-      <p className="muted small">"Fatura do banco" é o total que o banco informa; sem ele, soma os lançamentos que já chegaram.
-        "Compras batem" quer dizer que cada compra do banco está no FinFam e só o total do banco tem um crédito ou ajuste à parte.</p>
+      <p className="muted small">Compara a fatura de cada cartão conectado pelo Open Finance com o que está no FinFam.
+        "Compras batem": cada compra do banco está no FinFam e só o total do banco tem um crédito ou ajuste à parte.</p>
     </Panel>
   )
 }
