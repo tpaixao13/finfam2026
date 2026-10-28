@@ -167,6 +167,9 @@ pelo bot ou importando extrato, como antes.
   Transporte…); sem parecida, vira categoria nova em português (ex.: Vestuário, Tarifas bancárias).
   Ordem da sugestão: regras → histórico → banco → descrição. `services/bank_categories.py`. Na revisão aparece
   "banco: Supermercado"; "Aplicar às despesas" também recategoriza importados antigos que ficaram em "Outros".
+- Contas conectadas redesenhada: a tela fica só com o dia a dia (bancos, Atualizar agora, conferência de
+  faturas); ajustes de cada banco (renomear, automático, ligar cartão, fechamento, desconectar) atrás de
+  "Ajustes"; chave Pluggy, aviso no Telegram, limite e "usar o ID da conexão" em `/bank/settings`.
 - Tela de login: versão discreta no rodapé (`components/AppVersion.tsx`, lê `GET /health`).
 - 2ª revisão: `/rules/apply` com limite de chamadas; MCP encurta e trata como dado nomes vindos do banco;
   "Saldo nas contas" em `pages/BankBalances.tsx`; prévia de regras com erro visível e valor no celular.

@@ -506,6 +506,7 @@ a.insight:hover { background: #e8edf1; }
 .bank-conn header { align-items: center; flex-wrap: wrap; }
 .bank-name { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; min-width: 0; }
 .bank-name .input { flex: 1 1 12rem; min-width: 0; }
+.bank-settings { display: grid; gap: .75rem; padding-top: .75rem; border-top: 1px solid var(--line); }
 .bank-auto { display: flex; align-items: flex-start; gap: .65rem; padding: .55rem .7rem; border-radius: var(--radius-sm); background: var(--bg); }
 .bank-auto .switch { margin-top: .1rem; }
 .bank-accs { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }

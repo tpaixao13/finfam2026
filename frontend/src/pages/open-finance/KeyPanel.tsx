@@ -3,7 +3,6 @@ import { useState } from 'react'
 import { Badge, Button, Check, ConfirmButton, Field, Input, Panel } from '../../components/ui'
 import { api } from '../../lib/api'
 import { useAction } from '../../lib/session'
-import { ToggleRow } from './ToggleRow'
 import type { PluggyConfig, Saved } from './types'
 import { useBusy } from './useBusy'
 
@@ -49,10 +48,6 @@ function KeyStatus({ cfg, onEdit, onChanged }: { cfg: PluggyConfig; onEdit: () =
           : cfg.public_url_ok ? 'Webhook ainda não configurado: salve a chave de novo.'
             : 'Webhook pendente: o administrador precisa definir PUBLIC_URL (https) no servidor.'}
       </p>
-      <ToggleRow label="Avisar no Telegram quando chegar algo do banco" title="Avisar no Telegram" checked={cfg.notify}
-        onChange={(v) => act(() => api.put<Saved>('/pluggy/notify', { notify: v }), onChanged)}>
-        quando chegar algo do banco (precisa ter o Telegram ligado em Telegram e IA).
-      </ToggleRow>
       <div className="row gap">
         <Button variant="ghost" onClick={onEdit}>Trocar chave</Button>
         <ConfirmButton label="Remover chave Pluggy" text="Remover chave"
