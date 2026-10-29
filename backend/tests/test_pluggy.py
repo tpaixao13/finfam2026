@@ -175,3 +175,89 @@ def test_client_caches_api_key_and_renews_on_401(monkeypatch):
     assert [p for p, _ in calls].count('/auth') == 2 and calls[-1] == ('/items', 'k2')
     pg.forget(CID)
     assert CID not in pg._keys
+
+
+def _member(client, family, name='Greyce', email='g@test.com'):
+    session.get(Tenant, family.tenant['id']).plan = 'anual'
+    session.commit()
+    session.remove()
+    family.post('/family/members', json={'name': name, 'email': email, 'password': 'senha-greyce',
+                                         'confirm_password': 'senha-greyce'})
+    g = Family.__new__(Family)
+    g.client = client
+    g.headers = {'Authorization': 'Bearer ' + client.post(f'{API}/auth/login', json={
+        'email': email, 'password': 'senha-greyce'}).json()['access_token']}
+    return g
+
+
+def test_family_shares_one_key(client, family, other_family, fake_pluggy):
+    from app.core.security import decrypt_field
+    _enable(client, family)
+    g = _member(client, family)
+    assert g.get('/pluggy/config').json()['family_key'] is None
+    assert g.post('/pluggy/config/family', json={'consent': True}).status_code == 404  # ninguém cadastrou
+    assert _save(family).status_code == 200
+    offer = g.get('/pluggy/config').json()
+    assert offer['configured'] is False and offer['family_key']['owner_name'] == 'Tiago'
+    assert CID not in str(offer) and 'segredo' not in str(offer)
+    assert g.post('/pluggy/config/family', json={'consent': False}).status_code == 422
+    hooks = sum(1 for c in fake_pluggy if c[1] == '/webhooks')
+    r = g.post('/pluggy/config/family', json={'consent': True})
+    assert r.status_code == 200, r.text
+    out = r.json()['config']
+    assert out['configured'] and out['shared_from_name'] == 'Tiago' and out['webhook']  # avisos pela chave do Tiago
+    assert sum(1 for c in fake_pluggy if c[1] == '/webhooks') == hooks  # sem webhook novo
+    assert family.get('/pluggy/config').json()['shared_with'] == ['Greyce']
+    assert g.post('/pluggy/config/family', json={'consent': True}).status_code == 409  # já tem
+    # outra família não enxerga nem usa a chave
+    _enable(client, other_family)
+    assert other_family.get('/pluggy/config').json()['family_key'] is None
+    assert other_family.post('/pluggy/config/family', json={'consent': True}).status_code == 404
+
+    # Tiago troca o segredo (mesma aplicação): a cópia da Greyce acompanha
+    r = _save(family, secret='segredo-novo-456')
+    assert 'pessoa(s) da família' in r.json()['message']
+    copy = PluggyConfig.query.filter(PluggyConfig.shared_from.isnot(None)).one()
+    assert decrypt_field(copy.client_secret) == 'segredo-novo-456'
+    session.remove()
+
+    # Tiago remove a chave: a Greyce continua, agora como dona da chave (com webhook)
+    assert family.delete('/pluggy/config').status_code == 200
+    mine = g.get('/pluggy/config').json()
+    assert mine['configured'] and mine['shared_from_name'] is None and mine['webhook']
+    session.remove()
+
+
+def test_webhook_of_family_key_reaches_member_bank(client, family, fake_pluggy):
+    from app.core.security import decrypt_field
+    from app.models import BankConnection
+    _enable(client, family)
+    g = _member(client, family)
+    _save(family)
+    g.post('/pluggy/config/family', json={'consent': True})
+    greyce = PluggyConfig.query.filter(PluggyConfig.shared_from.isnot(None)).one().user_id
+    session.add(BankConnection(user_id=greyce, item_id='item-da-greyce', status='UPDATED'))
+    session.commit()
+    cfg = PluggyConfig.query.filter_by(shared_from=None).one()
+    token, secret = cfg.hook_token, decrypt_field(cfg.hook_secret)
+    session.remove()
+    _hook(client, token, secret, body={'event': 'item/error', 'itemId': 'item-da-greyce', 'error': {'message': 'Senha'}})
+    assert BankConnection.query.filter_by(item_id='item-da-greyce').one().status == 'LOGIN_ERROR'
+    session.remove()
+
+
+def test_removing_member_hands_key_over_and_copy_cannot_take_dashboard_items(client, family, fake_pluggy):
+    _enable(client, family)
+    g = _member(client, family)
+    family.post('/family/members', json={'name': 'Bia', 'email': 'b@test.com', 'password': 'senha-greyce',
+                                         'confirm_password': 'senha-greyce'})
+    assert _save(g, cid=CID2).status_code == 200  # a chave da família é da Greyce
+    family_cfg = family.get('/pluggy/config').json()
+    assert family_cfg['family_key']['owner_name'] == 'Greyce'
+    assert family.post('/pluggy/config/family', json={'consent': True}).status_code == 200
+    greyce_id = PluggyConfig.query.filter_by(shared_from=None).one().user_id
+    session.remove()
+    assert family.delete(f'/family/members/{greyce_id}').status_code == 200
+    mine = family.get('/pluggy/config').json()
+    assert mine['configured'] and mine['shared_from_name'] is None and mine['webhook']  # o Tiago herdou
+    session.remove()

@@ -264,19 +264,25 @@ def goal_notices(uids: list[int], today: date) -> list[str]:
 
 # ── disparos ─────────────────────────────────────────────────────────────────
 
-def _send(chats: list[str], message: str) -> int:
+def _send(chats: list[str], message: str, tenant: Tenant | None = None) -> int:
+    """Envia a cada conversa. Se o grupo da família não aceita mais (bot removido), desliga o grupo
+    e manda no privado de cada pessoa."""
     sent = 0
     for chat in chats:
         ok, err = tg.send_message(settings.telegram_bot_token, chat, message)
         sent += ok
         if not ok:
             log.warning('Aviso do bot não foi entregue: %s', err)
+            if tenant is not None and tg.drop_dead_group(tenant, chat, err):
+                uids = [u.id for u in User.query.filter_by(tenant_id=tenant.id).all()]
+                sent += _send(tg.linked_chats(uids), message)
     return sent
 
 
 def _family(tenant: Tenant) -> tuple[list[int], list[str]]:
+    """Membros e conversas que recebem os avisos da família (o grupo, se a família conectou um)."""
     uids = [u.id for u in User.query.filter_by(tenant_id=tenant.id).all()]
-    return uids, tg.linked_chats(uids)
+    return uids, tg.family_chats(tenant, uids)
 
 
 def _claim_week(tenant: Tenant, today: date) -> bool:
@@ -300,7 +306,7 @@ def run_weekly(now: datetime) -> int:
         uids, chats = _family(tenant)
         if not chats or not _claim_week(tenant, now.date()):
             continue
-        sent += _send(chats, week_text(week_report(uids, now.date())))
+        sent += _send(chats, week_text(week_report(uids, now.date())), tenant)
     return sent
 
 
@@ -318,7 +324,7 @@ def run_goal_alerts(now: datetime) -> int:
         notes = goal_notices(uids, now.date())
         db.session.commit()  # grava o nível avisado antes de enviar (não repete se o envio cair no meio)
         if notes:
-            sent += _send(chats, '🎯 <b>Metas</b>\n\n' + '\n'.join(notes))
+            sent += _send(chats, '🎯 <b>Metas</b>\n\n' + '\n'.join(notes), tenant)
     return sent
 
 

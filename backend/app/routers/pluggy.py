@@ -59,8 +59,60 @@ def _mask(client_id: str) -> str:
     return f'{client_id[:8]}-••••-{client_id[-4:]}' if client_id else ''
 
 
+def _family_key(ctx: Ctx) -> PluggyConfig | None:
+    """A chave original (não cópia) de outra pessoa da família — a mais antiga, sem erro de preferência."""
+    others = [u.id for u in ctx.members if u.id != ctx.user.id]
+    if not others:
+        return None
+    return (PluggyConfig.query.filter(PluggyConfig.user_id.in_(others), PluggyConfig.shared_from.is_(None))
+            .order_by((PluggyConfig.status != 'ok'), PluggyConfig.id).first())
+
+
+def _name(user_id: int | None) -> str | None:
+    user = db.session.get(User, user_id) if user_id else None
+    return user.name if user else None
+
+
+def _family_ids(user_id: int) -> list[int]:
+    user = db.session.get(User, user_id)
+    if user is None or not user.tenant_id:
+        return [user_id]
+    return [u.id for u in User.query.filter_by(tenant_id=user.tenant_id).all()]
+
+
+def _copies(cfg: PluggyConfig) -> list[PluggyConfig]:
+    """Quem da MESMA família usa a cópia desta chave (mesma aplicação Pluggy)."""
+    return (PluggyConfig.query.filter(PluggyConfig.shared_from == cfg.user_id, PluggyConfig.client_id == cfg.client_id,
+                                      PluggyConfig.user_id.in_(_family_ids(cfg.user_id)))
+            .order_by(PluggyConfig.id).all())
+
+
+def release_key(user_id: int) -> None:
+    """A pessoa vai sair da família: quem usa a chave dela continua com ela (e com o webhook)."""
+    cfg = PluggyConfig.query.filter_by(user_id=user_id).first()
+    if cfg is None:
+        return
+    if cfg.shared_from is None:
+        try:
+            _hand_over(cfg)
+            _drop_webhook(cfg)
+        except Exception as exc:  # a Pluggy fora do ar não impede remover a pessoa
+            log.warning('Passar a chave Pluggy adiante falhou: %s', exc)
+    db.session.delete(cfg)
+
+
+def _hook_owner(cfg: PluggyConfig) -> PluggyConfig:
+    """De onde vêm os avisos (webhook): a própria chave, ou a original quando é uma cópia."""
+    if cfg.shared_from and cfg.shared_from in _family_ids(cfg.user_id):
+        source = PluggyConfig.query.filter_by(user_id=cfg.shared_from).first()
+        if source is not None:
+            return source
+    return cfg
+
+
 def _out(ctx: Ctx, cfg: PluggyConfig | None) -> dict:
     tenant = ctx.tenant
+    family = _family_key(ctx) if cfg is None else None
     return {
         'available': bool(tenant and tenant.open_finance_enabled),
         'max_items': tenant.open_finance_max_items if tenant else None,
@@ -68,7 +120,11 @@ def _out(ctx: Ctx, cfg: PluggyConfig | None) -> dict:
         'client_id_masked': _mask(cfg.client_id) if cfg else '',
         'status': cfg.status if cfg else None,
         'last_error': cfg.last_error if cfg else None,
-        'webhook': bool(cfg and cfg.webhook_id),
+        'webhook': bool(cfg and _hook_owner(cfg).webhook_id),
+        'shared_from_name': _name(cfg.shared_from) if cfg else None,   # usando a chave dessa pessoa
+        'shared_with': [_name(c.user_id) for c in _copies(cfg)] if cfg and not cfg.shared_from else [],
+        'family_key': ({'owner_name': _name(family.user_id), 'client_id_masked': _mask(family.client_id)}
+                       if family else None),
         'public_url_ok': settings.public_url.startswith('https://'),
         'include_sandbox': settings.pluggy_include_sandbox,
         'connections': BankConnection.query.filter_by(user_id=ctx.user.id).count() if cfg else 0,
@@ -111,6 +167,41 @@ def _drop_connections(cfg: PluggyConfig) -> None:
         db.session.delete(conn)
 
 
+def _create_webhook(cfg: PluggyConfig, client: pg.PluggyClient) -> str:
+    """Cria o webhook da chave na conta Pluggy. Devolve o trecho da mensagem para a pessoa."""
+    url = webhook_url(cfg)
+    if not url:
+        return ' O webhook não foi criado: o administrador precisa definir PUBLIC_URL (https) no servidor.'
+    try:
+        cfg.webhook_id = client.create_webhook(url, decrypt_field(cfg.hook_secret))
+        return ' Aviso de novidades (webhook) configurado na sua conta Pluggy.'
+    except pg.PluggyError as exc:
+        cfg.status, cfg.last_error = 'error', f'Webhook: {exc}'
+        return ' Mas não consegui criar o webhook: a importação automática fica pendente.'
+
+
+def _hand_over(cfg: PluggyConfig) -> None:
+    """A chave original vai sair (removida ou trocada por outra aplicação): quem usava a cópia continua
+    com ela — a primeira cópia vira a original e ganha o webhook; as outras passam a apontar para ela."""
+    copies = _copies(cfg)
+    if not copies:
+        return
+    heir, rest = copies[0], copies[1:]
+    heir.shared_from = None
+    for c in rest:
+        c.shared_from = heir.user_id
+    heir.status, heir.last_error = 'ok', None
+    _create_webhook(heir, pg.PluggyClient(heir.client_id, decrypt_field(heir.client_secret)))
+
+
+def _update_copies(cfg: PluggyConfig, secret: str) -> int:
+    """Segredo novo da mesma aplicação: as cópias da família passam a usar o novo."""
+    copies = _copies(cfg)
+    for c in copies:
+        c.client_secret, c.status, c.last_error = encrypt_field(secret), 'ok', None
+    return len(copies)
+
+
 @router.put('/config', summary='Salva e testa minha chave Pluggy; cria o webhook na minha conta Pluggy')
 def save_config(body: ConfigIn, ctx: Ctx = Depends(get_ctx_session)):
     _enabled_tenant(ctx)
@@ -128,6 +219,7 @@ def save_config(body: ConfigIn, ctx: Ctx = Depends(get_ctx_session)):
     except pg.PluggyError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+    updated = 0
     if cfg is None:
         cfg = PluggyConfig(user_id=ctx.user.id, hook_token=secrets.token_urlsafe(24),
                            hook_secret=encrypt_field(secrets.token_urlsafe(32)), client_id=client_id,
@@ -136,25 +228,53 @@ def save_config(body: ConfigIn, ctx: Ctx = Depends(get_ctx_session)):
     else:
         if cfg.client_id != client_id:
             _drop_connections(cfg)  # os bancos eram da outra aplicação Pluggy
+            if not cfg.shared_from:
+                _hand_over(cfg)  # quem usava a chave antiga da família continua com ela
+        else:
+            updated = 0 if cfg.shared_from else _update_copies(cfg, secret)
         _drop_webhook(cfg)  # credencial nova → webhook e segredo novos
         pg.forget(cfg.client_id)
         cfg.client_id, cfg.client_secret = client_id, encrypt_field(secret)
         cfg.hook_secret = encrypt_field(secrets.token_urlsafe(32))
+    cfg.shared_from = None  # chave digitada pela própria pessoa: é dela
     cfg.consent_at, cfg.status, cfg.last_error = utcnow(), 'ok', None
 
-    message = 'Chave Pluggy aceita!'
-    url = webhook_url(cfg)
-    if url:
-        try:
-            cfg.webhook_id = client.create_webhook(url, decrypt_field(cfg.hook_secret))
-            message += ' Aviso de novidades (webhook) configurado na sua conta Pluggy.'
-        except pg.PluggyError as exc:
-            cfg.status, cfg.last_error = 'error', f'Webhook: {exc}'
-            message += ' Mas não consegui criar o webhook: a importação automática fica pendente.'
-    else:
-        message += ' O webhook não foi criado: o administrador precisa definir PUBLIC_URL (https) no servidor.'
+    message = 'Chave Pluggy aceita!' + _create_webhook(cfg, client)
+    if updated:
+        message += f' Atualizada também para {updated} pessoa(s) da família que usa(m) esta chave.'
     db.session.commit()
     return {'message': message, 'config': _out(ctx, cfg)}
+
+
+class FamilyKeyIn(BaseModel):
+    consent: bool = Field(description='Concorda em guardar os extratos importados (LGPD)')
+
+
+@router.post('/config/family', summary='Usa a chave Pluggy que outra pessoa da família já cadastrou')
+def use_family_key(body: FamilyKeyIn, ctx: Ctx = Depends(get_ctx_session)):
+    """Copia a chave (o segredo continua escondido de todos). Os bancos continuam por pessoa: cada um
+    conecta os seus e só vê os seus."""
+    _enabled_tenant(ctx)
+    if not body.consent:
+        raise HTTPException(status_code=422, detail='Consentimento: é preciso concordar para usar o Open Finance.')
+    if PluggyConfig.query.filter_by(user_id=ctx.user.id).first() is not None:
+        raise HTTPException(status_code=409, detail='Você já tem uma chave Pluggy. Remova a sua para usar a da família.')
+    source = _family_key(ctx)
+    if source is None:
+        raise HTTPException(status_code=404, detail='Ninguém da família cadastrou uma chave Pluggy ainda.')
+    secret = decrypt_field(source.client_secret)
+    try:
+        pg.PluggyClient(source.client_id, secret).api_key()  # confere que a chave ainda vale
+    except pg.PluggyError as exc:
+        raise HTTPException(status_code=422, detail=f'A chave da família não está funcionando: {exc}')
+    cfg = PluggyConfig(user_id=ctx.user.id, shared_from=source.user_id, client_id=source.client_id,
+                       client_secret=encrypt_field(secret), hook_token=secrets.token_urlsafe(24),
+                       hook_secret=encrypt_field(secrets.token_urlsafe(32)), consent_at=utcnow())
+    db.session.add(cfg)
+    db.session.commit()
+    owner = _name(source.user_id) or 'outra pessoa'
+    return {'message': f'Pronto! Você está usando a chave Pluggy da família (de {owner}). Agora conecte os seus bancos.',
+            'config': _out(ctx, cfg)}
 
 
 @router.delete('/config', summary='Remove minha chave Pluggy (e o webhook na minha conta Pluggy)')
@@ -162,8 +282,10 @@ def delete_config(ctx: Ctx = Depends(get_ctx_session)):
     cfg = PluggyConfig.query.filter_by(user_id=ctx.user.id).first()
     if cfg:
         _drop_connections(cfg)
-        _drop_webhook(cfg)
-        pg.forget(cfg.client_id)
+        if cfg.shared_from is None:
+            _hand_over(cfg)  # quem usa a chave da família continua usando
+            _drop_webhook(cfg)
+            pg.forget(cfg.client_id)
         db.session.delete(cfg)
         db.session.commit()
     return {'message': 'Chave Pluggy removida.', 'config': _out(ctx, None)}
@@ -289,7 +411,7 @@ class ItemIn(BaseModel):
 
 @router.post('/items', summary='Registra o banco que acabou de ser conectado no Pluggy Connect')
 def add_item(body: ItemIn, ctx: Ctx = Depends(get_ctx_session)):
-    _cfg, client = _client(ctx)
+    cfg, client = _client(ctx)
     conn = BankConnection.query.filter_by(item_id=body.item_id).first()
     if conn is not None and conn.user_id != ctx.user.id:
         raise HTTPException(status_code=404, detail='Banco não encontrado na sua conta Pluggy.')
@@ -300,6 +422,8 @@ def add_item(body: ItemIn, ctx: Ctx = Depends(get_ctx_session)):
     owner = str(item.get('clientUserId') or '')
     if owner.isdigit() and owner != str(ctx.user.id):
         raise HTTPException(status_code=404, detail='Banco não encontrado na sua conta Pluggy.')
+    if cfg.shared_from and owner != str(ctx.user.id):  # chave da família: só o banco que VOCÊ conectou pelo FinFam
+        raise HTTPException(status_code=404, detail='Com a chave da família, conecte o banco pelo botão Conectar banco.')
     created = conn is None
     if created:
         _check_limit(ctx)
@@ -694,14 +818,27 @@ async def webhook(hook_token: str, request: Request):
     if tenant is None or not tenant.open_finance_enabled:
         return {'ok': True, 'ignored': 'open_finance_disabled'}  # 2XX: a Pluggy não fica reenviando
     log.info('Webhook Pluggy de user %s: %s', cfg.user_id, str(event)[:60])
-    if _item_event(cfg.user_id, str(event or ''), str(payload.get('itemId') or ''), payload.get('error')):
-        of.schedule_sync(cfg.user_id)  # relê já (lança sozinho se a conexão estiver no automático)
+    owner = _item_owner(cfg, str(payload.get('itemId') or ''))
+    if owner and _item_event(owner, str(event or ''), str(payload.get('itemId') or ''), payload.get('error')):
+        of.schedule_sync(owner)  # relê já (lança sozinho se a conexão estiver no automático)
     # etapa 3: enfileirar a importação dos lançamentos (transactions/*)
     return {'ok': True}
 
 
 _EVENT_STATUS = {'item/error': 'LOGIN_ERROR', 'item/waiting_user_input': 'WAITING_USER_INPUT',
                  'item/waiting_user_action': 'WAITING_USER_ACTION', 'item/login_succeeded': 'UPDATING'}
+
+
+def _item_owner(cfg: PluggyConfig, item_id: str) -> int | None:
+    """Dono do banco do aviso: quem tem a chave do webhook ou quem usa a cópia dela (mesma aplicação)."""
+    if not item_id:
+        return None
+    conn = BankConnection.query.filter_by(item_id=item_id[:64]).first()
+    if conn is None:
+        return None
+    if conn.user_id == cfg.user_id:
+        return conn.user_id
+    return conn.user_id if any(c.user_id == conn.user_id for c in _copies(cfg)) else None
 
 
 def _item_event(user_id: int, event: str, item_id: str, error) -> bool:

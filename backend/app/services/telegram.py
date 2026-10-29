@@ -59,9 +59,33 @@ def linked_chats(user_ids: list[int]) -> list[str]:
     return [link.chat_id for link in TelegramLink.query.filter(TelegramLink.user_id.in_(user_ids)).all()]
 
 
+def family_chats(tenant: Tenant, user_ids: list[int]) -> list[str]:
+    """Para onde vão os avisos da FAMÍLIA pelo bot central: o grupo da família, se houver
+    (aí ninguém recebe no privado), senão a conversa de cada pessoa."""
+    if not settings.telegram_bot_token:
+        return []
+    if tenant.telegram_group_chat:
+        return [tenant.telegram_group_chat]
+    return linked_chats(user_ids)
+
+
+def drop_dead_group(tenant: Tenant, chat_id: str, error: str) -> bool:
+    """O bot saiu do grupo (ou o grupo sumiu/mudou de id): desliga o grupo e os avisos voltam
+    para o privado de cada pessoa. True se desligou."""
+    if not tenant.telegram_group_chat or str(chat_id) != tenant.telegram_group_chat:
+        return False
+    gone = error.startswith('Telegram API 403') or (error.startswith('Telegram API 400') and (
+        'chat not found' in error or 'upgraded to a supergroup' in error or 'kicked' in error))
+    if gone:
+        log.warning('Grupo do Telegram da família %s não aceita mais mensagens: desligado (%s)', tenant.id, error[:120])
+        tenant.telegram_group_chat = tenant.telegram_group_title = None
+        db.session.commit()
+    return gone
+
+
 def reminder_targets(tenant: Tenant, user_ids: list[int]) -> list[tuple[str, str]]:
     """[(token do bot, chat_id)] para onde vai o lembrete desta família."""
-    chats = linked_chats(user_ids)
+    chats = family_chats(tenant, user_ids)
     if chats:
         return [(settings.telegram_bot_token, c) for c in chats]
     if tenant.telegram_token and tenant.telegram_chat_id:
@@ -127,7 +151,7 @@ def _tenant_message(tenant: Tenant, now: datetime) -> str | None:
             msg = f'{msg}\n\n{alert_msg}' if msg else alert_msg
     except Exception as exc:
         log.warning('Alertas do tenant %s falharam: %s', tenant.id, exc)
-    if settings.telegram_bot_token and tenant.telegram_alerts is not False and linked_chats([u.id for u in users]):
+    if settings.telegram_bot_token and tenant.telegram_alerts is not False and family_chats(tenant, [u.id for u in users]):
         try:  # fatura que fecha amanhã / vence em 2 dias (só no bot central: lá tem /contas e /agenda)
             from app.services.bot_notices import card_notices
             cards = card_notices([u.id for u in users], now.date())
@@ -179,6 +203,9 @@ def run_daily_reminders(now: datetime | None = None) -> int:
                     delivered += 1
                 else:
                     log.warning('Telegram tenant %s: %s', tenant.id, err)
+                    if drop_dead_group(tenant, chat_id, err):  # manda no privado de cada um ainda hoje
+                        for chat in linked_chats(uids):
+                            delivered += send_message(token, chat, msg)[0]
             sent += delivered
             if not delivered:  # tenta de novo no próximo minuto/dia
                 db.session.execute(text('UPDATE tenants SET telegram_last_sent = NULL WHERE id = :id'),

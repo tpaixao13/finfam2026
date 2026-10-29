@@ -10,6 +10,7 @@ interface TelegramData {
   members: { id: number; name: string; linked: boolean }[]
   enabled: boolean; hour: number; minute: number; configured: boolean; legacy_configured: boolean
   alerts: boolean
+  group: { connected: boolean; title: string | null; can_manage: boolean }
 }
 interface AiProvider { id: string; label: string; default_model: string; key_url: string }
 interface AiData { configured: boolean; enabled: boolean; provider: string | null; model: string | null; base_url: string | null; key_masked: string; providers: AiProvider[]; can_edit: boolean }
@@ -28,6 +29,7 @@ export function TelegramPage() {
         <div className="grid-2">
           <div className="stack-lg">
             <TelegramLinkPanel d={d} reload={data.reload} />
+            <GroupPanel d={d} reload={data.reload} />
             <ReminderPanel d={d} reload={data.reload} />
             <BotCommandsPanel />
           </div>
@@ -59,6 +61,43 @@ function BotCommandsPanel() {
         <li>Com a IA ligada, é só escrever: <i>gastei 87,50 no mercado no cartão Inter em 3x</i></li>
       </ul>
       <p className="muted">Nada é lançado sem você confirmar no ✅. Cada pessoa conecta o próprio Telegram e vê só os dados da família dela.</p>
+    </Panel>
+  )
+}
+
+function GroupPanel({ d, reload }: { d: TelegramData; reload: () => void }) {
+  const act = useAction()
+  const [link, setLink] = useState<{ url: string } | null>(null)
+  if (!d.bot_configured) return null
+  return (
+    <Panel title="Grupo da família">
+      <div className="stack">
+        {d.group.connected ? (
+          <>
+            <p><Badge tone="success">Conectado</Badge>{d.group.title && <> ao grupo <b>{d.group.title}</b></>}</p>
+            <p className="muted">Os avisos da família (contas do dia, faturas, resumo da semana e metas) chegam só no grupo,
+              e não mais no privado de cada pessoa. Os avisos do banco de cada um continuam no privado dele.</p>
+            {d.group.can_manage && <div><ConfirmButton label="Desconectar o grupo" text="Desconectar grupo" confirmLabel="Voltar para o privado de cada um"
+              icon="trash" onConfirm={() => act(() => api.del<Done>('/telegram/group'), () => { setLink(null); reload() })} /></div>}
+          </>
+        ) : link ? (
+          <>
+            <a className="btn btn-primary" href={link.url} target="_blank" rel="noreferrer">Abrir o Telegram e escolher o grupo</a>
+            <p className="muted">Escolha o grupo da família e confirme. O link vale 15 minutos e só funciona uma vez. Depois,{' '}
+              <button type="button" className="link-button" onClick={reload}>atualize esta página</button>.</p>
+          </>
+        ) : (
+          <>
+            <p className="muted">Prefere receber os avisos num grupo do Telegram com a família toda? Conecte o grupo e cada
+              pessoa deixa de receber os mesmos avisos no privado. Consultar e lançar continua no privado.</p>
+            {d.group.can_manage
+              ? <div><Button variant="ghost" icon="telegram"
+                  onClick={() => act(() => api.post<{ url: string; message?: string }>('/telegram/group-code'), setLink)}>
+                  Conectar um grupo</Button></div>
+              : <p className="muted small">Só quem criou a família pode conectar o grupo.</p>}
+          </>
+        )}
+      </div>
     </Panel>
   )
 }

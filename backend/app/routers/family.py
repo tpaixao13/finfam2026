@@ -144,6 +144,8 @@ def delete_member(user_id: int, ctx: Ctx = Depends(get_ctx_session)):
     _require_owner(ctx, 'remover pessoas')
     user = get_or_404(User.query.filter_by(id=user_id, tenant_id=tenant.id), 'Membro não encontrado.')
     name = user.name
+    from app.routers.pluggy import release_key
+    release_key(user.id)  # quem usa a chave Pluggy dela continua usando
     db.session.delete(user)
     db.session.commit()
     return {'message': f'{name} removido do grupo.'}

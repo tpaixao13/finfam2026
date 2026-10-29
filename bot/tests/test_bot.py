@@ -151,7 +151,7 @@ def test_unlinked_chat_gets_instructions(bot):
 def test_group_chats_are_refused(bot, family):
     b, tg = bot
     b.handle(_msg(-500, '/contas', 'group'))
-    assert 'conversa privada' in tg.last['text']
+    assert 'no privado' in tg.last['text']
 
 
 def test_full_flow(bot, api_url, family):
@@ -632,3 +632,19 @@ def test_pick_person():
     assert pick_person('uber 20 para a greyce ontem', members) == (members[1], 'uber 20 ontem')
     assert pick_person('conta de luz 100', members) == (None, 'conta de luz 100')
     assert pick_person('mercado 20 pra Greyce', members[:1]) == (None, 'mercado 20 pra Greyce')
+
+
+def test_group_link_and_group_refuses_finance(bot, api_url, family):
+    b, tg = bot
+    code = _call(api_url, 'POST', '/telegram/group-code', token=family)['code']
+    group = {'update_id': 5, 'message': {'chat': {'id': -100123, 'type': 'supergroup', 'title': 'Família Paixão'},
+                                         'from': {'id': 1}, 'text': f'/start@TesteBot {code}'}}
+    b.handle(group)
+    assert 'Grupo conectado' in tg.last['text'] and tg.last['chat'] == -100123
+    b.handle(group)  # uso único
+    assert 'inválido' in tg.last['text']
+    status = _call(api_url, 'GET', '/telegram/status', token=family)
+    assert status['group']['connected'] and status['group']['title'] == 'Família Paixão'
+    b.handle(_msg(-100123, '/contas', chat_type='group'))
+    assert 'só mando os avisos' in tg.last['text']
+    _call(api_url, 'DELETE', '/telegram/group', token=family)

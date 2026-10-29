@@ -1,4 +1,4 @@
-// Etapa 1 do Open Finance: a chave da conta Pluggy de cada pessoa.
+// Etapa 1 do Open Finance: a chave Pluggy. Uma por família basta: quem cadastra primeiro, os outros usam a mesma.
 import { useState } from 'react'
 import { Badge, Button, Check, ConfirmButton, Field, Input, Panel } from '../../components/ui'
 import { api } from '../../lib/api'
@@ -24,8 +24,7 @@ function KeyForm({ cfg, onSaved, onCancel }: { cfg: PluggyConfig; onSaved: () =>
         <Input type="password" value={f.client_secret} onChange={(e) => setF({ ...f, client_secret: e.target.value })}
           required autoComplete="off" />
       </Field>
-      <Check checked={f.consent} onChange={(v) => setF({ ...f, consent: v })}
-        label="Concordo que o FinFam guarde os extratos e faturas importados dos bancos que eu conectar, e que apague tudo ao desconectar." />
+      <Check checked={f.consent} onChange={(v) => setF({ ...f, consent: v })} label={CONSENT} />
       <div className="row gap">
         <Button type="submit" busy={busy} disabled={!f.consent}>Salvar e testar</Button>
         {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancelar</Button>}
@@ -34,14 +33,40 @@ function KeyForm({ cfg, onSaved, onCancel }: { cfg: PluggyConfig; onSaved: () =>
   )
 }
 
+const CONSENT = 'Concordo que o FinFam guarde os extratos e faturas importados dos bancos que eu conectar, e que apague tudo ao desconectar.'
+
+function FamilyKeyOffer({ cfg, onSaved, onOwnKey }: { cfg: PluggyConfig; onSaved: () => void; onOwnKey: () => void }) {
+  const act = useAction()
+  const [consent, setConsent] = useState(false)
+  const [busy, run] = useBusy()
+  const fam = cfg.family_key!
+  return (
+    <div className="stack">
+      <p>A família já tem uma chave Pluggy, cadastrada por <b>{fam.owner_name ?? 'outra pessoa'}</b>{' '}
+        <span className="muted">(Client ID {fam.client_id_masked})</span>. Use a mesma: não precisa criar conta na Pluggy.</p>
+      <p className="muted small">Cada pessoa continua vendo só os bancos que ela mesma conectar.</p>
+      <Check checked={consent} onChange={setConsent} label={CONSENT} />
+      <div className="row gap">
+        <Button busy={busy} disabled={!consent}
+          onClick={() => run(() => act(() => api.post<Saved>('/pluggy/config/family', { consent }), onSaved))}>
+          Usar a chave da família</Button>
+        <Button variant="ghost" onClick={onOwnKey}>Cadastrar uma chave própria</Button>
+      </div>
+    </div>
+  )
+}
+
 function KeyStatus({ cfg, onEdit, onChanged }: { cfg: PluggyConfig; onEdit: () => void; onChanged: () => void }) {
   const act = useAction()
+  const sharedWith = cfg.shared_with.filter(Boolean)
   return (
     <div className="stack">
       <p>
         {cfg.status === 'ok' ? <Badge tone="success">Chave aceita</Badge> : <Badge tone="danger">Com problema</Badge>}
         {' '}<span className="muted">Client ID {cfg.client_id_masked}</span>
       </p>
+      {cfg.shared_from_name && <p>Você usa a chave da família, cadastrada por <b>{cfg.shared_from_name}</b>.</p>}
+      {sharedWith.length > 0 && <p className="muted">Também usam esta chave: {sharedWith.join(', ')}. Se você trocar o segredo, muda para todos.</p>}
       {cfg.last_error && <p className="form-error" role="alert">{cfg.last_error}</p>}
       <p className="muted">
         {cfg.webhook ? 'Aviso de novidades (webhook) configurado na sua conta Pluggy.'
@@ -49,8 +74,8 @@ function KeyStatus({ cfg, onEdit, onChanged }: { cfg: PluggyConfig; onEdit: () =
             : 'Webhook pendente: o administrador precisa definir PUBLIC_URL (https) no servidor.'}
       </p>
       <div className="row gap">
-        <Button variant="ghost" onClick={onEdit}>Trocar chave</Button>
-        <ConfirmButton label="Remover chave Pluggy" text="Remover chave"
+        <Button variant="ghost" onClick={onEdit}>{cfg.shared_from_name ? 'Usar uma chave própria' : 'Trocar chave'}</Button>
+        <ConfirmButton label="Remover chave Pluggy" text={cfg.shared_from_name ? 'Parar de usar' : 'Remover chave'}
           confirmLabel={cfg.connections ? `Remover e desconectar ${cfg.connections} banco(s)` : 'Confirmar remoção'}
           onConfirm={() => act(() => api.del<Saved>('/pluggy/config'), onChanged)} />
       </div>
@@ -60,11 +85,13 @@ function KeyStatus({ cfg, onEdit, onChanged }: { cfg: PluggyConfig; onEdit: () =
 
 export function KeyPanel({ cfg, editing, onEdit, onCancel, onChanged }:
   { cfg: PluggyConfig; editing: boolean; onEdit: () => void; onCancel: () => void; onChanged: () => void }) {
+  const offer = !cfg.configured && !editing && cfg.family_key
   return (
-    <Panel title="Sua chave Pluggy">
-      {!cfg.configured || editing
-        ? <KeyForm cfg={cfg} onSaved={onChanged} onCancel={editing ? onCancel : undefined} />
-        : <KeyStatus cfg={cfg} onEdit={onEdit} onChanged={onChanged} />}
+    <Panel title="Chave Pluggy">
+      {offer ? <FamilyKeyOffer cfg={cfg} onSaved={onChanged} onOwnKey={onEdit} />
+        : !cfg.configured || editing
+          ? <KeyForm cfg={cfg} onSaved={onChanged} onCancel={editing ? onCancel : undefined} />
+          : <KeyStatus cfg={cfg} onEdit={onEdit} onChanged={onChanged} />}
     </Panel>
   )
 }
@@ -78,7 +105,9 @@ export function HowTo() {
         <li>Cole os dois aqui e toque em <b>Salvar e testar</b>.</li>
         <li>Depois, toque em <b>Conectar banco</b> e escolha o seu banco.</li>
       </ol>
-      <p className="muted">A chave é <b>sua</b>: cada pessoa da família usa a própria conta Pluggy, e a cobrança (se houver) é feita pela Pluggy na sua conta. O FinFam nunca vê a senha do seu banco.</p>
+      <p className="muted"><b>Uma chave por família basta:</b> quem cadastrar primeiro, os outros tocam em
+        <b> Usar a chave da família</b>. Cada pessoa continua vendo só os bancos que ela conectar. A cobrança (se houver)
+        é feita pela Pluggy na conta de quem criou a aplicação. O FinFam nunca vê a senha do seu banco.</p>
     </Panel>
   )
 }

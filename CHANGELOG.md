@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026.6.0 — uma chave Pluggy para a família e avisos no grupo do Telegram (29/10/2026)
+
+- **Chave Pluggy da família:** quem ainda não tem chave vê "A família já tem uma chave Pluggy, cadastrada por
+  <nome>" e toca em **Usar a chave da família** (com o consentimento). O segredo continua escondido de todos.
+  Os bancos continuam por pessoa: cada um conecta os seus e só vê os seus. Os avisos (webhook) chegam pelo
+  webhook da chave original. Trocar o segredo atualiza quem usa a chave; remover a chave (ou trocar de
+  aplicação) passa a chave para a próxima pessoa que a usa, que ganha o webhook. Quem quiser continua podendo
+  cadastrar uma chave própria. `POST /pluggy/config/family`, `pluggy_configs.shared_from`.
+- **Grupo da família no Telegram:** em Telegram e IA → **Conectar um grupo** (abre o Telegram para escolher o
+  grupo; o bot entra e conecta). Com o grupo, os avisos da família (lembrete diário, faturas, resumo da semana,
+  metas) vão só para o grupo, e não mais para o privado de cada pessoa. Avisos do banco de cada um (o que
+  chegou, conta × saldo) continuam no privado dele. No grupo o bot só avisa: consultar e lançar é no privado.
+  `/telegram/group-code`, `DELETE /telegram/group`; links de pessoa e de grupo não se misturam. Só quem
+  criou a família conecta/desconecta o grupo, e cada pessoa recebe no privado o aviso de que o grupo mudou.
+  Se o bot for tirado do grupo, o grupo é desligado sozinho e os avisos voltam para o privado.
+- Remover uma pessoa da família passa a chave Pluggy dela para quem usava a cópia (com o webhook).
+- Banco: `pluggy_configs.shared_from`, `telegram_link_codes.kind`, `tenants.telegram_group_chat/title`.
+
 ## 2026.5.2 — bot: total e média nos gastos de vários meses (28/10/2026)
 
 - A resposta de "gastos com X nos últimos meses" termina com **Total** e **Média por mês** (todos os meses do

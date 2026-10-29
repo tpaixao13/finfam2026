@@ -376,6 +376,8 @@ def delete_user(user_id: int, _: User = Depends(get_admin)):
         raise HTTPException(status_code=403, detail='Não é possível excluir um administrador.')
     tenant = db.session.get(Tenant, user.tenant_id) if user.tenant_id else None
     name = user.name
+    from app.routers.pluggy import release_key
+    release_key(user.id)  # quem usa a chave Pluggy dela continua usando
     db.session.delete(user)
     db.session.flush()
     if tenant and tenant.users.filter(User.is_admin == False).count() == 0:  # noqa: E712

@@ -72,6 +72,9 @@ class Tenant(Base):
     # avisos automáticos do bot central: resumo de domingo e metas de limite (80%/100%)
     telegram_alerts = Column(Boolean, default=True, server_default='1', nullable=False)
     telegram_weekly_sent = Column(Date, nullable=True)
+    # grupo do Telegram da família: com ele, os avisos da FAMÍLIA vão só para o grupo (não para cada pessoa)
+    telegram_group_chat = Column(String(32), nullable=True)
+    telegram_group_title = Column(Text, nullable=True)
     trial_expires_at = Column(DateTime, nullable=True)
     plan = Column(Text, default='trial', nullable=False)
     extra_members = Column(Integer, default=0, nullable=False)
@@ -193,6 +196,7 @@ class TelegramLinkCode(Base):
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     code_hash = Column(String(64), nullable=False, unique=True)
     expires_at = Column(DateTime, nullable=False)
+    kind = Column(String(8), nullable=False, default='chat', server_default='chat')  # chat (pessoa) | group (família)
 
 
 class AiConfig(Base):
@@ -210,8 +214,10 @@ class AiConfig(Base):
 
 
 class PluggyConfig(Base):
-    """Conta Pluggy de UMA pessoa (cada membro usa a própria chave). O segredo e o
-    segredo do webhook ficam criptografados; `hook_token` identifica a pessoa na URL do webhook."""
+    """Chave Pluggy de uma pessoa. Uma chave por família basta: quem não cadastrou a própria usa uma
+    CÓPIA da chave de quem cadastrou (`shared_from` = id dessa pessoa) — sem webhook próprio, os avisos
+    chegam pelo webhook da chave original. O segredo e o segredo do webhook ficam criptografados;
+    `hook_token` identifica a pessoa na URL do webhook. Cada pessoa continua vendo só os bancos dela."""
     __tablename__ = 'pluggy_configs'
 
     id = Column(Integer, primary_key=True)
@@ -221,7 +227,8 @@ class PluggyConfig(Base):
     hook_token = Column(String(48), nullable=False, unique=True)
     hook_secret = Column(Text, nullable=False)            # encrypt_field(...)
     webhook_id = Column(String(64), nullable=True)
-    notify = Column(Boolean, default=True, nullable=False)  # avisar no Telegram quando chega algo do banco        # id do webhook na conta Pluggy da pessoa
+    notify = Column(Boolean, default=True, nullable=False)  # avisar no Telegram quando chega algo do banco
+    shared_from = Column(Integer, nullable=True, index=True)  # id da pessoa de quem é a chave (cópia); sem FK: não ambíguo
     status = Column(String(20), nullable=False, default='ok')  # ok | error
     last_error = Column(Text, nullable=True)
     consent_at = Column(DateTime, nullable=False, default=utcnow)

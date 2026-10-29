@@ -203,3 +203,56 @@ def test_weekly_summary_sunday_evening_once(client, family, monkeypatch):
     r = family.put('/settings/telegram', json={'enabled': False, 'hour': 8, 'minute': 0, 'alerts': True})
     assert r.json()['telegram']['alerts'] is True
     session.remove()
+
+
+# ── grupo da família ─────────────────────────────────────────────────────────
+
+def _BOT():
+    from test_telegram_ai import BOT
+    return BOT
+
+
+def test_family_group_gets_family_notices_instead_of_each_person(client, family, other_family, monkeypatch):
+    _link(client, family, '7101')
+    person_code = family.post('/telegram/link-code').json()['code']
+    # link de pessoa não conecta grupo (e vice-versa)
+    assert client.post(f'{API}/telegram/bot/link-group', headers=_BOT(),
+                       json={'code': person_code, 'chat_id': '-1001', 'title': 'x'}).status_code == 422
+    r = family.post('/telegram/group-code')
+    assert r.status_code == 200 and '?startgroup=' in r.json()['url']
+    group_code = r.json()['code']
+    assert client.post(f'{API}/telegram/bot/link', headers=_BOT(),
+                       json={'code': group_code, 'chat_id': '555'}).status_code == 422
+    group_code = family.post('/telegram/group-code').json()['code']
+    assert client.post(f'{API}/telegram/bot/link-group', json={'code': group_code, 'chat_id': '-1001'}).status_code == 403
+    ok = client.post(f'{API}/telegram/bot/link-group', headers=_BOT(),
+                     json={'code': group_code, 'chat_id': '-1001', 'title': 'Família Paixão'})
+    assert ok.status_code == 200, ok.text
+    assert family.get('/telegram/status').json()['group'] == {'connected': True, 'title': 'Família Paixão', 'can_manage': True}
+    # outra família não toma o mesmo grupo
+    other = other_family.post('/telegram/group-code').json()['code']
+    assert client.post(f'{API}/telegram/bot/link-group', headers=_BOT(),
+                       json={'code': other, 'chat_id': '-1001'}).status_code == 409
+
+    tenant = session.get(Tenant, family.tenant['id'])
+    uids = [family.user['id']]
+    assert tg_service.reminder_targets(tenant, uids) == [(tg_service.settings.telegram_bot_token, '-1001')]
+    sent = []
+    monkeypatch.setattr(tg_service, 'send_message', lambda token, chat, text, buttons=None: (sent.append(chat), (True, ''))[1])
+    assert bn.run_weekly(datetime(2026, 11, 1, 19, 0)) >= 1 and '-1001' in sent and '7101' not in sent
+    session.remove()
+
+    # o bot foi tirado do grupo: o grupo é desligado e o aviso vai para o privado
+    monkeypatch.setattr(tg_service, 'send_message', lambda token, chat, text, buttons=None: (
+        sent.append(chat), (False, 'Telegram API 403: bot was kicked') if chat == '-1001' else (True, ''))[1])
+    sent.clear()
+    tenant = session.get(Tenant, family.tenant['id'])
+    tenant.telegram_weekly_sent = None
+    session.commit()
+    assert bn.run_weekly(datetime(2026, 11, 1, 19, 0)) == 1 and sent == ['-1001', '7101']
+    assert session.get(Tenant, family.tenant['id']).telegram_group_chat is None
+    session.remove()
+    assert family.delete('/telegram/group').json()['telegram']['group']['connected'] is False
+    tenant = session.get(Tenant, family.tenant['id'])
+    assert tg_service.family_chats(tenant, uids) == ['7101']
+    session.remove()

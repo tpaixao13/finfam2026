@@ -108,9 +108,13 @@ class Bot:
     def _message(self, msg: dict) -> None:
         chat = msg.get('chat', {})
         chat_id, text = chat.get('id'), (msg.get('text') or '').strip()
-        if chat.get('type') != 'private':  # finanças só em conversa privada
+        if chat.get('type') != 'private':  # finanças só em conversa privada; no grupo, só os avisos
+            command, _, arg = text.partition(' ')
+            if command.split('@')[0].lower() == '/start' and arg.strip():
+                return self.link_group(chat, arg.strip())
             if text.startswith('/'):
-                self.tg.send(chat_id, 'Por segurança, eu só funciono em conversa privada.')
+                self.tg.send(chat_id, 'Neste grupo eu só mando os avisos da família. '
+                                      'Para consultar e lançar, fale comigo no privado.')
             return
         media = _media_of(msg)
         if media:
@@ -190,6 +194,17 @@ class Bot:
         family = f' (família {h(r["family"])})' if r.get('family') else ''
         self.tg.edit(chat_id, message_id, f'✅ {h(r["message"])}{family}')
         self.tg.send(chat_id, HELP, MENU)
+
+    def link_group(self, chat: dict, code: str) -> None:
+        """Link "Conectar grupo" do site (t.me/<bot>?startgroup=<código>): os avisos da família vêm para cá."""
+        try:
+            r = self.api.post(None, '/telegram/bot/link-group', {'code': code[:64], 'chat_id': str(chat['id']),
+                                                                 'title': (chat.get('title') or '')[:128]})
+        except ApiError as exc:
+            return self.tg.send(chat['id'], f'⚠️ {h(exc.message)}')
+        self.tg.send(chat['id'], f'✅ {h(r["message"])}\n\nOs avisos da família (contas do dia, faturas, resumo da '
+                                 'semana e metas) chegam neste grupo, e não mais no privado de cada um. '
+                                 'Avisos do banco de cada pessoa continuam no privado dela.')
 
     def unlink(self, chat_id: int) -> None:
         self.api.delete(chat_id, '/telegram/link')
