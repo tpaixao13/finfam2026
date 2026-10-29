@@ -85,6 +85,11 @@ def _name(user_id: int | None) -> str | None:
     return user.name if user else None
 
 
+def _owner_name(ctx: Ctx, user_id: int) -> str | None:
+    """Nome de quem é dono do dado, ou None quando é da própria pessoa."""
+    return None if user_id == ctx.user.id else _name(user_id)
+
+
 def _family_ids(user_id: int) -> list[int]:
     user = db.session.get(User, user_id)
     if user is None or not user.tenant_id:
@@ -601,7 +606,7 @@ def _tx_out(tx: BankTransaction, ctx: Ctx) -> dict:
         'bank_name': acc.connection.label, 'account_type': acc.type,
         'account_name': acc.name, 'account_last_digits': of.last4(acc.number),
         'card_id': acc.card_id, 'card_digits': tx.card_digits,
-        'owner_name': None if tx.user_id == ctx.user.id else _name(tx.user_id),
+        'owner_name': _owner_name(ctx, tx.user_id),
         'expense': ({'id': match.id, 'description': match.description, 'amount': float(match.amount),
                      'date': of._expense_date(match).isoformat()} if match else None),
     }
@@ -750,7 +755,7 @@ def bank_balances(ctx: Ctx = Depends(get_ctx)):
             .filter(_seen(ctx), BankAccount.type == 'BANK', BankAccount.balance.isnot(None))
             .order_by(BankConnection.id, BankAccount.id).all())
     items = [{'id': a.id, 'bank': a.connection.label, 'name': a.name, 'subtype': a.subtype,
-              'owner_name': None if a.connection.user_id == ctx.user.id else _name(a.connection.user_id),
+              'owner_name': _owner_name(ctx, a.connection.user_id),
               'last_digits': of.last4(a.number), 'balance': float(a.balance), 'currency': a.currency or 'BRL',
               'updated_at': (a.connection.last_updated_at.isoformat() + 'Z') if a.connection.last_updated_at else None}
              for a in rows]
@@ -767,7 +772,7 @@ def bank_investments(ctx: Ctx = Depends(get_ctx)):
             .filter(func.coalesce(BankInvestment.status, '') != 'TOTAL_WITHDRAWAL')
             .order_by(BankConnection.id, BankInvestment.name).all())
     items = [{'id': i.id, 'name': i.name, 'bank': i.connection.label, 'type': i.type, 'subtype': i.subtype,
-              'owner_name': None if i.connection.user_id == ctx.user.id else _name(i.connection.user_id),
+              'owner_name': _owner_name(ctx, i.connection.user_id),
               'issuer': i.issuer, 'balance': float(i.balance or 0),
               'amount_invested': float(i.amount_invested) if i.amount_invested is not None else None,
               'amount_withdrawal': float(i.amount_withdrawal) if i.amount_withdrawal is not None else None,
@@ -860,9 +865,8 @@ def _item_owner(cfg: PluggyConfig, item_id: str) -> int | None:
     conn = BankConnection.query.filter_by(item_id=item_id[:64]).first()
     if conn is None:
         return None
-    if conn.user_id == cfg.user_id:
-        return conn.user_id
-    return conn.user_id if any(c.user_id == conn.user_id for c in _copies(cfg)) else None
+    mine = conn.user_id == cfg.user_id or any(c.user_id == conn.user_id for c in _copies(cfg))
+    return conn.user_id if mine else None
 
 
 def _item_event(user_id: int, event: str, item_id: str, error) -> bool:

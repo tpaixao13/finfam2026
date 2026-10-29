@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.7.1 — revisão de segurança e unix (29/10/2026)
+
+- Banco compartilhado: no grupo do Telegram o aviso mostra só quantidade e total (sem a descrição das
+  compras: o grupo pode ter gente de fora); no privado continua com os lançamentos e o botão de revisar.
+  O ajuste "Compartilhar com a família" explica isso.
+- Código mais enxuto, sem mudar comportamento: `telegram.family_user_ids` no lugar de 5 cópias da mesma
+  consulta, `_owner_name` em pluggy.py, `update(patch)` no ConnectionCard, KeyPanel mais plano.
+
 ## 2026.7.0 — compartilhar banco conectado com a família (29/10/2026)
 
 - Em Contas conectadas → Ajustes de cada banco: **Compartilhar com a família** (desligado por padrão). Com ele,

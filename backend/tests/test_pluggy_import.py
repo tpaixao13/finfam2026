@@ -1130,6 +1130,21 @@ def test_shared_bank_family_sees_and_reviews(client, family, bank, txs, monkeypa
     # mexer no banco continua só com o dono
     assert g.delete(f'/pluggy/items/{conn_id}').status_code in (404, 409)
     assert g.post(f'/pluggy/items/{conn_id}/refresh').status_code in (404, 409)
+    # aviso de banco compartilhado no grupo da família: só quantidade e total, sem as compras
+    from app.services import telegram as tg
+    sent = []
+    monkeypatch.setattr(tg, 'send_message', lambda token, chat, text, buttons=None: (sent.append((chat, text, buttons)), (True, ''))[1])
+    tenant = session.get(Tenant, family.tenant['id'])
+    tenant.telegram_group_chat = '-900'
+    session.commit()
+    txs[acc].append({'id': 's-3', 'type': 'DEBIT', 'amount': -77.0, 'date': day(0), 'description': 'Farmacia Segredo'})
+    conn = session.get(BankConnection, conn_id)
+    before = {t.id for t in BankTransaction.query.all()}
+    of.sync(conn, of.client_for(conn.user_id))
+    assert of.notify_new(conn, before)
+    chat, text, buttons = sent[-1]
+    assert chat == '-900' and '(de Tiago)' in text and 'R$ 77,00' in text and 'Farmacia' not in text and buttons is None
+    session.remove()
     family.put(f'/pluggy/items/{conn_id}', json={'shared': False})
     assert g.get('/pluggy/items').json()['items'] == []
     session.remove()

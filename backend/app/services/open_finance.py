@@ -988,10 +988,11 @@ def notify_new(conn: BankConnection, before: set[int]) -> bool:
                    ~BankTransaction.id.in_(before or {0})).all())
     if not new:
         return False
-    chats = tg.linked_chats([conn.user_id])
     owner = db.session.get(User, conn.user_id)
     if conn.shared and owner is not None and owner.tenant is not None:  # banco compartilhado: a família recebe
-        chats = tg.family_chats(owner.tenant, [u.id for u in User.query.filter_by(tenant_id=owner.tenant_id).all()])
+        chats = tg.family_chats(owner.tenant, tg.family_user_ids(owner.tenant))
+    else:
+        chats = tg.linked_chats([conn.user_id])
     if not chats:
         return False
     pending = [t for t in new if t.status == 'pending']
@@ -1000,19 +1001,23 @@ def notify_new(conn: BankConnection, before: set[int]) -> bool:
     lines = [f'🏦 <b>{tg._h(conn.label)}</b>{whose}: {len(new)} lançamento(s) novo(s) do banco.']
     if launched:
         lines.append(f'✅ {len(launched)} lançado(s) automaticamente ({brl(sum(float(t.amount) for t in launched))}).')
+    details = []
     if pending:
-        lines.append(f'📝 {len(pending)} para revisar ({brl(sum(float(t.amount) for t in pending))}):')
-        lines += [f'• {tg._h(t.description[:40])} — {brl(float(t.amount))}' for t in sorted(pending, key=lambda t: t.date)[-5:]]
+        lines.append(f'📝 {len(pending)} para revisar ({brl(sum(float(t.amount) for t in pending))})')
+        details = [f'• {tg._h(t.description[:40])} — {brl(float(t.amount))}'
+                   for t in sorted(pending, key=lambda t: t.date)[-5:]]
     base = settings.public_url
-    if base.startswith('https://'):
-        lines.append(f'{base}/bank/review')
-    text = '\n'.join(lines)
-    # o toque chega ao bot central, que mostra um por um com ✅ Lançar / 🏷️ Trocar categoria / 🚫 Ignorar
+    link = [f'{base}/bank/review'] if base.startswith('https://') else []
+    # no privado: com os lançamentos e o botão (o toque chega ao bot, que mostra um por um);
+    # no grupo da família: só contagem e total (pode ter gente de fora; o bot não atende botões lá)
+    private_text = '\n'.join(lines[:-1] + [lines[-1] + (':' if details else '')] + details + link)
+    group_text = '\n'.join(lines + link)
     buttons = [[{'text': '📝 Revisar aqui no Telegram', 'callback_data': 'rv:go:0'}]] if pending else None
     sent = False
     for chat in chats:
-        private = not str(chat).startswith('-')  # no grupo o bot não atende botões
-        ok, err = tg.send_message(settings.telegram_bot_token, chat, text, buttons if private else None)
+        private = not str(chat).startswith('-')
+        ok, err = tg.send_message(settings.telegram_bot_token, chat, private_text if private else group_text,
+                                  buttons if private else None)
         sent = sent or ok
         if not ok:
             log.warning('Aviso do Open Finance não foi para o Telegram: %s', err)

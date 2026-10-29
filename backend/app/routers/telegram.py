@@ -7,7 +7,7 @@ e `X-Telegram-Chat: <chat_id>` — com o mesmo isolamento por família do site.
 """
 import html
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -49,7 +49,7 @@ def status(ctx: Ctx = Depends(get_ctx)):
     return link_status(ctx)
 
 
-def _new_code(ctx: Ctx, kind: str) -> tuple[str, object]:
+def _new_code(ctx: Ctx, kind: str) -> tuple[str, datetime]:
     if not bot_configured():
         raise HTTPException(status_code=503, detail='O bot do Telegram ainda não foi configurado no servidor.')
     now = utcnow()
@@ -76,9 +76,8 @@ def _owner_only(ctx: Ctx) -> None:
 
 def _tell_members(tenant: Tenant, text: str) -> None:
     """Aviso no privado de cada pessoa da família (ex.: quando o grupo muda) — melhor esforço."""
-    from app.services.telegram import linked_chats, send_message
-    uids = [u.id for u in User.query.filter_by(tenant_id=tenant.id).all()]
-    for chat in linked_chats(uids):
+    from app.services.telegram import family_user_ids, linked_chats, send_message
+    for chat in linked_chats(family_user_ids(tenant)):
         send_message(settings.telegram_bot_token, chat, text)
 
 

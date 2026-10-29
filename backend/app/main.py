@@ -34,7 +34,7 @@ class _HideHookToken(logging.Filter):
 
 logging.getLogger('uvicorn.access').addFilter(_HideHookToken())
 
-VERSION = '2026.7.0'
+VERSION = '2026.7.1'
 MAX_BODY_BYTES = 12 * 1024 * 1024
 
 _FIELD_LABELS = {

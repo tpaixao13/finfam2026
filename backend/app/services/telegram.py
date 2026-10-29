@@ -59,6 +59,10 @@ def linked_chats(user_ids: list[int]) -> list[str]:
     return [link.chat_id for link in TelegramLink.query.filter(TelegramLink.user_id.in_(user_ids)).all()]
 
 
+def family_user_ids(tenant: Tenant) -> list[int]:
+    return [u.id for u in User.query.filter_by(tenant_id=tenant.id).all()]
+
+
 def family_chats(tenant: Tenant, user_ids: list[int]) -> list[str]:
     """Para onde vão os avisos da FAMÍLIA pelo bot central: o grupo da família, se houver
     (aí ninguém recebe no privado), senão a conversa de cada pessoa."""
@@ -175,7 +179,7 @@ def run_daily_reminders(now: datetime | None = None) -> int:
                 continue
             if tenant.telegram_last_sent == today:
                 continue
-            uids = [u.id for u in User.query.filter_by(tenant_id=tenant.id).all()]
+            uids = family_user_ids(tenant)
             targets = reminder_targets(tenant, uids)
             if not targets:
                 continue

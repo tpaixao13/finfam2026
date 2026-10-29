@@ -6,6 +6,8 @@ import { useAction } from '../../lib/session'
 import type { PluggyConfig, Saved } from './types'
 import { useBusy } from './useBusy'
 
+const CONSENT = 'Concordo que o FinFam guarde os extratos e faturas importados dos bancos que eu conectar, e que apague tudo ao desconectar.'
+
 function KeyForm({ cfg, onSaved, onCancel }: { cfg: PluggyConfig; onSaved: () => void; onCancel?: () => void }) {
   const act = useAction()
   const [f, setF] = useState({ client_id: '', client_secret: '', consent: false })
@@ -32,8 +34,6 @@ function KeyForm({ cfg, onSaved, onCancel }: { cfg: PluggyConfig; onSaved: () =>
     </form>
   )
 }
-
-const CONSENT = 'Concordo que o FinFam guarde os extratos e faturas importados dos bancos que eu conectar, e que apague tudo ao desconectar.'
 
 function FamilyKeyOffer({ cfg, onSaved, onOwnKey }: { cfg: PluggyConfig; onSaved: () => void; onOwnKey: () => void }) {
   const act = useAction()
@@ -86,12 +86,12 @@ function KeyStatus({ cfg, onEdit, onChanged }: { cfg: PluggyConfig; onEdit: () =
 export function KeyPanel({ cfg, editing, onEdit, onCancel, onChanged }:
   { cfg: PluggyConfig; editing: boolean; onEdit: () => void; onCancel: () => void; onChanged: () => void }) {
   const offer = !cfg.configured && !editing && cfg.family_key
+  const form = !cfg.configured || editing
   return (
     <Panel title="Chave Pluggy">
       {offer ? <FamilyKeyOffer cfg={cfg} onSaved={onChanged} onOwnKey={onEdit} />
-        : !cfg.configured || editing
-          ? <KeyForm cfg={cfg} onSaved={onChanged} onCancel={editing ? onCancel : undefined} />
-          : <KeyStatus cfg={cfg} onEdit={onEdit} onChanged={onChanged} />}
+        : form ? <KeyForm cfg={cfg} onSaved={onChanged} onCancel={editing ? onCancel : undefined} />
+        : <KeyStatus cfg={cfg} onEdit={onEdit} onChanged={onChanged} />}
     </Panel>
   )
 }

@@ -50,6 +50,8 @@ export function ConnectionCard({ conn, cards, banks, onChange }: { conn: Connect
   const bank = conn.bank_name ?? 'banco'
   const panelId = `bank-settings-${conn.id}`
   const creditAccounts = conn.accounts.filter((a) => a.type === 'CREDIT')
+  const update = (patch: { shared: boolean } | { auto_import: boolean }) =>
+    act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, patch), onChange)
   const reconnect = () => run(async () => {
     try {
       const id = await openConnect(conn.id)
@@ -89,13 +91,13 @@ export function ConnectionCard({ conn, cards, banks, onChange }: { conn: Connect
         <div id={panelId} className="bank-settings">
           <RenameForm conn={conn} banks={banks} onChange={onChange} />
           <ToggleRow label={`Compartilhar ${bank} com a família`} title="Compartilhar com a família" checked={conn.shared}
-            onChange={(v) => act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, { shared: v }), onChange)}>
+            onChange={(v) => update({ shared: v })}>
             {conn.shared
-              ? 'a família vê saldo, cartões e o que chega deste banco, e pode lançar ou ignorar na revisão.'
+              ? 'a família vê saldo, cartões e o que chega deste banco, e pode lançar ou ignorar na revisão. Os avisos dele vão para a família (no grupo do Telegram, só quantidade e total).'
               : 'desligado: só você vê este banco.'}
           </ToggleRow>
           <ToggleRow label={`Lançar automaticamente o que chega de ${bank}`} title="Lançar automaticamente" checked={conn.auto_import}
-            onChange={(v) => act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, { auto_import: v }), onChange)}>
+            onChange={(v) => update({ auto_import: v })}>
             {conn.auto_import
               ? 'o que chega vira despesa com a categoria sugerida; corrija em Revisar importados › Lançados.'
               : 'desligado: tudo passa por Revisar importados antes.'}

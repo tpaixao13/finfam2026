@@ -274,14 +274,13 @@ def _send(chats: list[str], message: str, tenant: Tenant | None = None) -> int:
         if not ok:
             log.warning('Aviso do bot não foi entregue: %s', err)
             if tenant is not None and tg.drop_dead_group(tenant, chat, err):
-                uids = [u.id for u in User.query.filter_by(tenant_id=tenant.id).all()]
-                sent += _send(tg.linked_chats(uids), message)
+                sent += _send(tg.linked_chats(tg.family_user_ids(tenant)), message)
     return sent
 
 
 def _family(tenant: Tenant) -> tuple[list[int], list[str]]:
     """Membros e conversas que recebem os avisos da família (o grupo, se a família conectou um)."""
-    uids = [u.id for u in User.query.filter_by(tenant_id=tenant.id).all()]
+    uids = tg.family_user_ids(tenant)
     return uids, tg.family_chats(tenant, uids)
 
 
