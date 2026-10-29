@@ -199,11 +199,12 @@ def _interpret(ctx: Ctx, text: str, media: dict | None = None) -> dict:
         found, _ = categorize(description, ctx.uids, ctx.tenant_id) if ctx.tenant_id else (None, None)
         return found or svc.suggest_category_from_history(description, ctx.uids)
 
-    out = {'intent': result['intent'], 'reply': result['reply'], 'draft': None, 'query': None}
-    if result['intent'] in ai.QUERY_INTENTS:
-        out['query'] = ai.to_query(result['query'], intent=result['intent'], today=today, categories=categories,
-                                  methods=PAYMENT_METHODS, cards=card_list, message=text,
-                                  members=[{'id': u.id, 'name': u.name} for u in ctx.members])
+    members = [{'id': u.id, 'name': u.name} for u in ctx.members]
+    intent = ai.person_intent(result['intent'], text, members)
+    out = {'intent': intent, 'reply': result['reply'], 'draft': None, 'query': None}
+    if intent in ai.QUERY_INTENTS:
+        out['query'] = ai.to_query(result['query'], intent=intent, today=today, categories=categories,
+                                  methods=PAYMENT_METHODS, cards=card_list, message=text, members=members)
     if result['intent'] == 'expense':
         draft = ai.to_draft(result['expense'], today=today, categories=categories, methods=PAYMENT_METHODS,
                             cards=card_list, member_ids=ctx.uids, suggest=suggest)

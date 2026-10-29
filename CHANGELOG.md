@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.7.3 — bot: "gastos da Greyce" trazia a família toda (29/10/2026)
+
+- A IA às vezes entendia "gastos da Greyce" como o resumo geral do mês. Com uma pessoa da família citada e
+  uma palavra de gasto (gasto, despesa, conta, compra), vira a consulta de gastos dela no mês.
+- O nome também vale solto na frase ("quanto a Greyce gastou?"), não só depois de de/da/do/pra.
+
 ## 2026.7.2 — bot: contas de uma pessoa da família (29/10/2026)
 
 - "contas da Greyce no mês de outubro", "o que o Bruno gastou este mês", "contas a pagar da Greyce": o bot

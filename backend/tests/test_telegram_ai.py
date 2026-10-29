@@ -96,6 +96,8 @@ def fake_ai(monkeypatch):
         calls.update(system=system, user=user, provider=self.provider, key=self.api_key, model=self.model)
         return calls.get('answer', {})
     monkeypatch.setattr(ai_service.AIClient, 'complete_json', complete_json)
+    from app.routers import ai as ai_router
+    ai_router._recent.clear()  # o limite de 20/min por família não passa de um teste para o outro
     return calls
 
 
@@ -302,6 +304,13 @@ def test_interpret_queries_are_checked(client, family, fake_ai):
     fake_ai['answer'] = {'intent': 'spending', 'query': {'month': 10, 'text': 'Greyce'}}
     q = family.post('/ai/interpret', json={'text': 'contas da Greyce no mês de outubro'}).json()['query']
     assert (q['person_id'], q['person_name'], q['text'], q['month']) == (gid, 'Greyce Paixão', None, 10)
+    fake_ai['answer'] = {'intent': 'summary', 'reply': 'ok'}  # a IA achou que era o resumo geral
+    r = family.post('/ai/interpret', json={'text': 'gastos da Greyce'}).json()
+    assert r['intent'] == 'spending' and r['query']['person_id'] == gid
+    fake_ai['answer'] = {'intent': 'spending', 'query': {}}
+    assert family.post('/ai/interpret', json={'text': 'quanto a greyce gastou?'}).json()['query']['person_id'] == gid
+    fake_ai['answer'] = {'intent': 'summary', 'reply': 'ok'}
+    assert family.post('/ai/interpret', json={'text': 'resumo do mês'}).json()['intent'] == 'summary'
     fake_ai['answer'] = {'intent': 'bills', 'query': {'person_id': 99999}}  # id de fora da família: ignorado
     assert family.post('/ai/interpret', json={'text': 'contas a pagar'}).json()['query']['person_id'] is None
     fake_ai['answer'] = {'intent': 'spending', 'query': {'category': 'Moradia', 'months': 99}}

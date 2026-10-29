@@ -432,16 +432,31 @@ def quoted_name(message: str | None, categories: list[str]) -> str | None:
 
 
 def mentioned_member(message: str | None, members: list[dict]) -> dict | None:
-    """Membro citado na frase depois de de/da/do/pra/para ("contas da Greyce"): nome completo ou primeiro nome."""
+    """Membro citado na pergunta ("contas da Greyce", "quanto a Greyce gastou"): nome completo ou primeiro
+    nome (3+ letras). Primeiro depois de de/da/do/pra/para; senão o nome solto na frase."""
     text = _norm(message)
     if len(members) < 2 or not text:
         return None
+    names = []
     for m in sorted(members, key=lambda m: -len(m['name'])):
         full = _norm(m['name'])
-        for name in dict.fromkeys([full, full.split()[0] if full else '']):
-            if name and re.search(rf'\b(?:de|da|do|pra|para|pro)\s+(?:a\s+|o\s+)?{re.escape(name)}\b', text):
+        names += [(name, m) for name in dict.fromkeys([full, full.split()[0] if full else '']) if len(name) >= 3]
+    for pattern in (r'\b(?:de|da|do|pra|para|pro)\s+(?:a\s+|o\s+)?{}\b', r'\b{}\b'):
+        for name, m in names:
+            if re.search(pattern.format(re.escape(name)), text):
                 return m
     return None
+
+
+_SPENT_WORDS = re.compile(r'\b(gast\w*|despesa\w*|contas?|compr\w*|lancament\w*)\b')
+
+
+def person_intent(intent: str, message: str | None, members: list[dict]) -> str:
+    """"gastos da Greyce" às vezes volta como resumo geral (ou conversa): com uma pessoa citada e palavra
+    de gasto, vira a consulta de gastos do mês dela."""
+    if intent in ('summary', 'chat') and _SPENT_WORDS.search(_norm(message)) and mentioned_member(message, members):
+        return 'spending'
+    return intent
 
 
 def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str],
