@@ -75,6 +75,7 @@ _ALTERS = [
     "ALTER TABLE telegram_link_codes ADD COLUMN kind VARCHAR(8) NOT NULL DEFAULT 'chat'",
     'ALTER TABLE tenants ADD COLUMN telegram_group_chat VARCHAR(32)',
     'ALTER TABLE tenants ADD COLUMN telegram_group_title TEXT',
+    'ALTER TABLE bank_connections ADD COLUMN shared INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE bank_transactions ADD COLUMN bill_year INTEGER',
     'ALTER TABLE bank_transactions ADD COLUMN bill_month INTEGER',
     'ALTER TABLE bank_transactions ADD COLUMN bill_ref VARCHAR(64)',

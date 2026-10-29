@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.7.0 — compartilhar banco conectado com a família (29/10/2026)
+
+- Em Contas conectadas → Ajustes de cada banco: **Compartilhar com a família** (desligado por padrão). Com ele,
+  as outras pessoas da família veem o banco (saldo, cartões, investimentos, conferência de fatura) e revisam o
+  que chega dele — lançar ou ignorar, no site e no bot. A despesa lançada é sempre do dono do banco.
+  Conectar, atualizar, desconectar e os ajustes do banco continuam só com quem conectou. Quem não tem chave
+  Pluggy também vê os bancos compartilhados.
+- Banco compartilhado: o aviso "chegou do banco" vai para a família (ou para o grupo do Telegram, se houver),
+  com "(de <nome>)".
+- `bank_connections.shared`; `PUT /pluggy/items/{id}` aceita `shared`.
+
 ## 2026.6.0 — uma chave Pluggy para a família e avisos no grupo do Telegram (29/10/2026)
 
 - **Chave Pluggy da família:** quem ainda não tem chave vê "A família já tem uma chave Pluggy, cadastrada por

@@ -19,4 +19,5 @@ export interface BankAccount {
 export interface Connection {
   id: number; item_id: string; bank_name: string | null; connector_name: string | null; auto_import: boolean; bank_color: string | null; status: string | null
   execution_status: string | null; error: string | null; last_updated_at: string | null; accounts: BankAccount[]
+  shared: boolean; mine: boolean; owner_name: string | null   // banco compartilhado com a família
 }

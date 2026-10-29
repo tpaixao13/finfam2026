@@ -46,7 +46,7 @@ function AccountSummary({ acc }: { acc: BankAccount }) {
 }
 
 /** Resumo de uma conta ou cartão: só leitura, com aviso quando o cartão não está ligado. */
-export function AccountRow({ acc }: { acc: BankAccount }) {
+export function AccountRow({ acc, mine = true }: { acc: BankAccount; mine?: boolean }) {
   const credit = acc.type === 'CREDIT'
   return (
     <li className="bank-acc">
@@ -56,7 +56,7 @@ export function AccountRow({ acc }: { acc: BankAccount }) {
         {credit && (acc.card_id
           ? <div className="small muted">Ligado ao cartão {acc.card_label ?? 'do FinFam'}{acc.credit_limit ? '; o limite vem do banco' : ''}.</div>
           : <div className="small"><Badge tone="warning">Cartão não ligado</Badge>{' '}
-            <span className="muted">Abra Ajustes para ligar a um cartão do FinFam.</span></div>)}
+            {mine && <span className="muted">Abra Ajustes para ligar a um cartão do FinFam.</span>}</div>)}
       </div>
     </li>
   )

@@ -6,6 +6,7 @@ import { useSession } from '../lib/session'
 
 interface BankBalance {
   id: number; bank: string; name: string | null; subtype: string | null; last_digits: string | null
+  owner_name?: string | null
   balance: number; currency: string; updated_at: string | null
 }
 interface BankBalances { enabled: boolean; items: BankBalance[]; total: number }
@@ -25,7 +26,7 @@ export function BankBalancesPanel() {
         {b.items.map((a) => (
           <li key={a.id}>
             <div>
-              <b>{a.bank}</b>
+              <b>{a.bank}</b>{a.owner_name && <span className="muted small"> · de {a.owner_name}</span>}
               <small className="muted block">
                 {(a.subtype && ACCOUNT_KIND[a.subtype]) || a.name || 'Conta'}{a.last_digits && ` •••• ${a.last_digits}`}
                 {a.updated_at && ` · atualizado em ${dateBR(a.updated_at.slice(0, 10))}`}

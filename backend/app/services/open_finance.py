@@ -989,11 +989,15 @@ def notify_new(conn: BankConnection, before: set[int]) -> bool:
     if not new:
         return False
     chats = tg.linked_chats([conn.user_id])
+    owner = db.session.get(User, conn.user_id)
+    if conn.shared and owner is not None and owner.tenant is not None:  # banco compartilhado: a família recebe
+        chats = tg.family_chats(owner.tenant, [u.id for u in User.query.filter_by(tenant_id=owner.tenant_id).all()])
     if not chats:
         return False
     pending = [t for t in new if t.status == 'pending']
     launched = [t for t in new if t.status == 'imported']
-    lines = [f'🏦 <b>{tg._h(conn.label)}</b>: {len(new)} lançamento(s) novo(s) do banco.']
+    whose = f' (de {tg._h(owner.name)})' if conn.shared and owner is not None else ''
+    lines = [f'🏦 <b>{tg._h(conn.label)}</b>{whose}: {len(new)} lançamento(s) novo(s) do banco.']
     if launched:
         lines.append(f'✅ {len(launched)} lançado(s) automaticamente ({brl(sum(float(t.amount) for t in launched))}).')
     if pending:
@@ -1007,7 +1011,8 @@ def notify_new(conn: BankConnection, before: set[int]) -> bool:
     buttons = [[{'text': '📝 Revisar aqui no Telegram', 'callback_data': 'rv:go:0'}]] if pending else None
     sent = False
     for chat in chats:
-        ok, err = tg.send_message(settings.telegram_bot_token, chat, text, buttons)
+        private = not str(chat).startswith('-')  # no grupo o bot não atende botões
+        ok, err = tg.send_message(settings.telegram_bot_token, chat, text, buttons if private else None)
         sent = sent or ok
         if not ok:
             log.warning('Aviso do Open Finance não foi para o Telegram: %s', err)
@@ -1214,12 +1219,14 @@ def _bg_run(user_id: int) -> None:
 
 # ── conferir fatura (FinFam × banco) ─────────────────────────────────────────
 
-def invoice_check(user_id: int, month: int, year: int) -> list[dict]:
+def invoice_check(who, month: int, year: int) -> list[dict]:
     """Para cada cartão do banco ligado: total da fatura no banco (a fatura que ele informa, ou a
-    soma dos lançamentos até agora) × total no FinFam, e o que está só de um lado."""
+    soma dos lançamentos até agora) × total no FinFam, e o que está só de um lado.
+    `who`: id da pessoa, ou uma condição sobre BankConnection (os bancos que ela enxerga)."""
     out = []
+    cond = BankConnection.user_id == who if isinstance(who, int) else who
     accs = (BankAccount.query.join(BankConnection)
-            .filter(BankConnection.user_id == user_id, BankAccount.type == 'CREDIT').all())
+            .filter(cond, BankAccount.type == 'CREDIT').order_by(BankConnection.id, BankAccount.id).all())
     for acc in accs:
         conn = acc.connection
         label = f"{conn.label} •••• {last4(acc.number) or ''}".strip()

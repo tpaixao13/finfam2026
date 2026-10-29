@@ -252,6 +252,7 @@ class BankConnection(Base):
     last_updated_at = Column(DateTime, nullable=True)     # última atualização do banco na Pluggy
     needs_sync = Column(Boolean, default=False, nullable=False)  # webhook avisou novidade: reler contas
     auto_import = Column(Boolean, default=False, nullable=False)  # lançar sozinho o que chega (sem revisar)
+    shared = Column(Boolean, default=False, server_default='0', nullable=False)  # a família vê e revisa este banco
     import_from = Column(Date, nullable=True)             # desde quando trazer lançamentos (escolha ao conectar)
     tx_synced_at = Column(DateTime, nullable=True)        # última leitura dos lançamentos
     created_at = Column(DateTime, default=utcnow)

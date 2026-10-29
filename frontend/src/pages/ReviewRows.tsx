@@ -11,6 +11,7 @@ export interface BankTx {
   account_last_digits: string | null; card_id: number | null; card_digits: string | null
   expense: { id: number; description: string; amount: number; date: string } | null
   category?: string; payment_method?: string; bank_category?: string | null
+  owner_name?: string | null   // banco compartilhado por outra pessoa da família
 }
 export interface TxList { counts: Record<Status, number>; categories: string[]; items: BankTx[] }
 export interface Draft { selected: boolean; category: string; description: string; payment_method: string }
@@ -20,7 +21,7 @@ function Source({ tx }: { tx: BankTx }) {
   const where = tx.account_type === 'CREDIT' ? 'Cartão' : 'Conta'
   return (
     <span className="muted small">
-      {dayMonth(tx.date)} · {tx.bank_name ?? 'Banco'} · {where}
+      {dayMonth(tx.date)} · {tx.bank_name ?? 'Banco'}{tx.owner_name && ` (de ${tx.owner_name})`} · {where}
       {(tx.card_digits || tx.account_last_digits) && ` •••• ${tx.card_digits || tx.account_last_digits}`}
       {tx.installment && ` · parcela ${tx.installment.number}/${tx.installment.total}`}
       {tx.bill && ` · fatura ${tx.bill}`}

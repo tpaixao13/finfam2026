@@ -3,6 +3,7 @@ import { brl, dateBR, money, pct } from '../lib/format'
 
 export interface BankInvestment {
   id: number; name: string; bank: string; type: string | null; subtype: string | null; issuer: string | null
+  owner_name?: string | null
   balance: number; amount_invested: number | null; amount_withdrawal: number | null; currency: string
   rate: number | null; rate_type: string | null; annual_rate: number | null; due_date: string | null; updated_at: string | null
 }
@@ -45,7 +46,7 @@ export function BankInvestmentsPanel({ data }: { data: BankInvestments }) {
             <tr key={i.id}>
               <td><b>{i.name}</b>{bankDetail(i) && <small className="muted block">{bankDetail(i)}</small>}
                 <small className="muted block only-sm">{i.bank} · {bankRate(i)}{i.due_date ? ` · vence ${dateBR(i.due_date)}` : ''}</small></td>
-              <td className="hide-sm nowrap">{i.bank}</td>
+              <td className="hide-sm nowrap">{i.bank}{i.owner_name && <span className="muted small"> · de {i.owner_name}</span>}</td>
               <td className="num hide-sm nowrap">{bankRate(i)}</td>
               <td className="hide-sm">{i.due_date ? dateBR(i.due_date) : '—'}</td>
               <td className="num hide-sm">{i.amount_invested != null ? brl(i.amount_invested) : '—'}</td>

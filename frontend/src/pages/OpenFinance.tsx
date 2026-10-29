@@ -35,10 +35,10 @@ function HeaderActions({ cfg, onConnected }: { cfg: PluggyConfig; onConnected: (
   return (
     <div className="row gap">
       <Link to="/bank/settings" className="btn btn-ghost"><Icon name="gear" /><span>Configurações</span></Link>
+      {(cfg.configured || cfg.to_review > 0) && <Link to="/bank/review" className="btn btn-ghost">
+        Revisar importados{cfg.to_review ? <Badge tone="warning">{cfg.to_review}</Badge> : null}
+      </Link>}
       {cfg.configured && <>
-        <Link to="/bank/review" className="btn btn-ghost">
-          Revisar importados{cfg.to_review ? <Badge tone="warning">{cfg.to_review}</Badge> : null}
-        </Link>
         <Button icon="plus" busy={busy} disabled={full} title={full ? 'Limite de bancos da sua família' : undefined}
           onClick={() => setAsking(true)}>Conectar banco</Button>
         <WindowModal key={asking ? 'open' : 'closed'} open={asking} withId={false} onClose={() => setAsking(false)} onGo={connect} />
@@ -89,12 +89,18 @@ export function OpenFinancePage() {
           <p className="muted">O administrador ainda não liberou o Open Finance para a sua família.</p>
         </Panel>
       ) : !cfg.configured ? (
-        <Panel title="Bem-vindo às contas conectadas">
-          <div className="stack">
-            <p>Para conectar seus bancos, primeiro cadastre sua chave Pluggy.</p>
-            <div><Link to="/bank/settings" className="btn btn-primary">Cadastrar chave Pluggy</Link></div>
-          </div>
-        </Panel>
+        <div className="stack">
+          <Panel title="Conecte os seus bancos">
+            <div className="stack">
+              <p>{cfg.family_key
+                ? <>A família já tem uma chave Pluggy (de <b>{cfg.family_key.owner_name}</b>): é só usar a mesma para conectar os seus bancos.</>
+                : 'Para conectar seus bancos, primeiro cadastre a chave Pluggy (uma por família basta).'}</p>
+              <div><Link to="/bank/settings" className="btn btn-primary">
+                {cfg.family_key ? 'Usar a chave da família' : 'Cadastrar chave Pluggy'}</Link></div>
+            </div>
+          </Panel>
+          <Connections version={version} onChange={data.reload} />
+        </div>
       ) : (
         <div className="stack"><Connections version={version} onChange={data.reload} /></div>
       )}

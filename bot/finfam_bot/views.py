@@ -345,7 +345,7 @@ def review_text(item: dict, total: int, offset: int, category: str, note: str = 
     """Um lançamento do banco para revisar (/revisar)."""
     head = f'{note}\n\n' if note else ''
     digits = item.get('card_digits') or item.get('account_last_digits')
-    where = item['bank_name'] + ((' · cartão' + (f' •••• {digits}' if digits else ''))
+    where = item['bank_name'] + (f' (de {item["owner_name"]})' if item.get('owner_name') else '') + ((' · cartão' + (f' •••• {digits}' if digits else ''))
                                  if item['account_type'] == 'CREDIT' else ' · conta')
     lines = [f'{head}🏦 <b>Revisar do banco</b> — {offset + 1} de {total}', '',
              f'<b>{h(item["description"])}</b> — {brl(item["amount"])}' + (' ↩️ estorno' if item.get('refund') else ''),

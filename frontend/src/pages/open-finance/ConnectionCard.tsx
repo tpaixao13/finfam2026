@@ -63,14 +63,20 @@ export function ConnectionCard({ conn, cards, banks, onChange }: { conn: Connect
           <h3>{bank === 'banco' ? 'Banco' : bank}</h3>
           {conn.connector_name && conn.connector_name !== conn.bank_name && <span className="muted small">via {conn.connector_name}</span>}
         </div>
-        <Badge tone={st.tone}>{st.label}</Badge>
+        <span className="row gap">
+          {conn.shared && <Badge tone="info">{conn.mine ? 'Compartilhado com a família' : `De ${conn.owner_name ?? 'outra pessoa'}`}</Badge>}
+          <Badge tone={st.tone}>{st.label}</Badge>
+        </span>
       </header>
       <p className="muted small">Última atualização do banco: {when(conn.last_updated_at)}</p>
       {conn.error && <p className="form-error" role="alert">{conn.error}</p>}
       {conn.accounts.length
-        ? <ul className="bank-accs">{conn.accounts.map((a) => <AccountRow key={a.id} acc={a} />)}</ul>
+        ? <ul className="bank-accs">{conn.accounts.map((a) => <AccountRow key={a.id} acc={a} mine={conn.mine} />)}</ul>
         : <p className="muted">O banco ainda não devolveu contas.</p>}
-      <div className="row gap">
+      {!conn.mine ? (
+        <p className="muted small">{conn.owner_name ?? 'Outra pessoa'} compartilhou este banco: você vê e revisa o que chega
+          dele em Revisar importados. Conectar, atualizar e ajustar ficam com {conn.owner_name ?? 'quem conectou'}.</p>
+      ) : <div className="row gap">
         {st.fix
           ? <Button icon="key" busy={busy} onClick={reconnect}>Reconectar</Button>
           : <Button variant="ghost" icon="arrow-repeat" busy={refreshing}
@@ -78,10 +84,16 @@ export function ConnectionCard({ conn, cards, banks, onChange }: { conn: Connect
               Atualizar agora</Button>}
         <Button variant="ghost" icon="gear" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>
           Ajustes</Button>
-      </div>
-      {open && (
+      </div>}
+      {conn.mine && open && (
         <div id={panelId} className="bank-settings">
           <RenameForm conn={conn} banks={banks} onChange={onChange} />
+          <ToggleRow label={`Compartilhar ${bank} com a família`} title="Compartilhar com a família" checked={conn.shared}
+            onChange={(v) => act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, { shared: v }), onChange)}>
+            {conn.shared
+              ? 'a família vê saldo, cartões e o que chega deste banco, e pode lançar ou ignorar na revisão.'
+              : 'desligado: só você vê este banco.'}
+          </ToggleRow>
           <ToggleRow label={`Lançar automaticamente o que chega de ${bank}`} title="Lançar automaticamente" checked={conn.auto_import}
             onChange={(v) => act(() => api.put<{ message: string }>(`/pluggy/items/${conn.id}`, { auto_import: v }), onChange)}>
             {conn.auto_import

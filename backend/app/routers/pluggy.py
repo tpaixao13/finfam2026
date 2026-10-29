@@ -20,7 +20,7 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 
 from app.core import ratelimit
 from app.core.config import settings
@@ -40,6 +40,18 @@ log = logging.getLogger('finfam.pluggy')
 router = APIRouter(prefix='/pluggy', tags=['open finance'])
 
 UUID = r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
+
+def _seen(ctx: Ctx):
+    """Bancos que a pessoa enxerga: os dela e os que alguém da família compartilhou (condição SQL)."""
+    return or_(BankConnection.user_id == ctx.user.id,
+               and_(BankConnection.shared.is_(True), BankConnection.user_id.in_(ctx.uids)))
+
+
+def _seen_tx(ctx: Ctx):
+    """Lançamentos do banco que a pessoa pode ver e revisar (dos bancos que ela enxerga)."""
+    accounts = db.session.query(BankAccount.id).join(BankConnection).filter(_seen(ctx))
+    return BankTransaction.account_id.in_(accounts)
 
 
 def _enabled_tenant(ctx: Ctx) -> Tenant:
@@ -128,7 +140,7 @@ def _out(ctx: Ctx, cfg: PluggyConfig | None) -> dict:
         'public_url_ok': settings.public_url.startswith('https://'),
         'include_sandbox': settings.pluggy_include_sandbox,
         'connections': BankConnection.query.filter_by(user_id=ctx.user.id).count() if cfg else 0,
-        'to_review': BankTransaction.query.filter_by(user_id=ctx.user.id, status='pending').count() if cfg else 0,
+        'to_review': BankTransaction.query.filter(_seen_tx(ctx), BankTransaction.status == 'pending').count(),
         'notify': bool(cfg.notify) if cfg else True,
     }
 
@@ -333,8 +345,10 @@ def _account_out(acc: BankAccount) -> dict:
     }
 
 
-def _conn_out(conn: BankConnection) -> dict:
+def _conn_out(conn: BankConnection, ctx: Ctx | None = None) -> dict:
+    mine = ctx is None or conn.user_id == ctx.user.id
     return {
+        'shared': bool(conn.shared), 'mine': mine, 'owner_name': None if mine else _name(conn.user_id),
         'id': conn.id, 'item_id': conn.item_id, 'bank_name': conn.label, 'connector_name': conn.bank_name,
         'auto_import': bool(conn.auto_import), 'bank_color': conn.bank_color,
         'status': conn.status, 'execution_status': conn.execution_status, 'error': conn.error_message,
@@ -370,10 +384,11 @@ def connect_token(body: ConnectTokenIn, ctx: Ctx = Depends(get_ctx_session)):
 @router.get('/items', summary='Meus bancos conectados, com contas e cartões')
 def list_items(ctx: Ctx = Depends(get_ctx_session)):
     _enabled_tenant(ctx)
-    conns = BankConnection.query.filter_by(user_id=ctx.user.id).order_by(BankConnection.id).all()
-    if any(c.needs_sync for c in conns):  # o webhook avisou novidade: relê só esses
+    conns = BankConnection.query.filter(_seen(ctx)).order_by(BankConnection.id).all()
+    if any(c.needs_sync for c in conns if c.user_id == ctx.user.id):  # o webhook avisou novidade: relê só esses
         of.sync_stale(ctx.user.id)
-    return {'items': [_conn_out(c) for c in conns],
+    conns.sort(key=lambda c: (c.user_id != ctx.user.id, c.id))  # os meus primeiro
+    return {'items': [_conn_out(c, ctx) for c in conns],
             'banks': sorted(set(BANKS) | set(tenant_banks(ctx.uids)))}
 
 
@@ -381,6 +396,7 @@ class ItemUpdateIn(BaseModel):
     bank_name: str | None = Field(None, min_length=1, max_length=60,
                                   description='Nome do banco nas despesas lançadas (ex.: Caixa)')
     auto_import: bool | None = Field(None, description='Lançar sozinho o que chega deste banco')
+    shared: bool | None = Field(None, description='A família vê este banco e revisa o que chega dele')
 
 
 @router.put('/items/{conn_id}', summary='Nome do banco e/ou lançamento automático')
@@ -391,6 +407,10 @@ def update_item(conn_id: int, body: ItemUpdateIn, ctx: Ctx = Depends(get_ctx_ses
     if body.bank_name is not None:
         conn.display_name = body.bank_name.strip()
         msg.append(f'Banco renomeado para {conn.label}.')
+    if body.shared is not None:
+        conn.shared = body.shared
+        msg.append(f'{conn.label}: a família agora vê e revisa este banco.' if body.shared
+                   else f'{conn.label}: só você vê este banco.')
     launched = 0
     if body.auto_import is not None:
         conn.auto_import = body.auto_import
@@ -401,7 +421,7 @@ def update_item(conn_id: int, body: ItemUpdateIn, ctx: Ctx = Depends(get_ctx_ses
         else:
             msg.append(f'{conn.label}: volta a passar pela revisão.')
     db.session.commit()
-    return {'message': ' '.join(msg) or 'Nada mudou.', 'item': _conn_out(conn)}
+    return {'message': ' '.join(msg) or 'Nada mudou.', 'item': _conn_out(conn, ctx)}
 
 
 class ItemIn(BaseModel):
@@ -581,6 +601,7 @@ def _tx_out(tx: BankTransaction, ctx: Ctx) -> dict:
         'bank_name': acc.connection.label, 'account_type': acc.type,
         'account_name': acc.name, 'account_last_digits': of.last4(acc.number),
         'card_id': acc.card_id, 'card_digits': tx.card_digits,
+        'owner_name': None if tx.user_id == ctx.user.id else _name(tx.user_id),
         'expense': ({'id': match.id, 'description': match.description, 'amount': float(match.amount),
                      'date': of._expense_date(match).isoformat()} if match else None),
     }
@@ -590,7 +611,7 @@ def _tx_out(tx: BankTransaction, ctx: Ctx) -> dict:
 
 
 def _my_tx(ctx: Ctx, ids: list[int]) -> list[BankTransaction]:
-    rows = BankTransaction.query.filter(BankTransaction.id.in_(ids), BankTransaction.user_id == ctx.user.id).all()
+    rows = BankTransaction.query.filter(BankTransaction.id.in_(ids), _seen_tx(ctx)).all()
     if len(rows) != len(set(ids)):
         raise HTTPException(status_code=404, detail='Lançamento não encontrado.')
     return rows
@@ -605,9 +626,9 @@ def list_transactions(status: Literal['pending', 'duplicate', 'ignored', 'import
         db.session.commit()
     counts = {s: 0 for s in STATUSES}
     for st, n in (db.session.query(BankTransaction.status, func.count(BankTransaction.id))
-                  .filter(BankTransaction.user_id == ctx.user.id).group_by(BankTransaction.status)):
+                  .filter(_seen_tx(ctx)).group_by(BankTransaction.status)):
         counts[st] = n
-    rows = (BankTransaction.query.filter_by(user_id=ctx.user.id, status=status)
+    rows = (BankTransaction.query.filter(_seen_tx(ctx), BankTransaction.status == status)
             .order_by(BankTransaction.date.desc(), BankTransaction.id.desc()).limit(500).all())
     return {'counts': counts, 'categories': tenant_categories(ctx.uids),
             'items': [_tx_out(t, ctx) for t in rows]}
@@ -617,7 +638,7 @@ def list_transactions(status: Literal['pending', 'duplicate', 'ignored', 'import
 def review_next(offset: int = Query(0, ge=0, le=500), ctx: Ctx = Depends(get_ctx_site_or_bot)):
     """Mais antigos primeiro; `offset` pula os que a pessoa deixou para depois."""
     _enabled_tenant(ctx)
-    q = BankTransaction.query.filter_by(user_id=ctx.user.id, status='pending')
+    q = BankTransaction.query.filter(_seen_tx(ctx), BankTransaction.status == 'pending')
     total = q.count()
     tx = q.order_by(BankTransaction.date, BankTransaction.id).offset(offset).first() if offset < total else None
     return {'total': total, 'offset': offset, 'item': _tx_out(tx, ctx) if tx else None,
@@ -659,7 +680,8 @@ def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_site_or_bot
             done += 1
         else:
             known += 1
-    of.reconcile_payments(ctx.user.id)  # pagamento de fatura que chegou antes das compras
+    for owner in {t.user_id for t in rows.values()}:
+        of.reconcile_payments(owner)  # pagamento de fatura que chegou antes das compras
     db.session.commit()
     msg = f'{done} despesa(s) lançada(s) no FinFam.' if done else 'Nada para lançar.'
     if known:
@@ -716,7 +738,7 @@ def set_notify(body: NotifyIn, ctx: Ctx = Depends(get_ctx_session)):
 def invoice_check(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx)):
     _enabled_tenant(ctx)
     return {'month': period.month, 'year': period.year,
-            'cards': of.invoice_check(ctx.user.id, period.month, period.year)}
+            'cards': of.invoice_check(_seen(ctx), period.month, period.year)}
 
 
 @router.get('/balances', summary='Saldo das minhas contas correntes/poupança conectadas (só consulta)')
@@ -725,9 +747,10 @@ def bank_balances(ctx: Ctx = Depends(get_ctx)):
     if ctx.tenant is None or not ctx.tenant.open_finance_enabled:
         return {'enabled': False, 'items': [], 'total': 0}
     rows = (BankAccount.query.join(BankConnection)
-            .filter(BankConnection.user_id == ctx.user.id, BankAccount.type == 'BANK', BankAccount.balance.isnot(None))
+            .filter(_seen(ctx), BankAccount.type == 'BANK', BankAccount.balance.isnot(None))
             .order_by(BankConnection.id, BankAccount.id).all())
     items = [{'id': a.id, 'bank': a.connection.label, 'name': a.name, 'subtype': a.subtype,
+              'owner_name': None if a.connection.user_id == ctx.user.id else _name(a.connection.user_id),
               'last_digits': of.last4(a.number), 'balance': float(a.balance), 'currency': a.currency or 'BRL',
               'updated_at': (a.connection.last_updated_at.isoformat() + 'Z') if a.connection.last_updated_at else None}
              for a in rows]
@@ -740,10 +763,11 @@ def bank_investments(ctx: Ctx = Depends(get_ctx)):
     """Saldo como o banco informa na última leitura. Sem Open Finance liberado: lista vazia."""
     if ctx.tenant is None or not ctx.tenant.open_finance_enabled:
         return {'enabled': False, 'items': [], 'total': 0}
-    rows = (BankInvestment.query.join(BankConnection).filter(BankConnection.user_id == ctx.user.id)
+    rows = (BankInvestment.query.join(BankConnection).filter(_seen(ctx))
             .filter(func.coalesce(BankInvestment.status, '') != 'TOTAL_WITHDRAWAL')
             .order_by(BankConnection.id, BankInvestment.name).all())
     items = [{'id': i.id, 'name': i.name, 'bank': i.connection.label, 'type': i.type, 'subtype': i.subtype,
+              'owner_name': None if i.connection.user_id == ctx.user.id else _name(i.connection.user_id),
               'issuer': i.issuer, 'balance': float(i.balance or 0),
               'amount_invested': float(i.amount_invested) if i.amount_invested is not None else None,
               'amount_withdrawal': float(i.amount_withdrawal) if i.amount_withdrawal is not None else None,
@@ -762,11 +786,11 @@ def summary(status: Literal['pending', 'duplicate', 'ignored', 'imported'] = 'pe
     _enabled_tenant(ctx)
     counts = {s: 0 for s in STATUSES}
     for st, n in (db.session.query(BankTransaction.status, func.count(BankTransaction.id))
-                  .filter(BankTransaction.user_id == ctx.user.id).group_by(BankTransaction.status)):
+                  .filter(_seen_tx(ctx)).group_by(BankTransaction.status)):
         counts[st] = n
-    rows = (BankTransaction.query.filter_by(user_id=ctx.user.id, status=status)
+    rows = (BankTransaction.query.filter(_seen_tx(ctx), BankTransaction.status == status)
             .order_by(BankTransaction.date.desc()).limit(max(1, min(limit, 200))).all())
-    conns = BankConnection.query.filter_by(user_id=ctx.user.id).all()
+    conns = BankConnection.query.filter(_seen(ctx)).all()
     return {'counts': counts,
             'banks': [{'name': c.label, 'status': c.status, 'auto_import': bool(c.auto_import),
                        'last_updated_at': c.last_updated_at.isoformat() + 'Z' if c.last_updated_at else None} for c in conns],

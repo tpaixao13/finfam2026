@@ -1095,3 +1095,41 @@ def test_bills_calendar_groups_card_invoice(client, family, other_family):
     assert sum(i['amount'] for i in inv) + sum(i['amount'] for i in items if i['type'] == 'expense') == r['totals']['total']
     assert all(i['label'] == 'Fatura Nubank' for i in inv)
     session.remove()
+
+
+def test_shared_bank_family_sees_and_reviews(client, family, bank, txs, monkeypatch):  # noqa: F811
+    from test_pluggy import _member
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    txs[acc] += [{'id': 's-1', 'type': 'DEBIT', 'amount': -40.0, 'date': day(1), 'description': 'Padaria Real'},
+                 {'id': 's-2', 'type': 'DEBIT', 'amount': -15.0, 'date': day(1), 'description': 'Banca'}]
+    _post_item(family)
+    g = _member(client, family)
+    conn_id = family.get('/pluggy/items').json()['items'][0]['id']
+    # sem compartilhar: a Greyce não vê nada
+    assert g.get('/pluggy/items').json()['items'] == []
+    assert g.get('/pluggy/balances').json()['items'] == []
+    assert g.get('/pluggy/transactions').json()['counts']['pending'] == 0
+    tid = family.get('/pluggy/transactions').json()['items'][0]['id']
+    assert g.post('/pluggy/transactions/ignore', json={'ids': [tid]}).status_code == 404
+    # a Greyce não liga o compartilhamento de um banco que não é dela
+    assert g.put(f'/pluggy/items/{conn_id}', json={'shared': True}).status_code == 404
+
+    r = family.put(f'/pluggy/items/{conn_id}', json={'shared': True})
+    assert r.status_code == 200 and r.json()['item']['shared'] is True
+    items = g.get('/pluggy/items').json()['items']
+    assert len(items) == 1 and items[0]['mine'] is False and items[0]['owner_name'] == 'Tiago'
+    assert g.get('/pluggy/balances').json()['items'][0]['owner_name'] == 'Tiago'
+    pend = g.get('/pluggy/transactions').json()
+    assert pend['counts']['pending'] == 2 and pend['items'][0]['owner_name'] == 'Tiago'
+    # revisa: a despesa é do dono do banco
+    padaria = next(i for i in pend['items'] if i['description'] == 'Padaria Real')
+    assert g.post('/pluggy/transactions/approve', json={'items': [{'id': padaria['id'], 'category': 'Alimentação'}]}).status_code == 200
+    assert Expense.query.filter_by(description='Padaria Real').one().user_id == family.user['id']
+    banca = next(i for i in pend['items'] if i['description'] == 'Banca')
+    assert g.post('/pluggy/transactions/ignore', json={'ids': [banca['id']]}).status_code == 200
+    # mexer no banco continua só com o dono
+    assert g.delete(f'/pluggy/items/{conn_id}').status_code in (404, 409)
+    assert g.post(f'/pluggy/items/{conn_id}/refresh').status_code in (404, 409)
+    family.put(f'/pluggy/items/{conn_id}', json={'shared': False})
+    assert g.get('/pluggy/items').json()['items'] == []
+    session.remove()
