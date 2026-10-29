@@ -292,6 +292,18 @@ def test_interpret_queries_are_checked(client, family, fake_ai):
     fake_ai['answer'] = {'intent': 'spending', 'query': {'category': 'Moradia', 'months': 6}}
     q = family.post('/ai/interpret', json={'text': 'liste nos últimos meses os gastos com DEBITO PRESTACAO HAB'}).json()['query']
     assert (q['category'], q['text'], q['months']) == (None, 'DEBITO PRESTACAO HAB', 6)
+    # contas de uma pessoa da família: a IA manda o id, ou o FinFam acha pelo nome na frase
+    session.get(Tenant, family.tenant['id']).plan = 'anual'
+    session.commit()
+    r = family.post('/family/members', json={'name': 'Greyce Paixão', 'email': 'gp@test.com', 'password': 'senha-segura',
+                                             'confirm_password': 'senha-segura'})
+    assert r.status_code == 201, r.text
+    gid = r.json()['member']['id']
+    fake_ai['answer'] = {'intent': 'spending', 'query': {'month': 10, 'text': 'Greyce'}}
+    q = family.post('/ai/interpret', json={'text': 'contas da Greyce no mês de outubro'}).json()['query']
+    assert (q['person_id'], q['person_name'], q['text'], q['month']) == (gid, 'Greyce Paixão', None, 10)
+    fake_ai['answer'] = {'intent': 'bills', 'query': {'person_id': 99999}}  # id de fora da família: ignorado
+    assert family.post('/ai/interpret', json={'text': 'contas a pagar'}).json()['query']['person_id'] is None
     fake_ai['answer'] = {'intent': 'spending', 'query': {'category': 'Moradia', 'months': 99}}
     q = family.post('/ai/interpret', json={'text': 'quanto gastei de MORADIA'}).json()['query']
     assert (q['category'], q['text'], q['months']) == ('Moradia', None, None)

@@ -447,6 +447,15 @@ def test_ai_queries_spending_purchases_and_bills_days():
     assert 'nos últimos 3 meses: <b>R$ 900,00</b> em 9' in tg.last['text'] and '• out/2026: R$ 300,00' in tg.last['text']
     assert '<b>Total</b>: R$ 900,00' in tg.last['text'] and '<b>Média por mês</b>: R$ 300,00 (3 meses)' in tg.last['text']
 
+    q7 = {**q, 'category': None, 'person_id': 2, 'person_name': 'Greyce'}
+    b7 = Bot(tg, StubApi({'intent': 'spending', 'query': q7, 'reply': ''}))
+    b7.handle(_msg(74, 'contas da Greyce no mês de outubro'))
+    assert ('/expenses', {'per_page': 15, 'month': 10, 'year': 2026, 'user_id': 2}) in b7.api.gets
+    assert '<b>Gastos de Greyce</b> em outubro/2026' in tg.last['text']
+    b8 = Bot(tg, StubApi({'intent': 'bills', 'query': {**q7, 'days': 7}, 'reply': ''}))
+    b8.handle(_msg(75, 'contas da Greyce'))
+    assert ('/expenses/bills', {'days_ahead': 7, 'user_id': 2}) in b8.api.gets and 'Contas a pagar de Greyce' in tg.last['text']
+
     q2 = {**q, 'category': None, 'date_from': '2026-10-20', 'date_to': '2026-10-20'}
     b2 = Bot(tg, StubApi({'intent': 'purchases', 'query': q2, 'reply': ''}))
     b2.handle(_msg(71, 'o que comprei dia 20/10'))

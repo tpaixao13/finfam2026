@@ -237,8 +237,11 @@ class Bot:
                 raise
             return None
 
-    def bills(self, chat_id: int, message_id: int | None = None, days: int = 7) -> None:
-        text, markup = bills_view(self.api.get(chat_id, '/expenses/bills', days_ahead=days), days)
+    def bills(self, chat_id: int, message_id: int | None = None, days: int = 7, person: dict | None = None) -> None:
+        person = person or {}
+        who = {'user_id': person['id']} if person.get('id') else {}
+        r = self.api.get(chat_id, '/expenses/bills', days_ahead=days, **who)
+        text, markup = bills_view(r, days, person.get('name'))
         if message_id:
             self.tg.edit(chat_id, message_id, text, markup)
         else:
@@ -341,7 +344,8 @@ class Bot:
         """Responde ao que a IA entendeu (de texto, foto ou áudio)."""
         intent, q = r['intent'], r.get('query') or {}
         if intent == 'bills':
-            self.bills(chat_id, days=q.get('days') or 7)
+            person = {'id': q['person_id'], 'name': q.get('person_name')} if q.get('person_id') else None
+            self.bills(chat_id, days=q.get('days') or 7, person=person)
         elif intent == 'spending':
             self.spending(chat_id, q)
         elif intent == 'purchases':
@@ -373,16 +377,16 @@ class Bot:
     def spending(self, chat_id: int, q: dict) -> None:
         if (q.get('months') or 1) > 1:  # "nos últimos meses": um total por mês
             rows = [(m, y, self._search(chat_id, month=m, year=y, category=q.get('category'), search=q.get('text'),
-                                        payment_method=q.get('payment_method')))
+                                        payment_method=q.get('payment_method'), user_id=q.get('person_id')))
                     for m, y in months_back(q['month'], q['year'], q['months'])]
             return self.tg.send(chat_id, spending_months_text(q, rows))
         r = self._search(chat_id, month=q['month'], year=q['year'], category=q.get('category'), search=q.get('text'),
-                         payment_method=q.get('payment_method'))
+                         payment_method=q.get('payment_method'), user_id=q.get('person_id'))
         self.tg.send(chat_id, spending_text(q, r))
 
     def purchases(self, chat_id: int, q: dict) -> None:
         r = self._search(chat_id, purchase_from=q['date_from'], purchase_to=q['date_to'],
-                         category=q.get('category'), search=q.get('text'))
+                         category=q.get('category'), search=q.get('text'), user_id=q.get('person_id'))
         self.tg.send(chat_id, purchases_text(q, r))
 
     def ai_expense(self, chat_id: int, d: dict) -> None:

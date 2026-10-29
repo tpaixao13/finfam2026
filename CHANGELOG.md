@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.7.2 — bot: contas de uma pessoa da família (29/10/2026)
+
+- "contas da Greyce no mês de outubro", "o que o Bruno gastou este mês", "contas a pagar da Greyce": o bot
+  filtra pela pessoa (a IA manda o id; se não mandar, o FinFam acha o nome na frase depois de de/da/do/pra).
+  Vale para gastos do mês, de vários meses, compras de um dia e contas a pagar. Id de fora da família é ignorado.
+- A lista mostra a situação de cada conta: ✅ paga, ⏳ a pagar, ⚠️ vencida.
+
 ## 2026.7.1 — revisão de segurança e unix (29/10/2026)
 
 - Banco compartilhado: no grupo do Telegram o aviso mostra só quantidade e total (sem a descrição das

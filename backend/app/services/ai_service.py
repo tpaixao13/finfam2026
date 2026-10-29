@@ -252,7 +252,7 @@ Interprete a mensagem do usuário e responda SOMENTE com um objeto JSON, sem tex
              "installments": int|null, "category": str|null, "date": "AAAA-MM-DD"|null, "person_id": int|null} | null,
  "query": {"days": int|null, "category": str|null, "text": str|null, "payment_method": str|null,
            "card_id": int|null, "bank": str|null,
-           "month": int|null, "year": int|null, "months": int|null,
+           "month": int|null, "year": int|null, "months": int|null, "person_id": int|null,
            "date_from": "AAAA-MM-DD"|null, "date_to": "AAAA-MM-DD"|null} | null,
  "reply": str}
 Regras:
@@ -274,6 +274,10 @@ Regras:
   Se ela citar um NOME de lançamento/estabelecimento como aparece no extrato ("DEBITO PRESTACAO HAB", "Sabesp",
   "Netflix", "uber"), use query.text com esse nome EXATO e category null — mesmo que pareça de uma categoria.
   category só quando ela falar da categoria em si (alimentação, moradia, saúde…).
+  "contas/gastos/despesas de <pessoa> em <mês>" ("contas da Greyce em outubro", "o que o Bruno gastou este mês")
+  também é "spending": query.person_id = id dela na lista de Membros, month/year do mês, category e text null.
+- query.person_id (em spending, purchases e bills): só quando a pergunta for sobre UM membro ("de Greyce",
+  "do Bruno", "minhas" = quem está escrevendo). Use o id da lista de Membros. Senão null.
   Período de vários meses ("nos últimos meses", "últimos 3 meses", "este ano"): query.months = quantos meses
   até o mês atual (sem número: 6; "este ano": o nº do mês atual). Um mês só: months null.
 - "invoices": pergunta o valor da FATURA do cartão de crédito ("qual o valor do cartão de crédito de novembro?",
@@ -427,8 +431,22 @@ def quoted_name(message: str | None, categories: list[str]) -> str | None:
     return None if match_category(name, categories) else name
 
 
+def mentioned_member(message: str | None, members: list[dict]) -> dict | None:
+    """Membro citado na frase depois de de/da/do/pra/para ("contas da Greyce"): nome completo ou primeiro nome."""
+    text = _norm(message)
+    if len(members) < 2 or not text:
+        return None
+    for m in sorted(members, key=lambda m: -len(m['name'])):
+        full = _norm(m['name'])
+        for name in dict.fromkeys([full, full.split()[0] if full else '']):
+            if name and re.search(rf'\b(?:de|da|do|pra|para|pro)\s+(?:a\s+|o\s+)?{re.escape(name)}\b', text):
+                return m
+    return None
+
+
 def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str],
-             methods: list[str] | None = None, cards: list[dict] | None = None, message: str | None = None) -> dict:
+             methods: list[str] | None = None, cards: list[dict] | None = None, message: str | None = None,
+             members: list[dict] | None = None) -> dict:
     """Confere os filtros da consulta: números em faixa, categoria real, datas plausíveis."""
     raw = raw if isinstance(raw, dict) else {}
     days = _int(raw.get('days'))
@@ -458,7 +476,12 @@ def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str
     if bank and text and match_bank(text, [bank]):
         text = None  # "da Caixa" é o banco, não um nome de lançamento
     months = _int(raw.get('months'))
-    return {'days': days if days and 0 <= days <= 90 else 7, 'category': category, 'payment_method': method,
+    members = members or []
+    by_id = {m['id']: m for m in members}
+    person = by_id.get(_int(raw.get('person_id'))) or mentioned_member(message, members)
+    if person and text and _norm(text) in {_norm(person['name']), _norm(person['name']).split()[0]}:
+        text = None  # "da Greyce" é a pessoa, não um nome de lançamento
+    return {'person_id': person['id'] if person else None, 'person_name': person['name'] if person else None,'days': days if days and 0 <= days <= 90 else 7, 'category': category, 'payment_method': method,
             'months': months if months and 2 <= months <= 24 else None,
             'card_id': card_id, 'bank': bank,
             'text': None if category else text, 'month': month, 'year': year,

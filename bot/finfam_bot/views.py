@@ -65,9 +65,10 @@ def invest_text(d: dict, symbol: str, fx_rate: float | None, today: date) -> str
     return '\n'.join(lines)
 
 
-def bills_view(b: dict, days: int) -> tuple[str, list[list[dict]]]:
+def bills_view(b: dict, days: int, person: str | None = None) -> tuple[str, list[list[dict]]]:
     """Texto e botões (pagar / atualizar) de /contas."""
-    text, buttons = [f'📅 <b>Contas a pagar</b> — total {brl(b["total"])}'], []
+    whose = f' de {h(person)}' if person else ''
+    text, buttons = [f'📅 <b>Contas a pagar{whose}</b> — total {brl(b["total"])}'], []
     for key, title in (('overdue', '⚠️ Em atraso'), ('today', '🔔 Vencem hoje'), ('upcoming', f'🗓 Próximos {days} dias')):
         items = b[key]
         if not items:
@@ -130,17 +131,30 @@ MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', '
           'outubro', 'novembro', 'dezembro']
 
 
+_STATUS_MARK = {'pago': ' ✅', 'vencida': ' ⚠️ vencida', 'pendente': ' ⏳'}
+
+
 def _items(items: list[dict], date_field: str) -> list[str]:
     return [f'• {dm(e.get(date_field))} — {h(e["description"])} — {brl(e["amount"])}'
-            + (f' · {h(e["user_name"])}' if e.get('user_name') else '') for e in items]
+            + (f' · {h(e["user_name"])}' if e.get('user_name') else '') + _STATUS_MARK.get(e.get('status') or '', '')
+            for e in items]
+
+
+def _what(q: dict) -> str:
+    """O que foi perguntado: categoria, nome do lançamento ou forma de pagamento — e de quem."""
+    what = q.get('category') or q.get('text') or ('no ' + q['payment_method'] if q.get('payment_method') else '')
+    who = q.get('person_name')
+    if who:
+        return f'{what} de {who}' if what else f'Gastos de {who}'
+    return what or 'tudo'
 
 
 def spending_text(q: dict, r: dict) -> str:
     """Resposta de "quanto gastei com X no mês"."""
-    what = q.get('category') or q.get('text') or ('no ' + q['payment_method'] if q.get('payment_method') else 'tudo')
+    what = _what(q)
     period = f'{MONTHS[q["month"] - 1]}/{q["year"]}'
     if not r['total']:
-        return f'🔎 Nenhum gasto com <b>{h(what)}</b> em {period}.'
+        return f'🔎 Nada encontrado para <b>{h(what)}</b> em {period}.'
     lines = [f'🔎 <b>{h(what)}</b> em {period}: <b>{brl(r["total_amount"])}</b> em {r["total"]} lançamento(s)', '']
     lines += _items(r['items'], 'purchase_date')
     if r['total'] > len(r['items']):
@@ -159,11 +173,11 @@ def months_back(month: int, year: int, count: int) -> list[tuple[int, int]]:
 
 def spending_months_text(q: dict, rows: list[tuple[int, int, dict]]) -> str:
     """Resposta de "gastos com X nos últimos N meses": um total por mês."""
-    what = q.get('category') or q.get('text') or ('no ' + q['payment_method'] if q.get('payment_method') else 'tudo')
+    what = _what(q)
     total = sum(r['total_amount'] for _, _, r in rows)
     count = sum(r['total'] for _, _, r in rows)
     if not count:
-        return f'🔎 Nenhum gasto com <b>{h(what)}</b> nos últimos {len(rows)} meses.'
+        return f'🔎 Nada encontrado para <b>{h(what)}</b> nos últimos {len(rows)} meses.'
     lines = [f'🔎 <b>{h(what)}</b> nos últimos {len(rows)} meses: <b>{brl(total)}</b> em {count} lançamento(s)', '']
     for m, y, r in rows:
         label = f'{MONTHS[m - 1][:3]}/{y}'
@@ -185,7 +199,7 @@ def spending_months_text(q: dict, rows: list[tuple[int, int, dict]]) -> str:
 def purchases_text(q: dict, r: dict) -> str:
     """Resposta de "o que comprei dia X / no período"."""
     period = dm(q['date_from']) if q['date_from'] == q['date_to'] else f'{dm(q["date_from"])} a {dm(q["date_to"])}'
-    extra = f' ({h(q.get("category") or q.get("text"))})' if q.get('category') or q.get('text') else ''
+    extra = f' ({h(_what(q))})' if q.get('category') or q.get('text') or q.get('person_name') else ''
     if not r['total']:
         return f'🧾 Nenhuma compra registrada em {period}{extra}.'
     lines = [f'🧾 Compras de {period}{extra}: <b>{brl(r["total_amount"])}</b> em {r["total"]} lançamento(s)', '']
