@@ -20,7 +20,7 @@ from finfam_bot.fmt import btn, dm, h
 from finfam_bot.http import ApiError, FinFam, Telegram
 from finfam_bot.invest_flow import InvestFlow
 from finfam_bot.parsers import parse_amount, parse_date, pick_person, quick_parse  # noqa: F401  (usados pelos testes)
-from finfam_bot.review import Review
+from finfam_bot.review import IncomeReview, Review
 from finfam_bot.views import (HELP, MENU, agenda_text, balances_text, bank_text, bills_view, draft_text, goals_text,
                               invoices_text, months_back, portfolio_text, purchases_text, spending_months_text,
                               spending_text, summary_text, week_text)
@@ -63,7 +63,7 @@ class Bot:
         self.cache: dict[tuple, tuple[float, object]] = {}  # (chat, recurso) → (quando, dados)
         self.reviews: dict[tuple, dict] = {}  # (chat, lançamento do banco) → categoria escolhida
         self.expense, self.invest = ExpenseFlow(self), InvestFlow(self)
-        self.review = Review(self)
+        self.review, self.incomes = Review(self), IncomeReview(self)
         self.guided: dict[str, Flow] = {f.kind: f for f in (self.expense, self.invest)}
 
     # entrada ─────────────────────────────────────────────────────────────────
@@ -135,6 +135,7 @@ class Bot:
                     '/agenda': lambda: self.agenda(chat_id), '/metas': lambda: self.goals(chat_id),
                     '/semana': lambda: self.week(chat_id), '/menu': lambda: self.menu(chat_id),
                     '/revisar': lambda: self.review.show(chat_id),
+                    '/entradas': lambda: self.incomes.show(chat_id),
                     '/desconectar': lambda: self.unlink(chat_id)}
         if command in handlers:
             handlers[command]()
@@ -453,6 +454,8 @@ class Bot:
             return self._menu_answer(cq, arg, chat_id)
         if kind == 'rv':
             return self.review.button(cq, arg, chat_id, message_id)
+        if kind == 'ri':
+            return self.incomes.button(cq, arg, chat_id, message_id)
         if kind in ('ok', 'no'):
             return self._draft_answer(cq, kind, arg, chat_id, message_id)
         flow = next((f for f in self.guided.values() if f.prefix == kind), None)
@@ -464,7 +467,7 @@ class Bot:
         self.tg.answer(cq['id'])
         actions = {'contas': self.bills, 'agenda': self.agenda, 'resumo': self.summary, 'semana': self.week,
                    'metas': self.goals, 'carteira': self.portfolio, 'banco': self.bank,
-                   'revisar': self.review.show,
+                   'revisar': self.review.show, 'entradas': self.incomes.show,
                    'lancar': lambda c: self.linked(c) and self.expense.start(c)}
         if item in actions:
             actions[item](chat_id)

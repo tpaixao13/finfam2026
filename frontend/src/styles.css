@@ -762,3 +762,5 @@ a.insight:hover { background: #e8edf1; }
   .cal-item .badge { grid-column: 1 / -1; justify-self: start; }
 }
 .auth-pitch span { display: block; }
+
+.balance-note { margin: 0; padding: .6rem 1rem .8rem; border-top: 1px solid var(--line); }

@@ -12,7 +12,7 @@ COMMANDS = [('menu', 'Menu com botões'), ('contas', 'Contas a pagar'), ('agenda
             ('resumo', 'Resumo do mês'), ('semana', 'Como foi a semana'), ('metas', 'Progresso das metas'),
             ('lancar', 'Lançar um gasto'), ('investir', 'Registrar um investimento'),
             ('carteira', 'Seus investimentos'), ('banco', 'O que chegou dos bancos conectados'),
-            ('revisar', 'Revisar o que chegou do banco'),
+            ('revisar', 'Revisar o que chegou do banco'), ('entradas', 'Entradas do banco para Rendas'),
             ('openfinance', 'Open Finance: bancos, saldo, investimentos e faturas'),
             ('cancelar', 'Cancelar o lançamento em andamento'), ('ajuda', 'O que o bot faz'),
             ('desconectar', 'Desligar este Telegram da conta')]

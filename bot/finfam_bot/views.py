@@ -14,6 +14,7 @@ HELP = ('<b>O que eu faço</b>\n'
         '/carteira — seus investimentos (lançados e dos bancos)\n'
         '/banco ou /openfinance — bancos conectados: o que chegou, saldo, investimentos e se a fatura bate\n'
         '/revisar — revisar aqui o que chegou do banco (lançar, trocar categoria, ignorar)\n'
+        '/entradas — PIX recebido, salário e rendimentos do banco: lançar em Rendas ou ignorar\n'
         '/cancelar — cancela o lançamento em andamento\n'
         '/desconectar — desliga este Telegram da sua conta\n\n'
         'Com a IA configurada no site, é só escrever, por exemplo:\n'
@@ -29,6 +30,7 @@ MENU = [[btn('📅 Contas', 'm:contas'), btn('🗓 Agenda', 'm:agenda')],
         [btn('📊 Resumo do mês', 'm:resumo'), btn('📈 Semana', 'm:semana')],
         [btn('🎯 Metas', 'm:metas'), btn('💼 Carteira', 'm:carteira')],
         [btn('🏦 Banco', 'm:banco'), btn('📝 Revisar do banco', 'm:revisar')],
+        [btn('💰 Entradas do banco', 'm:entradas')],
         [btn('➕ Lançar um gasto', 'm:lancar')]]
 
 
@@ -369,4 +371,22 @@ def review_text(item: dict, total: int, offset: int, category: str, note: str = 
     if item.get('bank_pending'):
         lines.append('⏳ Ainda pendente no banco')
     lines.append(f'Categoria: <b>{h(category)}</b>')
+    return '\n'.join(lines)
+
+
+def income_text(item: dict, total: int, offset: int, kind: str, note: str = '') -> str:
+    """Uma entrada do banco para revisar como renda (/entradas)."""
+    head = f'{note}\n\n' if note else ''
+    sug = item.get('suggestion') or {}
+    bank = item['bank_name'] + (f' (de {item["owner_name"]})' if item.get('owner_name') else '')
+    lines = [f'{head}💰 <b>Entrada do banco</b> — {offset + 1} de {total}', '',
+             f'<b>{h(sug.get("company") or item["description"])}</b> — {brl(item["amount"])}',
+             f'{dm(item["date"])} · {h(bank)} · {h(item["description"])}',
+             f'Tipo: <b>{h(sug.get("label") or "Entrada")}</b> · {h(kind)}']
+    if sug.get('own_transfer_hint'):
+        lines.append('🔁 Parece dinheiro seu vindo de outra conta: se for, toque em Ignorar.')
+    if sug.get('expected'):
+        e = sug['expected']
+        lines.append(f'📌 Renda prevista do mês: {h(e.get("company") or "sem nome")} {brl(e["amount"])} — '
+                     'aprovar marca ela como recebida, com o valor do banco.')
     return '\n'.join(lines)

@@ -38,6 +38,9 @@ function HeaderActions({ cfg, onConnected }: { cfg: PluggyConfig; onConnected: (
       {(cfg.configured || cfg.to_review > 0) && <Link to="/bank/review" className="btn btn-ghost">
         Revisar importados{cfg.to_review ? <Badge tone="warning">{cfg.to_review}</Badge> : null}
       </Link>}
+      {(cfg.configured || cfg.incomes_to_review > 0) && <Link to="/bank/incomes" className="btn btn-ghost">
+        Entradas{cfg.incomes_to_review ? <Badge tone="success">{cfg.incomes_to_review}</Badge> : null}
+      </Link>}
       {cfg.configured && <>
         <Button icon="plus" busy={busy} disabled={full} title={full ? 'Limite de bancos da sua família' : undefined}
           onClick={() => setAsking(true)}>Conectar banco</Button>

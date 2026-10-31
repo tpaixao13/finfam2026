@@ -657,3 +657,46 @@ def test_group_link_and_group_refuses_finance(bot, api_url, family):
     b.handle(_msg(-100123, '/contas', chat_type='group'))
     assert 'só mando os avisos' in tg.last['text']
     _call(api_url, 'DELETE', '/telegram/group', token=family)
+
+
+class IncomeApi(StubApi):
+    def __init__(self):
+        super().__init__({})
+        self.queue = [{'id': 31, 'date': '2026-10-30', 'description': 'PAGTO SALARIO ACME', 'amount': 5123.45,
+                       'bank_name': 'C6 Bank', 'owner_name': None, 'counterpart': None,
+                       'suggestion': {'label': 'Salário', 'income_type': 'fixa', 'company': 'Acme',
+                                      'expected': {'id': 4, 'company': 'ACME', 'amount': 5000.0}}},
+                      {'id': 32, 'date': '2026-10-30', 'description': 'PIX RECEBIDO', 'amount': 150.0,
+                       'bank_name': 'C6 Bank', 'owner_name': None, 'counterpart': 'MARIA',
+                       'suggestion': {'label': 'PIX recebido', 'income_type': 'variavel', 'company': 'Maria',
+                                      'expected': None, 'own_transfer_hint': False}}]
+
+    def get(self, chat_id, path, **query):
+        if path == '/pluggy/incomes/next':
+            off = query.get('offset', 0)
+            return {'total': len(self.queue), 'offset': off, 'item': self.queue[off] if off < len(self.queue) else None}
+        return super().get(chat_id, path, **query)
+
+    def post(self, chat_id, path, body=None):
+        self.posted.append((path, body))
+        if path == '/pluggy/incomes/approve':
+            self.queue = [t for t in self.queue if t['id'] != body['items'][0]['id']]
+            return {'message': '1 renda(s) lançada(s).'}
+        return {'message': 'ok'}
+
+
+def test_review_incomes_with_buttons():
+    tg, api = FakeTelegram(), IncomeApi()
+    b = Bot(tg, api)
+    b.handle(_click(80, 'ri:go:0'))  # botão "💰 Revisar entradas" do aviso
+    assert 'Entrada do banco' in tg.last['text'] and 'Renda prevista do mês: ACME' in tg.last['text']
+    assert tg.button('✅ Recebida: ACME')
+    b.handle(_click(80, tg.button('⏭')))
+    assert 'Maria' in tg.last['text'] and 'Renda variável' in tg.last['text']
+    b.handle(_click(80, tg.button('🔁')))
+    b.handle(_click(80, tg.button('Renda fixa')))
+    assert api.posted[-1] == ('/pluggy/incomes/approve', {'items': [{'id': 32, 'income_type': 'fixa', 'company': 'Maria'}]})
+    b.handle(_click(80, tg.button('🚫')))
+    assert api.posted[-1] == ('/pluggy/incomes/ignore', {'ids': [31]})
+    b.handle(_msg(80, '/entradas'))
+    assert 'Entrada do banco' in tg.last['text'] or 'Nenhuma entrada' in tg.last['text']

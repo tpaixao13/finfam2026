@@ -2,6 +2,7 @@ import { Money, Panel } from '../components/ui'
 import { api } from '../lib/api'
 import { dateBR, money } from '../lib/format'
 import { useApi } from '../lib/hooks'
+import { Link } from '../lib/router'
 import { useSession } from '../lib/session'
 
 interface BankBalance {
@@ -9,7 +10,7 @@ interface BankBalance {
   owner_name?: string | null
   balance: number; currency: string; updated_at: string | null
 }
-interface BankBalances { enabled: boolean; items: BankBalance[]; total: number }
+interface BankBalances { enabled: boolean; items: BankBalance[]; total: number; incomes_to_review?: number }
 
 const ACCOUNT_KIND: Record<string, string> = { CHECKING_ACCOUNT: 'Conta corrente', SAVINGS_ACCOUNT: 'Poupança' }
 
@@ -35,6 +36,10 @@ export function BankBalancesPanel() {
             <span className="num">{money(a.balance, a.currency)}</span>
           </li>))}
       </ul>
+      {!!b.incomes_to_review && (
+        <p className="small balance-note"><Link to="/bank/incomes">{b.incomes_to_review} entrada(s) do banco para revisar</Link>
+          {' '}<span className="muted">— PIX recebido, salário, rendimentos: aprove para virar renda.</span></p>
+      )}
     </Panel>
   )
 }

@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026.8.0 — entradas do banco viram Rendas (31/10/2026)
+
+- **Entradas na conta corrente** (PIX recebido, salário, TED, rendimento) agora são trazidas do banco — antes
+  eram descartadas — e esperam revisão em **Contas conectadas → Entradas** (`/bank/incomes`). Só vira renda o
+  que você aprovar. Na primeira leitura depois de atualizar, vêm as entradas desde o início escolhido ao conectar.
+- **Tipo sugerido:** Salário (renda fixa), PIX recebido, Transferência recebida, Rendimento, Estorno/reembolso
+  (variável), com a fonte (o pagador que o banco informa, ou a descrição limpa). Entrada parecida com uma renda
+  do mês passado (mesma fonte, valor até 20% diferente) vem como **renda fixa**.
+- **Renda prevista do mês:** se já existe uma renda ainda não recebida de valor parecido (até 15%), aprovar marca
+  ela como recebida com o valor do banco, em vez de criar outra. Entrada igual a uma renda já recebida fica em
+  "Já em Rendas".
+- **Transferência entre as suas contas:** saída e entrada do mesmo valor (até 1 dia de diferença) em contas
+  correntes suas (ou compartilhadas pela família) são ignoradas dos dois lados — nem despesa, nem renda.
+  Resgate de investimento também fica de fora. Dinheiro que chega com o seu próprio nome (de um banco não
+  conectado) vem marcado como "Transferência sua?" e desmarcado.
+- **Telegram:** o aviso "chegou do banco" mostra as entradas e tem o botão **💰 Revisar entradas**; `/entradas`
+  e o menu revisam uma por vez (✅ Lançar como renda / 🔁 Fixa ou variável / 🚫 Ignorar). No grupo da família,
+  só quantidade e total.
+- Rendas mostra o atalho "N entrada(s) do banco para revisar" no quadro do saldo das contas.
+- Tabela nova `bank_incomes` (criada sozinha); `/pluggy/incomes` (lista, próxima, aprovar, ignorar, restaurar).
+
 ## 2026.7.3 — bot: "gastos da Greyce" trazia a família toda (29/10/2026)
 
 - A IA às vezes entendia "gastos da Greyce" como o resumo geral do mês. Com uma pessoa da família citada e

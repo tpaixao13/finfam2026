@@ -54,6 +54,12 @@ def _seen_tx(ctx: Ctx):
     return BankTransaction.account_id.in_(accounts)
 
 
+def _incomes_to_review(ctx: Ctx) -> int:
+    from app.models import BankIncome
+    accounts = db.session.query(BankAccount.id).join(BankConnection).filter(_seen(ctx))
+    return BankIncome.query.filter(BankIncome.account_id.in_(accounts), BankIncome.status == 'pending').count()
+
+
 def _enabled_tenant(ctx: Ctx) -> Tenant:
     if ctx.tenant is None or not ctx.tenant.open_finance_enabled:
         raise HTTPException(status_code=403, detail={
@@ -146,6 +152,7 @@ def _out(ctx: Ctx, cfg: PluggyConfig | None) -> dict:
         'include_sandbox': settings.pluggy_include_sandbox,
         'connections': BankConnection.query.filter_by(user_id=ctx.user.id).count() if cfg else 0,
         'to_review': BankTransaction.query.filter(_seen_tx(ctx), BankTransaction.status == 'pending').count(),
+        'incomes_to_review': _incomes_to_review(ctx),
         'notify': bool(cfg.notify) if cfg else True,
     }
 
@@ -759,7 +766,7 @@ def bank_balances(ctx: Ctx = Depends(get_ctx)):
               'last_digits': of.last4(a.number), 'balance': float(a.balance), 'currency': a.currency or 'BRL',
               'updated_at': (a.connection.last_updated_at.isoformat() + 'Z') if a.connection.last_updated_at else None}
              for a in rows]
-    return {'enabled': True, 'items': items,
+    return {'enabled': True, 'items': items, 'incomes_to_review': _incomes_to_review(ctx),
             'total': round(sum(i['balance'] for i in items if i['currency'] == 'BRL'), 2)}
 
 

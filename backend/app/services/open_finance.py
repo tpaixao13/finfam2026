@@ -15,7 +15,8 @@ from decimal import Decimal
 from app.core.db import db
 from app.core.security import decrypt_field
 from app.core.types import utcnow
-from app.models import BankAccount, BankBill, BankConnection, BankInvestment, BankTransaction, CreditCard, Expense, PluggyConfig, User
+from app.models import BankAccount, BankBill, BankConnection, BankIncome, BankInvestment, BankTransaction, CreditCard, Expense, PluggyConfig, User
+from app.services import bank_incomes
 from app.services import bank_categories
 from app.services import pluggy as pg
 from app.services.categorizer import categorize
@@ -840,7 +841,10 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
             acc_since = months_back(start, 2) if conn.tx_synced_at is None else \
                 max(months_back(start, 2), today - timedelta(days=RESYNC_DAYS + 62))
         raws, complete = _fetch(client, acc.pluggy_account_id, acc_since)
-        raws = [r for r in raws if _ID.fullmatch(str(r.get('id') or '')) and _is_expense(acc, r)]
+        raws = [r for r in raws if _ID.fullmatch(str(r.get('id') or ''))]
+        if acc.type == 'BANK':  # entradas (PIX recebido, salário…) vão para a revisão de rendas
+            _sync_incomes(conn, acc, client, raws, start, acc_since, complete)  # contadas à parte (Rendas)
+        raws = [r for r in raws if _is_expense(acc, r)]
         if infer_close_day(acc, raws):
             apply_card_limit(acc)  # o cartão ligado recebe o fechamento descoberto
             by_bill = True
@@ -884,6 +888,8 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
                 tx.status, tx.expense_id = 'duplicate', match.id
                 tx.reason = 'Já estava no FinFam.'
                 take_bank_amount(match, tx)
+            elif acc.type == 'BANK' and bank_incomes.pair_with_income(tx):
+                pass  # transferência para outra conta sua: some junto com a entrada
             elif fresh:
                 new_pending += 1
             db.session.flush()
@@ -891,6 +897,18 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
     conn.tx_synced_at = utcnow()
     db.session.flush()
     return new_pending
+
+
+def _sync_incomes(conn: BankConnection, acc: BankAccount, client: pg.PluggyClient, raws: list[dict],
+                  start: date, since: date, complete: bool) -> int:
+    """Entradas da conta. Na primeira vez traz desde o início escolhido ao conectar (antes as
+    entradas eram descartadas), depois só a janela de releitura."""
+    if conn.tx_synced_at is not None and since > start and not acc.incomes.count():
+        raws, complete = _fetch(client, acc.pluggy_account_id, start)
+        raws = [r for r in raws if _ID.fullmatch(str(r.get('id') or ''))]
+        since = start
+    incomes = [r for r in raws if bank_incomes.is_income(acc, r)]
+    return bank_incomes.sync_account(acc, incomes, max(start, since), complete)
 
 
 def family_of(user_id: int) -> tuple[list[int], int | None]:
@@ -963,6 +981,8 @@ def sync_stale(user_id: int | None = None, max_age_hours: int | None = None, not
             continue
         before = {i for (i,) in db.session.query(BankTransaction.id).join(BankAccount)
                   .filter(BankAccount.connection_id == conn.id).all()}
+        before_incomes = {i for (i,) in db.session.query(BankIncome.id).join(BankAccount)
+                          .filter(BankAccount.connection_id == conn.id).all()}
         try:
             total += sync(conn, client)
             db.session.commit()
@@ -971,13 +991,28 @@ def sync_stale(user_id: int | None = None, max_age_hours: int | None = None, not
             log.warning('Sincronização do item %s falhou: %s', conn.item_id, exc)
             continue
         if notify:
-            notify_new(conn, before)
+            notify_new(conn, before, before_incomes)
     return total
 
 
-def notify_new(conn: BankConnection, before: set[int]) -> bool:
-    """Avisa no Telegram o que chegou do banco nesta leitura (para revisar ou já lançado).
-    Só nas leituras sozinhas (webhook/cron): quem está na página já vê."""
+def _notice_blocks(launched: list, pending: list, incomes: list) -> list[tuple[str, list[str]]]:
+    """Blocos do aviso: (linha de resumo, detalhes que só vão no privado)."""
+    from app.services.telegram import _h
+    blocks = []
+    if launched:
+        blocks.append((f'✅ {len(launched)} lançado(s) automaticamente ({brl(sum(float(t.amount) for t in launched))}).', []))
+    if pending:
+        blocks.append((f'📝 {len(pending)} saída(s) para revisar ({brl(sum(float(t.amount) for t in pending))})',
+                       [f'• {_h(t.description[:40])} — {brl(float(t.amount))}' for t in pending[-5:]]))
+    if incomes:
+        blocks.append((f'💰 {len(incomes)} entrada(s) para revisar como renda ({brl(sum(float(i.amount) for i in incomes))})',
+                       [f'• {_h((i.counterpart or i.description)[:40])} — {brl(float(i.amount))}' for i in incomes[-5:]]))
+    return blocks
+
+
+def notify_new(conn: BankConnection, before: set[int], before_incomes: set[int] | None = None) -> bool:
+    """Avisa no Telegram o que chegou do banco nesta leitura: saídas (para revisar ou já lançadas) e
+    entradas para revisar como renda. Só nas leituras sozinhas (webhook/cron): quem está na página já vê."""
     from app.core.config import settings
     from app.services import telegram as tg
     cfg = PluggyConfig.query.filter_by(user_id=conn.user_id).first()
@@ -986,7 +1021,11 @@ def notify_new(conn: BankConnection, before: set[int]) -> bool:
     new = (BankTransaction.query.join(BankAccount)
            .filter(BankAccount.connection_id == conn.id, BankTransaction.status.in_(('pending', 'imported')),
                    ~BankTransaction.id.in_(before or {0})).all())
-    if not new:
+    incomes = [] if before_incomes is None else (
+        BankIncome.query.join(BankAccount)
+        .filter(BankAccount.connection_id == conn.id, BankIncome.status == 'pending',
+                ~BankIncome.id.in_(before_incomes or {0})).order_by(BankIncome.date).all())
+    if not new and not incomes:
         return False
     owner = db.session.get(User, conn.user_id)
     if conn.shared and owner is not None and owner.tenant is not None:  # banco compartilhado: a família recebe
@@ -995,29 +1034,29 @@ def notify_new(conn: BankConnection, before: set[int]) -> bool:
         chats = tg.linked_chats([conn.user_id])
     if not chats:
         return False
-    pending = [t for t in new if t.status == 'pending']
+    pending = sorted((t for t in new if t.status == 'pending'), key=lambda t: t.date)
     launched = [t for t in new if t.status == 'imported']
     whose = f' (de {tg._h(owner.name)})' if conn.shared and owner is not None else ''
-    lines = [f'🏦 <b>{tg._h(conn.label)}</b>{whose}: {len(new)} lançamento(s) novo(s) do banco.']
-    if launched:
-        lines.append(f'✅ {len(launched)} lançado(s) automaticamente ({brl(sum(float(t.amount) for t in launched))}).')
-    details = []
-    if pending:
-        lines.append(f'📝 {len(pending)} para revisar ({brl(sum(float(t.amount) for t in pending))})')
-        details = [f'• {tg._h(t.description[:40])} — {brl(float(t.amount))}'
-                   for t in sorted(pending, key=lambda t: t.date)[-5:]]
+    head = [f'🏦 <b>{tg._h(conn.label)}</b>{whose}: '
+            + ', '.join(p for p in (f'{len(new)} saída(s)' if new else '', f'{len(incomes)} entrada(s)' if incomes else '')
+                        if p) + ' nova(s) do banco.']
+    blocks = _notice_blocks(launched, pending, incomes)
     base = settings.public_url
     link = [f'{base}/bank/review'] if base.startswith('https://') else []
-    # no privado: com os lançamentos e o botão (o toque chega ao bot, que mostra um por um);
+    # no privado: com os lançamentos e os botões (o toque chega ao bot, que mostra um por um);
     # no grupo da família: só contagem e total (pode ter gente de fora; o bot não atende botões lá)
-    private_text = '\n'.join(lines[:-1] + [lines[-1] + (':' if details else '')] + details + link)
-    group_text = '\n'.join(lines + link)
-    buttons = [[{'text': '📝 Revisar aqui no Telegram', 'callback_data': 'rv:go:0'}]] if pending else None
+    private_lines = list(head)
+    for line, details in blocks:
+        private_lines += [line + (':' if details else '')] + details
+    private_text = '\n'.join(private_lines + link)
+    group_text = '\n'.join(head + [line for line, _ in blocks] + link)
+    buttons = ([[{'text': '📝 Revisar aqui no Telegram', 'callback_data': 'rv:go:0'}]] if pending else []) + \
+              ([[{'text': '💰 Revisar entradas', 'callback_data': 'ri:go:0'}]] if incomes else [])
     sent = False
     for chat in chats:
         private = not str(chat).startswith('-')
         ok, err = tg.send_message(settings.telegram_bot_token, chat, private_text if private else group_text,
-                                  buttons if private else None)
+                                  (buttons or None) if private else None)
         sent = sent or ok
         if not ok:
             log.warning('Aviso do Open Finance não foi para o Telegram: %s', err)

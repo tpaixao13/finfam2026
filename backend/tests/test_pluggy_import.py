@@ -1148,3 +1148,113 @@ def test_shared_bank_family_sees_and_reviews(client, family, bank, txs, monkeypa
     family.put(f'/pluggy/items/{conn_id}', json={'shared': False})
     assert g.get('/pluggy/items').json()['items'] == []
     session.remove()
+
+
+def test_incomes_from_bank_go_to_review_and_become_rendas(client, family, bank, txs, monkeypatch):  # noqa: F811
+    from app.models import BankIncome, Salary
+    acc, cc, _ = _connect(client, family, bank, txs)
+    # uma segunda conta corrente da família, para a transferência entre contas
+    bank['accounts'][ITEM].append({'id': f'{ITEM[:8]}-acc2', 'type': 'BANK', 'subtype': 'SAVINGS_ACCOUNT',
+                                   'name': 'Poupança', 'number': '0001/9999-0', 'balance': 10.0, 'currencyCode': 'BRL'})
+    acc2 = f'{ITEM[:8]}-acc2'
+    txs[acc2] = []
+    # salário previsto (renda fixa ainda não recebida) de 5.000
+    month, year = TODAY.month, TODAY.year
+    family.post('/incomes', json={'amount': '5000', 'company': 'ACME', 'income_type': 'fixa', 'month': month, 'year': year})
+    txs[acc] += [
+        {'id': 'in-sal', 'type': 'CREDIT', 'amount': 5123.45, 'date': day(0), 'description': 'PAGTO SALARIO ACME LTDA'},
+        {'id': 'in-pix', 'type': 'CREDIT', 'amount': 150.0, 'date': day(0), 'description': 'PIX RECEBIDO',
+         'paymentData': {'paymentMethod': 'PIX', 'payer': {'name': 'MARIA SOUZA'}}},
+        {'id': 'in-res', 'type': 'CREDIT', 'amount': 800.0, 'date': day(0), 'description': 'RESGATE CDB'},
+        {'id': 'out-tr', 'type': 'DEBIT', 'amount': -300.0, 'date': day(0), 'description': 'PIX ENVIADO'},
+        {'id': 'out-mk', 'type': 'DEBIT', 'amount': -42.0, 'date': day(0), 'description': 'MERCADO'},
+    ]
+    txs[acc2] += [{'id': 'in-tr', 'type': 'CREDIT', 'amount': 300.0, 'date': day(0), 'description': 'PIX RECEBIDO'}]
+    _post_item(family)
+
+    r = family.get('/pluggy/incomes').json()
+    pending = {i['description']: i for i in r['items']}
+    assert set(pending) == {'PAGTO SALARIO ACME LTDA', 'PIX RECEBIDO'} and r['counts']['ignored'] == 2  # resgate + transferência
+    sal, pix = pending['PAGTO SALARIO ACME LTDA'], pending['PIX RECEBIDO']
+    assert sal['suggestion']['label'] == 'Salário' and sal['suggestion']['income_type'] == 'fixa'
+    assert sal['suggestion']['expected']['company'] == 'ACME' and sal['suggestion']['recurring'] is False
+    assert pix['suggestion']['label'] == 'PIX recebido' and pix['suggestion']['company'] == 'Maria Souza'
+    # a saída da transferência some junto (não vira despesa para revisar)
+    outs = {t['description'] for t in family.get('/pluggy/transactions').json()['items']}
+    assert 'MERCADO' in outs and 'PIX ENVIADO' not in outs
+    assert family.get('/pluggy/config').json()['incomes_to_review'] == 2
+
+    # aprovar: o salário marca a renda prevista como recebida, com o valor do banco; o PIX vira renda variável
+    ok = family.post('/pluggy/incomes/approve', json={'items': [
+        {'id': sal['id'], 'income_type': 'fixa'}, {'id': pix['id'], 'income_type': 'variavel', 'company': 'Maria'}]})
+    assert ok.status_code == 200 and ok.json()['imported'] == 1 and ok.json()['marked'] == 1, ok.text
+    rows = {s.company: s for s in Salary.query.filter_by(user_id=family.user['id']).all()}
+    assert rows['ACME'].received and float(rows['ACME'].amount) == 5123.45
+    assert rows['Maria'].income_type == 'variavel' and rows['Maria'].received and float(rows['Maria'].amount) == 150.0
+    assert family.get('/pluggy/incomes?status=imported').json()['counts']['imported'] == 2
+    session.remove()
+    # reler o banco não duplica
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    family.get('/pluggy/items')
+    assert BankIncome.query.filter_by(status='pending').count() == 0
+    session.remove()
+
+
+def test_incomes_bot_review_and_isolation(client, family, other_family, bank, txs):  # noqa: F811
+    from test_telegram_ai import _bot, _link
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    txs[acc] += [{'id': 'in-1', 'type': 'CREDIT', 'amount': 99.9, 'date': day(1), 'description': 'TED RECEBIDA JOAO'}]
+    _post_item(family)
+    _link(client, family, '8801')
+    nxt = client.get(f'{API}/pluggy/incomes/next', headers=_bot('8801')).json()
+    assert nxt['total'] == 1 and nxt['item']['suggestion']['label'] == 'Transferência recebida'
+    iid = nxt['item']['id']
+    assert other_family.post('/pluggy/incomes/ignore', json={'ids': [iid]}).status_code in (403, 404)
+    raw = family.post('/auth/tokens', json={'name': 'mcp'}).json()['token']
+    assert client.post(f'{API}/pluggy/incomes/ignore', headers={'Authorization': f'Bearer {raw}'},
+                       json={'ids': [iid]}).status_code == 403
+    assert client.post(f'{API}/pluggy/incomes/ignore', headers=_bot('8801'), json={'ids': [iid]}).status_code == 200
+    assert family.post('/pluggy/incomes/restore', json={'ids': [iid]}).status_code == 200
+    assert client.post(f'{API}/pluggy/incomes/ignore', headers=_bot('8801'), json={'ids': [iid]}).status_code == 200
+    assert client.post(f'{API}/pluggy/incomes/approve', headers=_bot('8801'),  # ignorada não vira renda
+                       json={'items': [{'id': iid}]}).json()['imported'] == 0
+    family.post('/pluggy/incomes/restore', json={'ids': [iid]})
+    assert client.post(f'{API}/pluggy/incomes/approve', headers=_bot('8801'),
+                       json={'items': [{'id': iid}]}).json()['imported'] == 1
+    session.remove()
+
+
+def test_new_income_is_announced_with_button(client, family, bank, txs, monkeypatch):  # noqa: F811
+    from app.models import TelegramLink
+    from app.services import telegram as tg
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    _post_item(family)
+    sent = []
+    monkeypatch.setattr(tg, 'send_message', lambda token, chat, text, buttons=None: (sent.append((chat, text, buttons)), (True, ''))[1])
+    session.add(TelegramLink(user_id=family.user['id'], chat_id='991', username='t'))
+    session.query(BankConnection).update({'needs_sync': True})
+    session.commit()
+    txs[acc].append({'id': 'in-x', 'type': 'CREDIT', 'amount': 250.0, 'date': day(0), 'description': 'PIX RECEBIDO',
+                     'paymentData': {'payer': {'name': 'JOANA LIMA'}}})
+    of.sync_stale(family.user['id'], notify=True)
+    chat, text, buttons = sent[-1]
+    assert '1 entrada(s)' in text and 'Joana' in text.title() and 'R$ 250,00' in text
+    assert {'text': '💰 Revisar entradas', 'callback_data': 'ri:go:0'} in [b for row in buttons for b in row]
+    session.remove()
+
+
+def test_income_like_last_month_is_suggested_as_fixed(client, family, bank, txs):  # noqa: F811
+    from app.models import BankIncome, Salary
+    from app.services import bank_incomes as bi
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    first = TODAY.replace(day=1) - timedelta(days=1)
+    session.add(Salary(user_id=family.user['id'], year=first.year, month=first.month, amount=1000, company='Maria Souza',
+                       income_type='variavel', received=True))
+    session.commit()
+    txs[acc].append({'id': 'in-m', 'type': 'CREDIT', 'amount': 1050.0, 'date': day(0), 'description': 'PIX RECEBIDO',
+                     'paymentData': {'payer': {'name': 'MARIA SOUZA'}}})
+    _post_item(family)
+    sug = bi.suggestion(BankIncome.query.filter_by(pluggy_id='in-m').one())
+    assert sug['recurring'] is True and sug['income_type'] == 'fixa' and sug['label'] == 'PIX recebido'
+    session.remove()

@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.core.config import settings
 from app.core.db import DBSessionMiddleware
 from app.core.migrations import run_migrations
-from app.routers import (admin, ai, auth, cards, dashboard, expenses, family, goals, imports, incomes,
+from app.routers import (admin, ai, auth, bank_incomes, cards, dashboard, expenses, family, goals, imports, incomes,
                          investments, pluggy, rules, settings as settings_router, telegram)
 
 log = logging.getLogger('finfam')
@@ -34,7 +34,7 @@ class _HideHookToken(logging.Filter):
 
 logging.getLogger('uvicorn.access').addFilter(_HideHookToken())
 
-VERSION = '2026.7.3'
+VERSION = '2026.8.0'
 MAX_BODY_BYTES = 12 * 1024 * 1024
 
 _FIELD_LABELS = {
@@ -127,7 +127,7 @@ def create_app() -> FastAPI:
 
     prefix = settings.api_prefix
     for module in (auth, family, dashboard, expenses, incomes, cards, goals, rules, investments,
-                   imports, settings_router, telegram, ai, pluggy, admin):
+                   imports, settings_router, telegram, ai, bank_incomes, pluggy, admin):
         app.include_router(module.router, prefix=prefix)
 
     @app.get(f'{prefix}/health', tags=['meta'], summary='Status da API')

@@ -1,6 +1,6 @@
-// Linhas da tela "Revisar importados": pendente (editável) e já resolvida.
-import { useState } from 'react'
-import { Button, IconButton, Input, Money, Select } from '../components/ui'
+// Peças das telas de revisão (saídas e entradas): abas, barra de seleção, rascunhos e linhas de saída.
+import { useState, type ReactNode } from 'react'
+import { Button, Check, IconButton, Input, Money, Segmented, Select } from '../components/ui'
 import { brl, dayMonth } from '../lib/format'
 
 export type Status = 'pending' | 'duplicate' | 'ignored' | 'imported'
@@ -14,6 +14,39 @@ export interface BankTx {
   owner_name?: string | null   // banco compartilhado por outra pessoa da família
 }
 export interface TxList { counts: Record<Status, number>; categories: string[]; items: BankTx[] }
+export const REVIEW_STATUSES: Status[] = ['pending', 'duplicate', 'ignored', 'imported']
+/** Só o que está ignorado ou repetido volta para a revisão. */
+export const canRestore = (tab: Status) => tab === 'duplicate' || tab === 'ignored'
+
+/** Abas por situação, com a contagem de cada uma quando a lista já chegou. */
+export function StatusTabs({ tabs, value, counts, onChange }:
+  { tabs: Record<Status, string>; value: Status; counts?: Record<Status, number>; onChange: (s: Status) => void }) {
+  return (
+    <Segmented ariaLabel="Situação" value={value} onChange={onChange}
+      options={REVIEW_STATUSES.map((s) => ({ value: s, label: `${tabs[s]}${counts ? ` (${counts[s]})` : ''}` }))} />
+  )
+}
+
+/** Barra da lista pendente: marcar todos, "N de M · total" e as ações (filhos). */
+export function ReviewBar({ picked, count, total, onToggleAll, children }:
+  { picked: number; count: number; total: number; onToggleAll: (v: boolean) => void; children: ReactNode }) {
+  return (
+    <div className="review-bar">
+      <Check checked={picked === count} label={`${picked} de ${count} · ${brl(total)}`} onChange={onToggleAll} />
+      <div className="row gap">{children}</div>
+    </div>
+  )
+}
+
+/** Rascunhos por id (um por linha pendente): editar uma linha e marcar/desmarcar todas. */
+export function useDrafts<D extends { selected: boolean }>() {
+  const [drafts, setDrafts] = useState<Record<number, D>>({})
+  const edit = (id: number, d: Partial<D>) => setDrafts((s) => ({ ...s, [id]: { ...s[id], ...d } }))
+  const selectAll = (selected: boolean) =>
+    setDrafts((s) => Object.fromEntries(Object.entries(s).map(([k, d]) => [k, { ...d, selected }])))
+  return { drafts, setDrafts, edit, selectAll }
+}
+
 export interface Draft { selected: boolean; category: string; description: string; payment_method: string }
 
 /** Linha de origem: data · banco · conta/cartão · parcela. */

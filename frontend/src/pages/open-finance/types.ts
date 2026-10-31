@@ -3,7 +3,7 @@
 export interface PluggyConfig {
   available: boolean; max_items: number | null; configured: boolean; client_id_masked: string
   status: 'ok' | 'error' | null; last_error: string | null; webhook: boolean; public_url_ok: boolean
-  include_sandbox: boolean; connections: number; to_review: number; notify: boolean
+  include_sandbox: boolean; connections: number; to_review: number; incomes_to_review: number; notify: boolean
   shared_from_name: string | null          // usando a chave dessa pessoa da família
   shared_with: (string | null)[]           // quem da família usa a minha chave
   family_key: { owner_name: string | null; client_id_masked: string } | null  // chave da família para usar

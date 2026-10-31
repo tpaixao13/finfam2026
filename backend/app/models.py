@@ -289,6 +289,7 @@ class BankAccount(Base):
 
     transactions = relationship('BankTransaction', backref='account', lazy='dynamic', cascade='all, delete-orphan')
     bills = relationship('BankBill', backref='account', lazy='dynamic', cascade='all, delete-orphan')
+    incomes = relationship('BankIncome', backref='account', lazy='dynamic', cascade='all, delete-orphan')
 
 
 class BankInvestment(Base):
@@ -325,6 +326,32 @@ class BankBill(Base):
     pluggy_id = Column(String(64), nullable=False, unique=True)
     due_date = Column(Date, nullable=False)
     total = Column(Numeric(14, 2), nullable=True)
+
+
+class BankIncome(Base):
+    """Entrada de dinheiro na conta (PIX recebido, salário, rendimento) que espera revisão.
+    Só vira renda (Salary) quando a pessoa aprova. Fica separada das saídas (BankTransaction).
+
+    status: pending (revisar) | duplicate (já estava em Rendas) | ignored | imported
+    """
+    __tablename__ = 'bank_incomes'
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey('bank_accounts.id'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    pluggy_id = Column(String(64), nullable=False, unique=True)
+    date = Column(Date, nullable=False)
+    description = Column(Text, nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)       # positivo
+    counterpart = Column(Text, nullable=True)             # quem pagou (paymentData.payer.name)
+    payment_hint = Column(String(16), nullable=True)      # PIX | TED | ...
+    pluggy_category = Column(Text, nullable=True)
+    status = Column(String(12), nullable=False, default='pending', index=True)
+    reason = Column(Text, nullable=True)
+    salary_id = Column(Integer, ForeignKey('salaries.id', ondelete='SET NULL'), nullable=True)
+    transfer_tx_id = Column(Integer, nullable=True)       # saída da outra conta (transferência entre contas)
+    created_at = Column(DateTime, default=utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
 
 
 class BankTransaction(Base):
