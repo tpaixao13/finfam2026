@@ -98,7 +98,7 @@ def api_url():
 @pytest.fixture(scope='module')
 def family(api_url):
     r = _call(api_url, 'POST', '/auth/register', {'name': 'Tiago', 'email': 'tiago@bot.test',
-                                                  'password': 'senha-segura', 'confirm_password': 'senha-segura'})
+                                                  'password': 'senha-segura', 'confirm_password': 'senha-segura', 'accept_terms': True})
     token = r['access_token']
     _call(api_url, 'POST', '/cards', {'supports_credit': True, 'last_digits': '4321', 'bank': 'Inter',
                                       'due_day': 10, 'best_buy_day': 3}, token)

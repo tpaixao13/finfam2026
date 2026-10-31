@@ -8,7 +8,10 @@ export interface Tenant {
   open_finance?: boolean; open_finance_max_items?: number | null
 }
 
-export interface Me { user: User; tenant: Tenant | null; members: User[]; alert_count: number; via_api_token: boolean }
+export interface Me {
+  user: User; tenant: Tenant | null; members: User[]; alert_count: number; via_api_token: boolean
+  terms?: { version: string; accepted: boolean; accepted_at: string | null }
+}
 
 export interface Series { type: 'parcelado' | 'recorrente'; group_id: number; number: number; total: number; label: string }
 

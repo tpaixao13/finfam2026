@@ -44,7 +44,8 @@ class Family:
     def __init__(self, client, name='Tiago', email='tiago@test.com'):
         self.client = client
         r = client.post(f'{API}/auth/register', json={
-            'name': name, 'email': email, 'password': 'senha-segura', 'confirm_password': 'senha-segura'})
+            'name': name, 'email': email, 'password': 'senha-segura', 'confirm_password': 'senha-segura',
+            'accept_terms': True})
         assert r.status_code == 201, r.text
         body = r.json()
         self.user = body['user']

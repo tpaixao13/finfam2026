@@ -28,7 +28,7 @@ def test_login_errors(client, family):
 
 def test_duplicate_email(client, family):
     r = client.post(f'{API}/auth/register', json={'name': 'Tiago', 'email': 'tiago@test.com',
-                                                  'password': 'senha-segura', 'confirm_password': 'senha-segura'})
+                                                  'password': 'senha-segura', 'confirm_password': 'senha-segura', 'accept_terms': True})
     assert r.status_code == 409
 
 
@@ -103,3 +103,22 @@ def test_family_member_limit(client, family):
     assert r.status_code == 200
     assert family.delete(f"/family/members/{family.user['id']}").status_code == 422
     assert family.delete(f'/family/members/{gid}').status_code == 200
+
+
+def test_terms_must_be_accepted(client, family):
+    r = client.post(f'{API}/auth/register', json={'name': 'Joana', 'email': 'joana@test.com', 'password': 'senha-segura',
+                                                  'confirm_password': 'senha-segura'})
+    assert r.status_code == 422 and 'Termos' in r.json()['detail']
+    me = family.get('/auth/me').json()
+    assert me['terms']['accepted'] is True and me['terms']['version']
+    from app.core.db import session
+    from app.models import Tenant
+    session.get(Tenant, family.tenant['id']).plan = 'anual'
+    session.commit()
+    family.post('/family/members', json={'name': 'Greyce', 'email': 'gt@test.com', 'password': 'senha-segura',
+                                         'confirm_password': 'senha-segura'})
+    tok = client.post(f'{API}/auth/login', json={'email': 'gt@test.com', 'password': 'senha-segura'}).json()['access_token']
+    g = {'Authorization': f'Bearer {tok}'}
+    assert client.get(f'{API}/auth/me', headers=g).json()['terms']['accepted'] is False  # convidada: aceita no 1º acesso
+    assert client.post(f'{API}/auth/accept-terms', headers=g).json()['terms']['accepted'] is True
+    session.remove()

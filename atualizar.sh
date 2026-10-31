@@ -48,5 +48,14 @@ for s in "${SERVICES[@]}"; do
   fi
 done
 
+# arquivos de serviço do systemd mudaram no repositório? (não troca sozinho: só avisa)
+for unit in finfam2026 finfam2026-bot; do
+  if [ -f "/etc/systemd/system/$unit.service" ] && [ -f "deploy/$unit.service" ] && \
+     ! diff -q "/etc/systemd/system/$unit.service" "deploy/$unit.service" >/dev/null 2>&1; then
+    echo "ℹ️  deploy/$unit.service mudou. Para aplicar (veja o CHANGELOG antes):"
+    echo "    sudo cp deploy/$unit.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart $unit"
+  fi
+done
+
 version="$(grep -oP "^VERSION = '\K[^']+" backend/app/main.py || true)"
 echo "🎉 FinFam 2026 ${version:-} atualizado ($(git log -1 --format='%h %s'))."

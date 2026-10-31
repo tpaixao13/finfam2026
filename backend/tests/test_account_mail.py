@@ -25,7 +25,7 @@ def _link(msg, path):
 
 def _register(client, email='nova@test.com'):
     return client.post(f'{API}/auth/register', json={'name': 'Maria Souza', 'email': email,
-                                                     'password': 'senha-segura', 'confirm_password': 'senha-segura'})
+                                                     'password': 'senha-segura', 'confirm_password': 'senha-segura', 'accept_terms': True})
 
 
 def test_register_sends_welcome_and_login_waits_for_confirmation(client, outbox):

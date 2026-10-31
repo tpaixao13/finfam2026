@@ -7,6 +7,7 @@ import { navigate } from '../../lib/router'
 import { useSession } from '../../lib/session'
 import { FamiliesBoard, type AdminTenant, type Member } from './Families'
 import { FamilyDataModal } from './FamilyData'
+import { SystemHealth } from './SystemHealth'
 
 interface AdminData {
   admin: { name: string }
@@ -122,6 +123,7 @@ export function AdminPage() {
           <>
             <PageHeader title="Famílias e planos"
               subtitle={`${d.counts.tenants} famílias, ${d.counts.users} pessoas. ${d.online.length ? `${d.online.length} online agora.` : 'Ninguém online agora.'}`} />
+            <SystemHealth />
             <FamiliesBoard tenants={d.tenants} run={run} onPassword={(m) => { setReset(m); setNewPwd('') }}
               onData={(t) => setDataFor({ id: t.id, name: t.name })} />
           </>

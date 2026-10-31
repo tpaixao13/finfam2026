@@ -13,6 +13,7 @@ import { TelegramPage } from './pages/Telegram'
 import { AdminLoginPage, AdminPage } from './pages/admin/Admin'
 import { ConfirmEmailPage, ForgotPasswordPage, ResetPasswordPage } from './pages/AccountEmail'
 import { LoginPage, RegisterPage } from './pages/Auth'
+import { PrivacyPage, TermsPage } from './pages/Legal'
 import { AlertsPage, ImportPage, RulesPage } from './pages/Automation'
 import { CardsPage, InvoicePage } from './pages/Cards'
 import { DashboardPage } from './pages/Dashboard'
@@ -48,7 +49,7 @@ const TITLES: Record<string, string> = {
   '/investments': 'Investimentos', '/goals': 'Metas', '/alerts': 'Alertas', '/import': 'Importar extrato',
   '/rules': 'Regras de categoria', '/family': 'Família', '/settings': 'Perfil e acesso', '/telegram': 'Telegram e IA', '/bank': 'Contas conectadas', '/bank/review': 'Revisar importados', '/bank/incomes': 'Entradas do banco',
   '/bank/settings': 'Configurações do Open Finance',
-  '/upgrade': 'Planos', '/login': 'Entrar', '/register': 'Criar conta',
+  '/upgrade': 'Planos', '/login': 'Entrar', '/register': 'Criar conta', '/termos': 'Termos de uso', '/privacidade': 'Política de privacidade',
   '/esqueci-senha': 'Esqueci minha senha', '/redefinir-senha': 'Nova senha', '/confirmar-email': 'Confirmar e-mail',
 }
 
@@ -69,6 +70,9 @@ export function App() {
   // links do e-mail: valem logado ou não
   if (pathname === '/confirmar-email') return <><ConfirmEmailPage /><Toasts /></>
   if (pathname === '/redefinir-senha') return <><ResetPasswordPage /><Toasts /></>
+  // termos e privacidade: públicos, logado ou não
+  if (pathname === '/termos') return <TermsPage />
+  if (pathname === '/privacidade') return <PrivacyPage />
 
   const isPublic = pathname === '/login' || pathname === '/register' || pathname === '/esqueci-senha'
   if (loading) return <Spinner label="Abrindo o FinFam…" />

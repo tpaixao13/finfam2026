@@ -7,6 +7,7 @@ import { useTask } from '../lib/hooks'
 import { Link, navigate } from '../lib/router'
 import { useSession } from '../lib/session'
 import { CheckEmail, PASSWORD_MISMATCH, PasswordFields, ResendConfirmation } from './AccountEmail'
+import { TermsLinks } from './Legal'
 
 interface SessionResponse { access_token: string }
 type LoginResponse = SessionResponse | { two_factor_required: true; challenge: string }
@@ -23,6 +24,7 @@ export function AuthShell({ title, lead, children, footer }: { title: string; le
           {children}
           {footer && <p className="auth-foot">{footer}</p>}
         </div>
+        <p className="auth-legal"><TermsLinks /></p>
         <AppVersion />
       </main>
     </div>
@@ -105,7 +107,7 @@ export function LoginPage() {
 
 export function RegisterPage() {
   const { login } = useSession()
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirm_password: '' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', confirm_password: '', accept_terms: false })
   const [sentTo, setSentTo] = useState<string | null>(null)  // conta criada: falta confirmar o e-mail
   const { busy, error, setError, run } = useTask()
   const set = (k: 'name' | 'email', v: string) => setForm((f) => ({ ...f, [k]: v }))
@@ -130,8 +132,13 @@ export function RegisterPage() {
         <Field label="Seu nome"><Input value={form.name} onChange={(e) => set('name', e.target.value)} required minLength={2} maxLength={30} autoFocus /></Field>
         <Field label="E-mail"><Input type="email" autoComplete="email" value={form.email} onChange={(e) => set('email', e.target.value)} required /></Field>
         <PasswordFields value={form} onChange={(v) => setForm((f) => ({ ...f, ...v }))} />
+        <label className="check auth-terms">
+          <input type="checkbox" checked={form.accept_terms} required
+            onChange={(e) => setForm((f) => ({ ...f, accept_terms: e.target.checked }))} />
+          <span>Li e aceito os <TermsLinks /> (inclui como os dados da família são guardados).</span>
+        </label>
         {error && <p className="form-error" role="alert">{error}</p>}
-        <Button type="submit" busy={busy} className="btn-block">Criar conta</Button>
+        <Button type="submit" busy={busy} className="btn-block" disabled={!form.accept_terms}>Criar conta</Button>
       </form>
     </AuthShell>
   )

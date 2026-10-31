@@ -1,3 +1,4 @@
+import { TermsBanner } from '../pages/Legal'
 import { TwoFactorBanner } from './TwoFactor'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from '../lib/router'
@@ -89,6 +90,7 @@ export function Layout({ children }: { children: ReactNode }) {
             </div>
           )}
           <button className="nav-link nav-logout" onClick={logout}><Icon name="box-arrow-right" /><span>Sair</span></button>
+          <p className="sidebar-legal"><Link to="/termos">Termos</Link> · <Link to="/privacidade">Privacidade</Link></p>
         </div>
       </aside>
       <div className="scrim" onClick={() => setOpen(false)} />
@@ -102,7 +104,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </Link>
           <Button icon="plus" onClick={() => openExpense()}>Nova despesa</Button>
         </header>
-        <main className="content"><TwoFactorBanner />{children}</main>
+        <main className="content"><TermsBanner /><TwoFactorBanner />{children}</main>
       </div>
     </div>
   )

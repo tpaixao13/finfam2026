@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026.9.0 — backup fora do Raspberry, monitor, termos e privacidade (31/10/2026)
+
+- **Backup automático fora do Raspberry** (`scripts/backup_offsite.py`): cópia consistente do banco, confere a
+  integridade, compacta e **criptografa** (senha em `BACKUP_PASSWORD`), e manda para um ou mais destinos:
+  Telegram (`BACKUP_CHAT_ID`), nuvem pelo rclone (`BACKUP_RCLONE_REMOTE`, ex.: Google Drive) e/ou outro disco
+  (`BACKUP_DIR_EXTRA`, ex.: HD USB). Guarda `BACKUP_KEEP_DAYS` dias (padrão 30). Abrir um backup:
+  `python -m scripts.backup_offsite --decrypt ARQUIVO`.
+- **Monitor** (`scripts/monitor.py`, cron a cada 5 min): avisa no seu Telegram quando a API não responde, um
+  serviço (API ou bot) cai, bancos conectados ficam mais de 6 h sem atualizar, o backup fora do Raspberry atrasa
+  (30 h) ou o disco passa de 90% — e avisa de novo quando volta ao normal. Só alerta depois de 2 checagens
+  seguidas. Destino: `MONITOR_USER_EMAIL` (o Telegram que essa conta conectou) ou `MONITOR_CHAT_ID`.
+- **Admin → Saúde do sistema:** situação do monitor e do último backup no painel.
+- **Termos de uso e Política de privacidade** (`/termos`, `/privacidade`, LGPD): aceite obrigatório ao criar
+  conta; quem já usa (e quem foi convidado) vê uma faixa "Li e aceito" no próximo acesso. Links no login, no
+  cadastro e no menu. Mudou o texto: mude `TERMS_VERSION` em `backend/app/core/config.py`.
+- **Segurança (itens baixos da auditoria):** cabeçalhos CSP, HSTS e Permissions-Policy no site (se o Pluggy
+  Connect parar de abrir, `CSP_REPORT_ONLY=1` no .env e me avise); o MCP pede confirmação antes de marcar contas
+  como pagas ou pagar fatura; a senha inicial do admin vai para `instance/admin_initial_password.txt` (não para o
+  log); `deploy/finfam2026.service` passa a escutar só em 127.0.0.1 (veja abaixo).
+- Banco: `users.terms_version/terms_accepted_at` (migração automática).
+
+### Configurar no Raspberry (uma vez)
+
+1. No `backend/.env`:
+   ```
+   BACKUP_PASSWORD=uma-senha-longa-guardada-fora-do-raspberry
+   BACKUP_CHAT_ID=seu-chat-id            # e/ou BACKUP_RCLONE_REMOTE=gdrive:FinFamBackup / BACKUP_DIR_EXTRA=/mnt/hd/finfam
+   MONITOR_USER_EMAIL=seu-email-do-finfam
+   ```
+2. Teste: `cd ~/finfam2026/backend && .venv/bin/python -m scripts.backup_offsite` e
+   `.venv/bin/python -m scripts.monitor --test`.
+3. `crontab -e` (troque o backup antigo `scripts.backup_telegram`, se tiver, por este):
+   ```
+   30 3 * * * cd /home/finfam/finfam2026/backend && .venv/bin/python -m scripts.backup_offsite >> /home/finfam/finfam2026_backup.log 2>&1
+   */5 * * * * cd /home/finfam/finfam2026/backend && .venv/bin/python -m scripts.monitor >> /home/finfam/finfam2026_monitor.log 2>&1
+   ```
+4. API só em 127.0.0.1 — antes, confira que o cloudflared aponta para `localhost:8001`
+   (`grep -r 8001 /etc/cloudflared ~/.cloudflared 2>/dev/null`). Se sim:
+   `sudo cp deploy/finfam2026.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart finfam2026`.
+
 ## 2026.8.1 — auditoria de segurança completa (31/10/2026)
 
 - **Limite de tentativas** reforçado: além de (IP, e-mail), agora também por IP (muitos e-mails) e por conta

@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 
 from app.core import ratelimit
-from app.core.config import settings
+from app.core.config import TERMS_VERSION, settings
 from app.core.types import Email, utcnow
 from app.core.db import db, get_or_404
 from app.core.deps import (Ctx, Period, get_ctx, get_ctx_allow_expired, get_ctx_session,
@@ -38,11 +38,14 @@ class RegisterIn(BaseModel):
     email: Email
     password: str = Field(min_length=8, max_length=256)
     confirm_password: str = Field(max_length=256)
+    accept_terms: bool = Field(False, description='Leu e aceita os Termos de uso e a Política de privacidade')
 
     @model_validator(mode='after')
     def _passwords_match(self):
         if self.password != self.confirm_password:
             raise ValueError('As senhas não coincidem.')
+        if not self.accept_terms:
+            raise ValueError('Para criar a conta, aceite os Termos de uso e a Política de privacidade.')
         return self
 
 
@@ -133,7 +136,8 @@ def register(body: RegisterIn, request: Request):
                     trial_expires_at=utcnow() + timedelta(days=settings.trial_days))
     db.session.add(tenant)
     db.session.flush()
-    user = User(name=body.name.strip(), email=email, tenant_id=tenant.id)
+    user = User(name=body.name.strip(), email=email, tenant_id=tenant.id,
+                terms_version=TERMS_VERSION, terms_accepted_at=utcnow())
     user.set_password(body.password)
     db.session.add(user)
     db.session.flush()
@@ -223,6 +227,18 @@ def reset_password(body: ResetIn, request: Request):
     return {'message': 'Senha alterada! Entre com a nova senha.'}
 
 
+@router.post('/auth/accept-terms', summary='Aceita a versão atual dos Termos de uso e da Política de privacidade')
+def accept_terms(ctx: Ctx = Depends(get_ctx_session_allow_expired)):
+    ctx.user.terms_version, ctx.user.terms_accepted_at = TERMS_VERSION, utcnow()
+    db.session.commit()
+    return {'message': 'Obrigado! Termos e política aceitos.', 'terms': _terms(ctx.user)}
+
+
+def _terms(user: User) -> dict:
+    return {'version': TERMS_VERSION, 'accepted': user.terms_version == TERMS_VERSION,
+            'accepted_at': user.terms_accepted_at.isoformat() + 'Z' if user.terms_accepted_at else None}
+
+
 @router.get('/auth/me', summary='Usuário logado, família, plano e contador de alertas')
 def me(ctx: Ctx = Depends(get_ctx_allow_expired), period: Period = Depends(get_period)):
     active = ctx.tenant is None or ctx.tenant.trial_active
@@ -232,6 +248,7 @@ def me(ctx: Ctx = Depends(get_ctx_allow_expired), period: Period = Depends(get_p
         'members': [user_out(u) for u in ctx.members],
         'alert_count': quick_alert_count(ctx.uids, period.month, period.year) if active else 0,
         'via_api_token': ctx.via_api_token,
+        'terms': _terms(ctx.user),
     }
 
 

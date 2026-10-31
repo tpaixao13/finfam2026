@@ -73,6 +73,8 @@ _ALTERS = [
     'ALTER TABLE goals ADD COLUMN alert_sent TEXT',
     'ALTER TABLE pluggy_configs ADD COLUMN shared_from INTEGER',
     'ALTER TABLE pluggy_configs ADD COLUMN allow_family INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE users ADD COLUMN terms_version VARCHAR(16)',
+    'ALTER TABLE users ADD COLUMN terms_accepted_at DATETIME',
     # quem já tinha a chave usada pela família (2026.6–2026.8) continua compartilhando
     'UPDATE pluggy_configs SET allow_family = 1 WHERE allow_family = 0 AND user_id IN '
     '(SELECT shared_from FROM pluggy_configs WHERE shared_from IS NOT NULL)',
@@ -154,8 +156,14 @@ def _seed_admin(conn):
     password = settings.admin_initial_password
     if not password:
         password = secrets.token_urlsafe(16)
-        print(f'[FinFam] ADMIN_INITIAL_PASSWORD não definida. Senha gerada para '
-              f'{settings.admin_email}: {password}')
+        # a senha não vai para o log (o journal guarda): fica num arquivo que só o usuário do serviço lê
+        from app.core.config import INSTANCE_DIR
+        INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
+        path = INSTANCE_DIR / 'admin_initial_password.txt'
+        path.write_text(f'{settings.admin_email}\n{password}\n')
+        path.chmod(0o600)
+        print(f'[FinFam] ADMIN_INITIAL_PASSWORD não definida. Senha gerada para {settings.admin_email} '
+              f'gravada em {path} — entre, troque a senha e apague o arquivo.')
     conn.execute(text("INSERT INTO users (name, email, password_hash, is_admin) VALUES ('Admin', :e, :pw, 1)"),
                  {'e': settings.admin_email, 'pw': hash_password(password)})
     conn.commit()

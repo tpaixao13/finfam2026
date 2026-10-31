@@ -145,6 +145,35 @@ def my_2fa_disable(body: DisableIn, admin: User = Depends(get_admin)):
     return {'message': 'Verificação em duas etapas desativada no login do administrador.'}
 
 
+def _json(path) -> dict:
+    import json
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+@router.get('/health', summary='Saúde do sistema: monitor e backup fora do Raspberry')
+def system_health(_: User = Depends(get_admin)):
+    """O que o cron escreveu por último (scripts.monitor e scripts.backup_offsite). Sem segredos."""
+    import os
+    from app.core.config import INSTANCE_DIR
+    monitor = _json(INSTANCE_DIR / 'monitor_state.json')
+    backup = _json(INSTANCE_DIR / 'backup_state.json')
+    problems = [{'check': k, 'problem': v.get('problem'), 'since': v.get('since')}
+                for k, v in monitor.items() if isinstance(v, dict) and v.get('problem')]
+    env = lambda k: bool(os.environ.get(k, '').split('#')[0].strip())  # noqa: E731
+    return {
+        'monitor': {'configured': env('MONITOR_USER_EMAIL') or env('MONITOR_CHAT_ID'),
+                    'checked_at': monitor.get('_checked_at'), 'problems': problems},
+        'backup': {'configured': env('BACKUP_PASSWORD') and (env('BACKUP_CHAT_ID') or env('BACKUP_RCLONE_REMOTE')
+                                                              or env('BACKUP_DIR_EXTRA')),
+                   'last_ok': backup.get('last_ok'), 'last_run': backup.get('last_run'),
+                   'destinations': backup.get('last_destinations') or [], 'errors': backup.get('last_errors') or [],
+                   'size': backup.get('last_size')},
+    }
+
+
 @router.get('/dashboard', summary='Visão geral das famílias e usuários')
 def dashboard(admin: User = Depends(get_admin)):
     now = datetime.now()
