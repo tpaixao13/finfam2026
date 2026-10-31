@@ -16,7 +16,7 @@
   (`BACKUP_DIR_EXTRA`, ex.: HD USB). Guarda `BACKUP_KEEP_DAYS` dias (padrão 30). Abrir um backup:
   `python -m scripts.backup_offsite --decrypt ARQUIVO`.
 - **Monitor** (`scripts/monitor.py`, cron a cada 5 min): avisa no seu Telegram quando a API não responde, um
-  serviço (API ou bot) cai, bancos conectados ficam mais de 6 h sem atualizar, o backup fora do Raspberry atrasa
+  serviço (API ou bot) cai, bancos conectados ficam mais de 26 h sem atualizar, o backup fora do Raspberry atrasa
   (30 h) ou o disco passa de 90% — e avisa de novo quando volta ao normal. Só alerta depois de 2 checagens
   seguidas. Destino: `MONITOR_USER_EMAIL` (o Telegram que essa conta conectou) ou `MONITOR_CHAT_ID`.
 - **Admin → Saúde do sistema:** situação do monitor e do último backup no painel.

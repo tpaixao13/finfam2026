@@ -13,7 +13,7 @@ Configuração no backend/.env (um dos dois):
     MONITOR_CHAT_ID=...                   ou o id do chat direto
     MONITOR_API_URL=http://127.0.0.1:8001/api/v1   (padrão)
 
-Confere: a API responde, os serviços (API e bot) estão de pé, os bancos conectados estão sendo relidos,
+Confere: a API responde, os serviços (API e bot) estão de pé, os bancos conectados estão sendo relidos (nenhum há mais de 26 h sem leitura),
 o último backup fora do Raspberry deu certo, sobra disco. Um problema só vira aviso depois de 2 checagens
 seguidas (evita alarme por um reinício). Roda separado da API: avisa mesmo com a API caída
 (manda direto pelo Bot API do Telegram).
@@ -34,7 +34,7 @@ STATE = INSTANCE_DIR / 'monitor_state.json'
 BACKUP_STATE = INSTANCE_DIR / 'backup_state.json'
 SERVICES = ('finfam2026', 'finfam2026-bot')
 FAILS_TO_ALERT = 2
-SYNC_STALE_HOURS = 6       # o cron do Open Finance relê de hora em hora
+SYNC_STALE_HOURS = 26      # o cron do Open Finance relê quem está há 24 h sem leitura (scripts.pluggy_sync)
 BACKUP_STALE_HOURS = 30    # backup diário
 DISK_MIN_FREE = 0.10
 
