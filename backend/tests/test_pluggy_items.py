@@ -7,6 +7,7 @@ from app.core.db import session
 from app.core.security import decrypt_field
 from app.models import BankAccount, BankConnection, PluggyConfig, Tenant
 from app.routers import pluggy as router_mod
+from app.services import pluggy_keys as keys_mod
 from app.services import pluggy as pg
 from conftest import API, Family
 from test_pluggy import CID, CID2, _enable, _save
@@ -43,8 +44,9 @@ def bank(monkeypatch):
             return {'results': state['accounts'].get(path.split('=')[1], [])}
         return None
     monkeypatch.setattr(pg, '_http', http)
-    monkeypatch.setattr(router_mod, 'settings', dataclasses.replace(
-        router_mod.settings, public_url='https://finfam.test', pluggy_webhook_ips=('52.67.145.81',)))
+    fake = dataclasses.replace(router_mod.settings, public_url='https://finfam.test', pluggy_webhook_ips=('52.67.145.81',))
+    monkeypatch.setattr(router_mod, 'settings', fake)
+    monkeypatch.setattr(keys_mod, 'settings', fake)
     pg._keys.clear()
 
     def add(item_id, cid=CID, owner=None, accounts=None):

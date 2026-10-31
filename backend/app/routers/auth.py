@@ -30,14 +30,14 @@ MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
 class LoginIn(BaseModel):
     email: Email
-    password: str = Field(min_length=1)
+    password: str = Field(min_length=1, max_length=256)
 
 
 class RegisterIn(BaseModel):
     name: str = Field(min_length=2, max_length=30)
     email: Email
-    password: str = Field(min_length=8)
-    confirm_password: str
+    password: str = Field(min_length=8, max_length=256)
+    confirm_password: str = Field(max_length=256)
 
     @model_validator(mode='after')
     def _passwords_match(self):
@@ -47,9 +47,9 @@ class RegisterIn(BaseModel):
 
 
 class ChangePasswordIn(BaseModel):
-    current_password: str
-    new_password: str = Field(min_length=8)
-    confirm_password: str
+    current_password: str = Field(max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)
+    confirm_password: str = Field(max_length=256)
 
     @model_validator(mode='after')
     def _passwords_match(self):
@@ -70,7 +70,9 @@ def _session_payload(user: User, tenant: Tenant | None) -> dict:
 
 @router.post('/auth/login', summary='Login (retorna JWT)')
 def login(body: LoginIn, request: Request):
-    ratelimit.check(request, 'login', body.email)
+    ratelimit.check(request, 'login', body.email)                      # este e-mail, deste IP
+    ratelimit.check(request, 'login-ip', limit=100)                    # muitos e-mails do mesmo IP
+    ratelimit.check_key('login-account', body.email, limit=30, window=3600)  # uma conta, de vários IPs
     user = User.query.filter_by(email=body.email.strip().lower()).first()
     if not (user.check_password(body.password) if user else verify_password(None, body.password)):
         raise HTTPException(status_code=401, detail='E-mail ou senha incorretos.')
@@ -153,8 +155,8 @@ class EmailOnlyIn(BaseModel):
 
 class ResetIn(BaseModel):
     token: str = Field(min_length=10, max_length=2000)
-    password: str = Field(min_length=8)
-    confirm_password: str
+    password: str = Field(min_length=8, max_length=256)
+    confirm_password: str = Field(max_length=256)
 
     @model_validator(mode='after')
     def _passwords_match(self):
@@ -182,6 +184,7 @@ _GENERIC_RESEND = 'Se o e-mail estiver cadastrado e ainda não confirmado, envia
 def resend_verification(body: EmailOnlyIn, request: Request):
     email = body.email.strip().lower()
     ratelimit.check(request, 'verify-resend', email, limit=3, window=3600)
+    ratelimit.check_key('verify-resend-account', email, limit=5, window=3600)  # e-mail bombing de vários IPs
     user = User.query.filter_by(email=email).first()
     if user is not None and account_mail.needs_verification(user):
         account_mail.send_verification(user, request)
@@ -200,6 +203,7 @@ def forgot_password(body: EmailOnlyIn, request: Request):
     email = body.email.strip().lower()
     ratelimit.check(request, 'forgot', limit=30, window=3600)
     ratelimit.check(request, 'forgot', email, limit=3, window=3600)
+    ratelimit.check_key('forgot-account', email, limit=5, window=3600)  # e-mail bombing de vários IPs
     user = User.query.filter_by(email=email).first()
     if user is not None and not user.is_admin and user.password_hash:
         account_mail.send_reset(user, request)
@@ -275,7 +279,7 @@ class TwoFactorCodeIn(BaseModel):
 
 
 class TwoFactorDisableIn(TwoFactorCodeIn):
-    password: str = Field(min_length=1)
+    password: str = Field(min_length=1, max_length=256)
 
 
 def _tfa_call(fn, *args):

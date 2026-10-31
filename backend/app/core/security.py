@@ -47,7 +47,8 @@ def create_access_token(user_id: int, kind: str = 'user', fingerprint: str = '',
 
 def decode_access_token(token: str) -> dict | None:
     try:
-        return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+        return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM],
+                          options={'require': ['exp', 'sub', 'typ']})  # token sem validade não vale
     except jwt.PyJWTError:
         return None
 

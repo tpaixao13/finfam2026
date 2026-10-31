@@ -53,13 +53,14 @@ export function FamilyPage() {
   return (
     <div className="page">
       <PageHeader title="Família" subtitle={d && <>Plano {d.tenant.plan_label}: {d.member_count} de {d.member_limit} pessoa(s)</>}
-        actions={<Button icon="plus" disabled={full} title={full ? 'Limite do plano atingido' : undefined} onClick={() => openMember(null)}>Adicionar pessoa</Button>} />
+        actions={iAmOwner ? <Button icon="plus" disabled={full} title={full ? 'Limite do plano atingido' : undefined} onClick={() => openMember(null)}>Adicionar pessoa</Button> : undefined} />
       {data.error ? <ErrorBox message={data.error} /> : !d ? <Spinner /> : (
         <div className="grid-2">
           <Panel title="Nome do grupo">
             <form className="inline-form" onSubmit={(e) => { e.preventDefault(); act(() => api.patch<{ message: string }>('/family', { name: name ?? d.tenant.name }), () => { data.reload(); refreshMe() }) }}>
-              <Field label="Nome"><Input value={name ?? d.tenant.name} onChange={(e) => setName(e.target.value)} minLength={2} maxLength={60} required /></Field>
-              <Button type="submit" variant="ghost">Salvar nome</Button>
+              <Field label="Nome" hint={iAmOwner ? undefined : 'Só quem criou a família muda o nome.'}>
+                <Input value={name ?? d.tenant.name} onChange={(e) => setName(e.target.value)} minLength={2} maxLength={60} required disabled={!iAmOwner} /></Field>
+              {iAmOwner && <Button type="submit" variant="ghost">Salvar nome</Button>}
             </form>
           </Panel>
           <Panel title="Pessoas" flush>
@@ -70,10 +71,10 @@ export function FamilyPage() {
                   <div><b>{m.name}</b>{m.id === me?.user.id && <Badge tone="info">você</Badge>}<small className="muted block">{m.email}</small>
                     {m.email_verified === false && <span className="small">
                       <Badge tone="warning">aguardando confirmar o e-mail</Badge>{' '}
-                      <button type="button" className="link-btn" onClick={() => act(() => api.post<{ message: string }>(`/family/members/${m.id}/resend`))}>reenviar</button>
+                      {iAmOwner && <button type="button" className="link-btn" onClick={() => act(() => api.post<{ message: string }>(`/family/members/${m.id}/resend`))}>reenviar</button>}
                     </span>}</div>
                   <span className="actions">
-                    <IconButton icon="pencil" label="Editar" onClick={() => openMember(m)} />
+                    {(iAmOwner || m.id === me?.user.id) && <IconButton icon="pencil" label="Editar" onClick={() => openMember(m)} />}
                     {m.id !== me?.user.id && iAmOwner && <ConfirmButton label="Remover" confirmLabel="Remover e apagar dados"
                       onConfirm={() => act(() => api.del<{ message: string }>(`/family/members/${m.id}`), () => { data.reload(); refreshMe() })} />}
                   </span>

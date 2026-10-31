@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026.8.1 — auditoria de segurança completa (31/10/2026)
+
+- **Limite de tentativas** reforçado: além de (IP, e-mail), agora também por IP (muitos e-mails) e por conta
+  (de qualquer IP) no login, no login do admin, no "esqueci a senha" e no reenvio de confirmação; IPv6 conta
+  por rede /64; a memória do limite é limitada (sem travar o servidor com milhares de tentativas). Senhas com
+  mais de 256 caracteres são recusadas antes do cálculo do hash.
+- **Corpo grande** é cortado em 12 MB mesmo sem Content-Length (`Transfer-Encoding: chunked`).
+- **Família:** só quem criou a família convida, renomeia, reenvia convite e edita os dados de outra pessoa
+  (cada um continua editando os próprios). A tela Família esconde esses botões para os outros.
+- **Chave Pluggy da família:** agora só vira "chave da família" se quem cadastrou **deixar** (Configurações do
+  Open Finance → "Deixar a família usar esta chave"; quem já compartilhava continua compartilhando). Parar de
+  compartilhar, remover a chave, trocar de aplicação ou sair da família **revoga** as cópias e desconecta os
+  bancos que a família conectou com ela (ficam na conta Pluggy de quem cadastrou) — antes a cópia virava dona.
+- Sessão do admin dura 8 h; token sem validade (`exp`) não vale; token de API não desconecta o Telegram;
+  trocar o bot próprio (token/chat legados) só pelo dono; caminho com byte nulo não dá mais erro 500.
+- Organização (sem mudar comportamento): a lógica da chave da família foi para `services/pluggy_keys.py`.
+
 ## 2026.8.0 — entradas do banco viram Rendas (31/10/2026)
 
 - **Entradas na conta corrente** (PIX recebido, salário, TED, rendimento) agora são trazidas do banco — antes

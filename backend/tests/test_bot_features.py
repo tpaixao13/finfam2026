@@ -256,3 +256,13 @@ def test_family_group_gets_family_notices_instead_of_each_person(client, family,
     tenant = session.get(Tenant, family.tenant['id'])
     assert tg_service.family_chats(tenant, uids) == ['7101']
     session.remove()
+
+
+def test_chunked_body_over_limit_is_refused(client):
+    def chunks():
+        for _ in range(14):
+            yield b'x' * (1024 * 1024)
+    r = client.post(f'{API}/auth/login', content=chunks(), headers={'Content-Type': 'application/json'})
+    assert r.status_code == 413
+    ok = client.post(f'{API}/auth/login', json={'email': 'a@b.com', 'password': 'x'})
+    assert ok.status_code == 401

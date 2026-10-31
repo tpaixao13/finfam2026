@@ -72,6 +72,10 @@ _ALTERS = [
     'ALTER TABLE tenants ADD COLUMN telegram_weekly_sent DATE',
     'ALTER TABLE goals ADD COLUMN alert_sent TEXT',
     'ALTER TABLE pluggy_configs ADD COLUMN shared_from INTEGER',
+    'ALTER TABLE pluggy_configs ADD COLUMN allow_family INTEGER NOT NULL DEFAULT 0',
+    # quem já tinha a chave usada pela família (2026.6–2026.8) continua compartilhando
+    'UPDATE pluggy_configs SET allow_family = 1 WHERE allow_family = 0 AND user_id IN '
+    '(SELECT shared_from FROM pluggy_configs WHERE shared_from IS NOT NULL)',
     "ALTER TABLE telegram_link_codes ADD COLUMN kind VARCHAR(8) NOT NULL DEFAULT 'chat'",
     'ALTER TABLE tenants ADD COLUMN telegram_group_chat VARCHAR(32)',
     'ALTER TABLE tenants ADD COLUMN telegram_group_title TEXT',

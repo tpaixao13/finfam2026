@@ -21,6 +21,7 @@ from app.services import two_factor as tfa
 from app.services.serializers import iso, tenant_out
 
 log = logging.getLogger('finfam.admin')
+ADMIN_SESSION_MINUTES = 8 * 60  # sessão do admin mais curta que a da família (7 dias)
 
 router = APIRouter(prefix='/admin', tags=['admin'])
 
@@ -29,7 +30,7 @@ ONLINE_THRESHOLD = timedelta(minutes=5)
 
 class AdminLoginIn(BaseModel):
     email: Email
-    password: str
+    password: str = Field(max_length=256)
 
 
 class PlanIn(BaseModel):
@@ -37,7 +38,7 @@ class PlanIn(BaseModel):
 
 
 class PasswordIn(BaseModel):
-    new_password: str = Field(min_length=8)
+    new_password: str = Field(min_length=8, max_length=256)
 
 
 def _user_row(u: User, now: datetime) -> dict:
@@ -50,6 +51,8 @@ def _user_row(u: User, now: datetime) -> dict:
 @router.post('/login', summary='Login do administrador')
 def login(body: AdminLoginIn, request: Request):
     ratelimit.check(request, 'admin-login', body.email, limit=5)
+    ratelimit.check(request, 'admin-login-ip', limit=30)
+    ratelimit.check_key('admin-login-account', body.email, limit=15, window=3600)
     user = User.query.filter_by(email=body.email.strip().lower(), is_admin=True).first()
     if not user or not user.check_password(body.password):
         raise HTTPException(status_code=401, detail='Credenciais inválidas.')
@@ -68,7 +71,8 @@ ADMIN_LOCKED = ('Conta de administrador bloqueada por códigos errados na verifi
 
 
 def _admin_session(user: User) -> dict:
-    token, expires = create_access_token(user.id, kind='admin', fingerprint=session_fingerprint(user.password_hash))
+    token, expires = create_access_token(user.id, kind='admin', fingerprint=session_fingerprint(user.password_hash),
+                                         minutes=ADMIN_SESSION_MINUTES)
     return {'access_token': token, 'token_type': 'bearer', 'expires_at': expires.isoformat(),
             'admin': {'id': user.id, 'name': user.name, 'email': user.email,
                       'two_factor_enabled': bool(user.totp_enabled)}}
@@ -105,7 +109,7 @@ class CodeIn(BaseModel):
 
 
 class DisableIn(CodeIn):
-    password: str = Field(min_length=1)
+    password: str = Field(min_length=1, max_length=256)
 
 
 def _tfa(fn, *args):
@@ -376,7 +380,7 @@ def delete_user(user_id: int, _: User = Depends(get_admin)):
         raise HTTPException(status_code=403, detail='Não é possível excluir um administrador.')
     tenant = db.session.get(Tenant, user.tenant_id) if user.tenant_id else None
     name = user.name
-    from app.routers.pluggy import release_key
+    from app.services.pluggy_keys import release_key
     release_key(user.id)  # quem usa a chave Pluggy dela continua usando
     db.session.delete(user)
     db.session.flush()

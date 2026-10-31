@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.db import db
-from app.core.deps import Ctx, get_bot, get_ctx, get_ctx_session, is_owner
+from app.core.deps import Ctx, get_bot, get_ctx, get_ctx_session, get_ctx_site_or_bot, is_owner
 from app.core.security import hash_api_token
 from app.core.types import utcnow
 from app.models import TelegramLink, TelegramLinkCode, Tenant, User
@@ -105,7 +105,7 @@ def unlink_group(ctx: Ctx = Depends(get_ctx_session)):
 
 
 @router.delete('/link', summary='Desconecta o Telegram (pelo site: todas as conversas; pelo bot: a atual)')
-def unlink(ctx: Ctx = Depends(get_ctx), chat_id: str | None = Header(None, alias='X-Telegram-Chat',
+def unlink(ctx: Ctx = Depends(get_ctx_site_or_bot), chat_id: str | None = Header(None, alias='X-Telegram-Chat',
                                                                     include_in_schema=False)):
     q = TelegramLink.query.filter_by(user_id=ctx.user.id)
     if ctx.via_api_token and chat_id:

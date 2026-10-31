@@ -56,9 +56,33 @@ function FamilyKeyOffer({ cfg, onSaved, onOwnKey }: { cfg: PluggyConfig; onSaved
   )
 }
 
+/** Só quem cadastrou a chave decide se a família pode usar. Tirar desconecta os bancos que a família ligou com ela. */
+function FamilySharing({ cfg, sharedWith, onChanged }: { cfg: PluggyConfig; sharedWith: string[]; onChanged: () => void }) {
+  const act = useAction()
+  const set = (allow: boolean) => act(() => api.put<Saved>('/pluggy/config/family-sharing', { allow }), onChanged)
+  if (!cfg.allow_family) {
+    return (
+      <div className="stack-sm">
+        <p className="muted small">Só você usa esta chave. Se deixar, as pessoas da família conectam os bancos delas sem criar
+          conta na Pluggy — mas esses bancos ficam na <b>sua</b> conta Pluggy (você os vê no painel da Pluggy).</p>
+        <div><Button variant="ghost" onClick={() => set(true)}>Deixar a família usar esta chave</Button></div>
+      </div>
+    )
+  }
+  return (
+    <div className="stack-sm">
+      <p className="muted">A família pode usar esta chave{sharedWith.length ? <>: {sharedWith.join(', ')} já usa(m)</> : ''}.
+        Se você trocar o segredo, muda para todos.</p>
+      <div><ConfirmButton label="Parar de compartilhar a chave" text="Parar de compartilhar"
+        confirmLabel={sharedWith.length ? `Parar e desconectar ${cfg.family_banks} banco(s) da família` : 'Confirmar'}
+        onConfirm={() => set(false)} /></div>
+    </div>
+  )
+}
+
 function KeyStatus({ cfg, onEdit, onChanged }: { cfg: PluggyConfig; onEdit: () => void; onChanged: () => void }) {
   const act = useAction()
-  const sharedWith = cfg.shared_with.filter(Boolean)
+  const sharedWith = cfg.shared_with.filter((n): n is string => !!n)
   return (
     <div className="stack">
       <p>
@@ -66,7 +90,7 @@ function KeyStatus({ cfg, onEdit, onChanged }: { cfg: PluggyConfig; onEdit: () =
         {' '}<span className="muted">Client ID {cfg.client_id_masked}</span>
       </p>
       {cfg.shared_from_name && <p>Você usa a chave da família, cadastrada por <b>{cfg.shared_from_name}</b>.</p>}
-      {sharedWith.length > 0 && <p className="muted">Também usam esta chave: {sharedWith.join(', ')}. Se você trocar o segredo, muda para todos.</p>}
+      {!cfg.shared_from_name && <FamilySharing cfg={cfg} sharedWith={sharedWith} onChanged={onChanged} />}
       {cfg.last_error && <p className="form-error" role="alert">{cfg.last_error}</p>}
       <p className="muted">
         {cfg.webhook ? 'Aviso de novidades (webhook) configurado na sua conta Pluggy.'
@@ -76,7 +100,9 @@ function KeyStatus({ cfg, onEdit, onChanged }: { cfg: PluggyConfig; onEdit: () =
       <div className="row gap">
         <Button variant="ghost" onClick={onEdit}>{cfg.shared_from_name ? 'Usar uma chave própria' : 'Trocar chave'}</Button>
         <ConfirmButton label="Remover chave Pluggy" text={cfg.shared_from_name ? 'Parar de usar' : 'Remover chave'}
-          confirmLabel={cfg.connections ? `Remover e desconectar ${cfg.connections} banco(s)` : 'Confirmar remoção'}
+          confirmLabel={cfg.connections + cfg.family_banks
+            ? `Remover e desconectar ${cfg.connections + cfg.family_banks} banco(s)${cfg.family_banks ? ' (inclui os da família)' : ''}`
+            : 'Confirmar remoção'}
           onConfirm={() => act(() => api.del<Saved>('/pluggy/config'), onChanged)} />
       </div>
     </div>
@@ -105,7 +131,7 @@ export function HowTo() {
         <li>Cole os dois aqui e toque em <b>Salvar e testar</b>.</li>
         <li>Depois, toque em <b>Conectar banco</b> e escolha o seu banco.</li>
       </ol>
-      <p className="muted"><b>Uma chave por família basta:</b> quem cadastrar primeiro, os outros tocam em
+      <p className="muted"><b>Uma chave por família basta:</b> quem cadastrar deixa a família usar, e os outros tocam em
         <b> Usar a chave da família</b>. Cada pessoa continua vendo só os bancos que ela conectar. A cobrança (se houver)
         é feita pela Pluggy na conta de quem criou a aplicação. O FinFam nunca vê a senha do seu banco.</p>
     </Panel>

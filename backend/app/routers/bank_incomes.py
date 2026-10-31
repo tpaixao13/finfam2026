@@ -12,8 +12,8 @@ from sqlalchemy import func
 from app.core.db import db
 from app.core.deps import Ctx, get_ctx_session, get_ctx_site_or_bot
 from app.core.types import utcnow
-from app.models import BankAccount, BankConnection, BankIncome, Salary
-from app.routers.pluggy import _enabled_tenant, _owner_name, _seen
+from app.models import BankIncome, Salary
+from app.routers.pluggy import _enabled_tenant, _owner_name, _seen_accounts
 from app.services import bank_incomes as bi
 from app.services import open_finance as of
 
@@ -24,8 +24,7 @@ Status = Literal['pending', 'duplicate', 'ignored', 'imported']
 
 
 def _seen_inc(ctx: Ctx):
-    accounts = db.session.query(BankAccount.id).join(BankConnection).filter(_seen(ctx))
-    return BankIncome.account_id.in_(accounts)
+    return BankIncome.account_id.in_(_seen_accounts(ctx))
 
 
 def _counts(ctx: Ctx) -> dict:

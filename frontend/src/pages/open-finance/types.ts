@@ -6,6 +6,7 @@ export interface PluggyConfig {
   include_sandbox: boolean; connections: number; to_review: number; incomes_to_review: number; notify: boolean
   shared_from_name: string | null          // usando a chave dessa pessoa da família
   shared_with: (string | null)[]           // quem da família usa a minha chave
+  allow_family: boolean; family_banks: number  // deixei a família usar; bancos que ela conectou com a minha chave
   family_key: { owner_name: string | null; client_id_masked: string } | null  // chave da família para usar
 }
 export type Saved = { message: string; config: PluggyConfig }

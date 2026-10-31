@@ -228,7 +228,8 @@ class PluggyConfig(Base):
     hook_secret = Column(Text, nullable=False)            # encrypt_field(...)
     webhook_id = Column(String(64), nullable=True)
     notify = Column(Boolean, default=True, nullable=False)  # avisar no Telegram quando chega algo do banco
-    shared_from = Column(Integer, nullable=True, index=True)  # id da pessoa de quem é a chave (cópia); sem FK: não ambíguo
+    shared_from = Column(Integer, nullable=True, index=True)
+    allow_family = Column(Boolean, default=False, server_default='0', nullable=False)  # dono deixou a família usar  # id da pessoa de quem é a chave (cópia); sem FK: não ambíguo
     status = Column(String(20), nullable=False, default='ok')  # ok | error
     last_error = Column(Text, nullable=True)
     consent_at = Column(DateTime, nullable=False, default=utcnow)

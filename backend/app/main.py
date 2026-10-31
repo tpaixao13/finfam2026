@@ -13,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
+from app.core.bodylimit import BodyLimitMiddleware
 from app.core.config import settings
 from app.core.db import DBSessionMiddleware
 from app.core.migrations import run_migrations
@@ -34,7 +35,7 @@ class _HideHookToken(logging.Filter):
 
 logging.getLogger('uvicorn.access').addFilter(_HideHookToken())
 
-VERSION = '2026.8.0'
+VERSION = '2026.8.1'
 MAX_BODY_BYTES = 12 * 1024 * 1024
 
 _FIELD_LABELS = {
@@ -109,14 +110,6 @@ def create_app() -> FastAPI:
     app.add_middleware(DBSessionMiddleware)
 
     @app.middleware('http')
-    async def body_limit(request: Request, call_next):
-        """Corpo grande é recusado antes de ser lido (a maior entrada é a foto/áudio do bot, até 8 MB em base64)."""
-        size = request.headers.get('content-length', '')
-        if size.isdigit() and int(size) > MAX_BODY_BYTES:
-            return JSONResponse(status_code=413, content={'detail': 'Arquivo grande demais.'})
-        return await call_next(request)
-
-    @app.middleware('http')
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
         response.headers.setdefault('X-Content-Type-Options', 'nosniff')
@@ -124,6 +117,9 @@ def create_app() -> FastAPI:
         response.headers.setdefault('Referrer-Policy', 'same-origin')
         return response
     app.add_exception_handler(RequestValidationError, _validation_handler)
+    # por último = o mais de fora: o corpo grande é cortado antes de qualquer outra coisa
+    # (a maior entrada é a foto/áudio do bot, até 8 MB em base64)
+    app.add_middleware(BodyLimitMiddleware, max_bytes=MAX_BODY_BYTES)
 
     prefix = settings.api_prefix
     for module in (auth, family, dashboard, expenses, incomes, cards, goals, rules, investments,
@@ -148,6 +144,8 @@ def _mount_frontend(app: FastAPI):
     def spa(full_path: str):
         if full_path.startswith('api/'):
             return JSONResponse(status_code=404, content={'detail': 'Rota não encontrada.'})
+        if '\x00' in full_path:  # o sistema de arquivos recusa byte nulo (sem isso, erro 500)
+            return FileResponse(index)
         candidate = (dist / full_path).resolve()
         if full_path and candidate.is_file() and dist.resolve() in candidate.parents:
             return FileResponse(candidate)

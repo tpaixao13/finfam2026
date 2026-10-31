@@ -21,8 +21,8 @@ class RenameIn(BaseModel):
 class MemberIn(BaseModel):
     name: str = Field(min_length=2, max_length=30)
     email: Email
-    password: str = Field(min_length=8)
-    confirm_password: str
+    password: str = Field(min_length=8, max_length=256)
+    confirm_password: str = Field(max_length=256)
 
     @model_validator(mode='after')
     def _match(self):
@@ -34,9 +34,9 @@ class MemberIn(BaseModel):
 class MemberUpdate(BaseModel):
     name: str = Field(min_length=2, max_length=30)
     email: Email
-    new_password: str | None = Field(default=None, min_length=8)
-    confirm_password: str | None = None
-    current_password: str | None = Field(None, description='Obrigatória ao trocar a própria senha ou e-mail')
+    new_password: str | None = Field(default=None, min_length=8, max_length=256)
+    confirm_password: str | None = Field(None, max_length=256)
+    current_password: str | None = Field(None, max_length=256, description='Obrigatória ao trocar a própria senha ou e-mail')
 
     @model_validator(mode='after')
     def _match(self):
@@ -69,6 +69,7 @@ def get_family(ctx: Ctx = Depends(get_ctx)):
 @router.patch('', summary='Renomeia a família')
 def rename(body: RenameIn, ctx: Ctx = Depends(get_ctx_session)):
     tenant = _require_tenant(ctx)
+    _require_owner(ctx, 'renomear a família')
     tenant.name = body.name.strip()
     db.session.commit()
     return {'message': 'Nome do grupo atualizado!', 'tenant': tenant_out(tenant)}
@@ -77,6 +78,7 @@ def rename(body: RenameIn, ctx: Ctx = Depends(get_ctx_session)):
 @router.post('/members', status_code=201, summary='Adiciona um membro')
 def add_member(body: MemberIn, request: Request, ctx: Ctx = Depends(get_ctx_session)):
     tenant = _require_tenant(ctx)
+    _require_owner(ctx, 'adicionar pessoas')  # quem entra vê tudo da família
     if len(ctx.members) >= tenant.member_limit:
         raise HTTPException(status_code=403, detail=(
             f'Limite do plano {tenant.plan_label} atingido ({tenant.member_limit} usuários). '
@@ -99,6 +101,7 @@ def add_member(body: MemberIn, request: Request, ctx: Ctx = Depends(get_ctx_sess
 @router.post('/members/{user_id}/resend', summary='Manda de novo o e-mail de confirmação de um membro')
 def resend_member(user_id: int, request: Request, ctx: Ctx = Depends(get_ctx_session)):
     tenant = _require_tenant(ctx)
+    _require_owner(ctx, 'reenviar o convite')
     user = get_or_404(User.query.filter_by(id=user_id, tenant_id=tenant.id), 'Membro não encontrado.')
     if not account_mail.needs_verification(user):
         return {'message': f'O e-mail de {user.name} já está confirmado.'}
@@ -116,8 +119,8 @@ def edit_member(user_id: int, body: MemberUpdate, request: Request, ctx: Ctx = D
     if user.id == ctx.user.id:
         if changes_credentials and not ctx.user.check_password(body.current_password or ''):
             raise HTTPException(status_code=422, detail='Informe sua senha atual para trocar e-mail ou senha.')
-    elif changes_credentials:
-        _require_owner(ctx, 'alterar e-mail ou senha de outra pessoa')
+    else:
+        _require_owner(ctx, 'alterar os dados de outra pessoa')
     other = User.query.filter_by(email=email).first()
     if other and other.id != user.id:
         raise HTTPException(status_code=409, detail='E-mail já está em uso por outro membro.')
@@ -144,7 +147,7 @@ def delete_member(user_id: int, ctx: Ctx = Depends(get_ctx_session)):
     _require_owner(ctx, 'remover pessoas')
     user = get_or_404(User.query.filter_by(id=user_id, tenant_id=tenant.id), 'Membro não encontrado.')
     name = user.name
-    from app.routers.pluggy import release_key
+    from app.services.pluggy_keys import release_key
     release_key(user.id)  # quem usa a chave Pluggy dela continua usando
     db.session.delete(user)
     db.session.commit()
