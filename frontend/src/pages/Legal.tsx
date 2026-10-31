@@ -146,9 +146,12 @@ export function PrivacyPage() {
       <ul>
         <li>Enquanto a sua conta existir.</li>
         <li>Ao desconectar um banco, os dados que vieram dele são apagados (as despesas e rendas que você aprovou ficam).</li>
-        <li>Ao excluir a conta (em Perfil e acesso → Excluir conta), os dados são apagados na hora e os bancos
-          conectados são desconectados na Pluggy; as cópias de segurança criptografadas expiram em até 30 dias. Podemos
-          manter o mínimo exigido por lei pelo prazo legal.</li>
+        <li>Ao excluir a conta (em Perfil e acesso → Excluir conta), os dados são apagados do FinFam na hora e os
+          bancos conectados são desconectados na Pluggy.</li>
+        <li>As cópias de segurança do servidor inteiro são criptografadas, só a administração do FinFam consegue abri-las
+          e são usadas apenas para recuperar o serviço em caso de falha. Elas são descartadas aos poucos (as mais
+          antigas primeiro) e não são usadas para restaurar uma conta que você excluiu.</li>
+        <li>Podemos manter o mínimo exigido por lei pelo prazo legal.</li>
       </ul>
 
       <h2>7. Seus direitos</h2>

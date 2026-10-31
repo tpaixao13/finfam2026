@@ -36,13 +36,13 @@ class _HideHookToken(logging.Filter):
 
 logging.getLogger('uvicorn.access').addFilter(_HideHookToken())
 
-VERSION = '2026.10.0'
+VERSION = '2026.10.1'
 MAX_BODY_BYTES = 12 * 1024 * 1024
 # O site só carrega o que é dele, as fontes do Google e o Pluggy Connect (script e janela do banco).
 # Se um dia o Pluggy Connect parar de abrir por causa disto, CSP_REPORT_ONLY=1 no .env só avisa no console.
 CSP = ("default-src 'self'; script-src 'self' https://cdn.pluggy.ai https://*.pluggy.ai; "
        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; "
-       "img-src 'self' data: blob: https:; connect-src 'self' https://*.pluggy.ai wss://*.pluggy.ai; "
+       "img-src 'self' data: blob: https://*.pluggy.ai; connect-src 'self' https://*.pluggy.ai wss://*.pluggy.ai; "
        "frame-src https://*.pluggy.ai; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 CSP_HEADER = ('Content-Security-Policy-Report-Only' if os.environ.get('CSP_REPORT_ONLY', '').split('#')[0].strip() == '1'
               else 'Content-Security-Policy')

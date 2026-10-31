@@ -15,7 +15,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 INSTANCE_DIR = BACKEND_DIR / 'instance'
 # versão dos Termos de uso e da Política de privacidade (frontend/src/pages/Legal.tsx): mudou o texto,
 # muda a data — cada pessoa aceita de novo no próximo acesso
-TERMS_VERSION = '2026-10-31'
+TERMS_VERSION = '2026-10-31.2'
 
 
 def _env(name: str, default: str | None = None) -> str | None:

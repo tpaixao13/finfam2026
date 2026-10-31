@@ -19,6 +19,7 @@ seguidas (evita alarme por um reinício). Roda separado da API: avisa mesmo com 
 (manda direto pelo Bot API do Telegram).
 """
 import argparse
+import html
 import json
 import shutil
 import subprocess
@@ -28,6 +29,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.core.config import INSTANCE_DIR, settings
+from app.core.state_file import read_state, write_state
 from scripts.backup_telegram import _env, chat_of
 
 STATE = INSTANCE_DIR / 'monitor_state.json'
@@ -81,9 +83,8 @@ def check_sync() -> str | None:
 
 
 def check_backup() -> str | None:
-    try:
-        state = json.loads(BACKUP_STATE.read_text())
-    except (OSError, ValueError):
+    state = read_state(BACKUP_STATE)
+    if state is None:
         return None  # backup fora do Raspberry ainda não configurado: o admin vê no painel
     last = state.get('last_ok')
     if not last:
@@ -137,13 +138,6 @@ def notify(text: str) -> bool:
     return ok
 
 
-def _load() -> dict:
-    try:
-        return json.loads(STATE.read_text())
-    except (OSError, ValueError):
-        return {}
-
-
 def transitions(previous: dict, current: dict) -> tuple[dict, list[str], list[str]]:
     """(novo estado, problemas novos, problemas resolvidos). Problema só conta depois de 2 checagens seguidas."""
     state, down, up = {}, [], []
@@ -166,19 +160,27 @@ def transitions(previous: dict, current: dict) -> tuple[dict, list[str], list[st
 
 
 def run(send: bool = True) -> int:
-    previous = _load()
+    previous = read_state(STATE) or {}
     current = checks()
     state, down, up = transitions(previous, current)
-    STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps(state, ensure_ascii=False, indent=1))
+    write_state(STATE, state)
     ts = f'[{datetime.now():%Y-%m-%d %H:%M:%S}]'
     problems = [p for p in current.values() if p]
     print(f'{ts} ' + ('tudo ok' if not problems else 'problemas: ' + '; '.join(problems)))
-    if send and down:
-        notify('🚨 <b>FinFam 2026 — problema</b>\n\n' + '\n'.join(f'• {p}' for p in down))
+    if send and down and not notify('🚨 <b>FinFam 2026 — problema</b>\n\n' + _bullets(down)):
+        # o aviso não saiu: tenta de novo na próxima checagem (não marca como avisado)
+        for name in current:
+            if state[name]['alerted'] and not (previous.get(name) or {}).get('alerted'):
+                state[name]['alerted'] = False
+        write_state(STATE, state)
     if send and up:
-        notify('✅ <b>FinFam 2026 — voltou ao normal</b>\n\n' + '\n'.join(f'• {p}' for p in up))
+        notify('✅ <b>FinFam 2026 — voltou ao normal</b>\n\n' + _bullets(up))
     return 1 if problems else 0
+
+
+def _bullets(items: list[str]) -> str:
+    """Lista para o Telegram (HTML): o texto vem de erros de ferramentas e pode ter < e &."""
+    return '\n'.join(f'• {html.escape(p, quote=False)}' for p in items)
 
 
 def main(argv: list[str] | None = None) -> int:

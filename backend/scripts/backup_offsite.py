@@ -22,9 +22,9 @@ O que faz: cópia consistente do SQLite (com a API rodando) → confere a integr
 monitor (scripts.monitor) usa para avisar se o backup parar de acontecer.
 """
 import argparse
+import getpass
 import base64
 import hashlib
-import json
 import os
 import shutil
 import sqlite3
@@ -38,25 +38,37 @@ from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import INSTANCE_DIR, settings
+from app.core.state_file import read_state, write_state
 from scripts.backup_telegram import _env, chat_of, db_path, send_document, snapshot
 
-MAGIC = b'FFBK1'
+MAGIC = b'FFBK2'          # FFBK2 + expoente do scrypt (1 byte) + sal (16) + token Fernet
+OLD_MAGIC = b'FFBK1'      # backups de 31/10/2026: scrypt n=2^15, sem o byte do expoente
+SCRYPT_LOG_N = 17         # n = 2^17 (recomendação atual); usa ~128 MB de RAM por alguns segundos
 STATE = INSTANCE_DIR / 'backup_state.json'
 TELEGRAM_LIMIT = 49 * 1024 * 1024
 
 
 # ── criptografia ─────────────────────────────────────────────────────────────
 
-def _key(password: str, salt: bytes) -> bytes:
-    raw = hashlib.scrypt(password.encode(), salt=salt, n=2 ** 15, r=8, p=1, maxmem=64 * 1024 * 1024, dklen=32)
+def _key(password: str, salt: bytes, log_n: int = SCRYPT_LOG_N) -> bytes:
+    raw = hashlib.scrypt(password.encode(), salt=salt, n=2 ** log_n, r=8, p=1, maxmem=256 * 1024 * 1024, dklen=32)
     return base64.urlsafe_b64encode(raw)
 
 
 def encrypt(src: Path, password: str) -> Path:
     salt = os.urandom(16)
     out = src.with_name(src.name + '.enc')
-    out.write_bytes(MAGIC + salt + Fernet(_key(password, salt)).encrypt(src.read_bytes()))
+    token = Fernet(_key(password, salt)).encrypt(src.read_bytes())
+    out.write_bytes(MAGIC + bytes([SCRYPT_LOG_N]) + salt + token)
     return out
+
+
+def _private_write(path: Path, data: bytes) -> None:
+    """Grava legível só pelo dono (o backup aberto é o banco inteiro)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'wb') as f:
+        f.write(data)
+    os.chmod(path, 0o600)
 
 
 def decrypt(src: Path, password: str) -> Path:
@@ -64,15 +76,21 @@ def decrypt(src: Path, password: str) -> Path:
         raise SystemExit(f'Arquivo não encontrado: {src.resolve()}\n'
                          'Baixe o backup do Telegram para o Raspberry (ou passe o caminho completo dele).')
     data = src.read_bytes()
-    if not data.startswith(MAGIC):
+    if data.startswith(MAGIC):
+        log_n, rest = data[len(MAGIC)], data[len(MAGIC) + 1:]
+    elif data.startswith(OLD_MAGIC):
+        log_n, rest = 15, data[len(OLD_MAGIC):]
+    else:
         raise SystemExit('Arquivo não é um backup criptografado do FinFam.')
-    salt, token = data[len(MAGIC):len(MAGIC) + 16], data[len(MAGIC) + 16:]
+    if not 14 <= log_n <= 20:
+        raise SystemExit('Arquivo de backup inválido.')
+    salt, token = rest[:16], rest[16:]
     try:
-        plain = Fernet(_key(password, salt)).decrypt(token)
+        plain = Fernet(_key(password, salt, log_n)).decrypt(token)
     except InvalidToken:
         raise SystemExit('Senha errada (ou arquivo corrompido).') from None
     out = src.with_suffix('') if src.suffix == '.enc' else src.with_name(src.name + '.db.gz')
-    out.write_bytes(plain)
+    _private_write(out, plain)
     return out
 
 
@@ -151,18 +169,24 @@ def destinations(keep_days: int) -> list:
     return out
 
 
+def prune_family_backups(keep_days: int) -> int:
+    """Os backups por família que o admin gera (antes de zerar/restaurar) também expiram."""
+    from app.services.family_backup import BACKUP_DIR
+    limit, removed = time.time() - keep_days * 86400, 0
+    for old in BACKUP_DIR.glob('familia_*.json.gz') if BACKUP_DIR.exists() else []:
+        if old.stat().st_mtime < limit:
+            old.unlink()
+            removed += 1
+    return removed
+
+
 def save_state(ok: list[str], errors: list[str], size: int) -> None:
-    previous = {}
-    try:
-        previous = json.loads(STATE.read_text())
-    except (OSError, ValueError):
-        pass
+    previous = read_state(STATE) or {}
     now = datetime.now().isoformat(timespec='seconds')
     state = {**previous, 'last_run': now, 'last_size': size, 'last_destinations': ok, 'last_errors': errors}
     if ok:
         state['last_ok'] = now
-    STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps(state, ensure_ascii=False, indent=1))
+    write_state(STATE, state)
 
 
 def run() -> int:
@@ -196,6 +220,7 @@ def run() -> int:
                 ok.append(send(enc))
             except Exception as exc:
                 errors.append(f'{name}: {exc}')
+    prune_family_backups(keep)
     save_state(ok, errors, size)
     print(f'{ts} Backup de {size // 1024} KB → ' + (', '.join(ok) or 'nenhum destino')
           + (f' | ERROS: {"; ".join(errors)}' if errors else ''))
@@ -207,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--decrypt', metavar='ARQUIVO', help='abre um backup .enc (pede BACKUP_PASSWORD do .env)')
     args = parser.parse_args(argv)
     if args.decrypt:
-        password = _env('BACKUP_PASSWORD') or input('Senha do backup: ')
+        password = _env('BACKUP_PASSWORD') or getpass.getpass('Senha do backup: ')
         out = decrypt(Path(args.decrypt), password)
         print(f'Pronto: {out} (gunzip e substitua o banco com a API parada).')
         return 0

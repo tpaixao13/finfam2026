@@ -229,16 +229,16 @@ def reset_password(body: ResetIn, request: Request):
     return {'message': 'Senha alterada! Entre com a nova senha.'}
 
 
+def _terms(user: User) -> dict:
+    return {'version': TERMS_VERSION, 'accepted': user.terms_version == TERMS_VERSION,
+            'accepted_at': user.terms_accepted_at.isoformat() + 'Z' if user.terms_accepted_at else None}
+
+
 @router.post('/auth/accept-terms', summary='Aceita a versão atual dos Termos de uso e da Política de privacidade')
 def accept_terms(ctx: Ctx = Depends(get_ctx_session_allow_expired)):
     ctx.user.terms_version, ctx.user.terms_accepted_at = TERMS_VERSION, utcnow()
     db.session.commit()
     return {'message': 'Obrigado! Termos e política aceitos.', 'terms': _terms(ctx.user)}
-
-
-def _terms(user: User) -> dict:
-    return {'version': TERMS_VERSION, 'accepted': user.terms_version == TERMS_VERSION,
-            'accepted_at': user.terms_accepted_at.isoformat() + 'Z' if user.terms_accepted_at else None}
 
 
 @router.get('/auth/me', summary='Usuário logado, família, plano e contador de alertas')
@@ -377,12 +377,8 @@ class DeleteAccountIn(BaseModel):
     confirm: str = Field(max_length=30, description='Digite EXCLUIR')
 
 
-@router.post('/auth/delete-account', summary='Exclui a minha conta (ou a família inteira, para quem criou)')
-def delete_account(body: DeleteAccountIn, request: Request, ctx: Ctx = Depends(get_ctx_session_allow_expired)):
-    """Pede a senha, o código do app (se houver) e a palavra EXCLUIR. Não dá para desfazer."""
-    from app.core.deps import is_owner
-    from app.services import account_deletion
-    user = ctx.user
+def _confirm_deletion(body: DeleteAccountIn, request: Request, user: User) -> None:
+    """Limite de tentativas, palavra EXCLUIR, senha e (se ligado) código do app."""
     ratelimit.check(request, 'delete-account', str(user.id), limit=5, window=900)
     if body.confirm.strip().upper() != 'EXCLUIR':
         raise HTTPException(status_code=422, detail='Para confirmar, digite EXCLUIR.')
@@ -394,16 +390,31 @@ def delete_account(body: DeleteAccountIn, request: Request, ctx: Ctx = Depends(g
         except tfa.TwoFactorError as exc:
             db.session.commit()  # guarda a tentativa errada (bloqueio depois de 3)
             raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post('/auth/delete-account', summary='Exclui a minha conta (ou a família inteira, para quem criou)')
+def delete_account(body: DeleteAccountIn, request: Request, ctx: Ctx = Depends(get_ctx_session_allow_expired)):
+    """Pede a senha, o código do app (se houver) e a palavra EXCLUIR. Não dá para desfazer."""
+    from app.core.deps import is_owner
+    from app.services import account_deletion
+    user = ctx.user
     owner, others = is_owner(ctx), len(ctx.members) > 1
+    whole_family = ctx.tenant is not None and (body.scope == 'family' or (owner and not others))
+    # regras antes da senha/código: um pedido que não pode ser atendido não gasta o código do app
     if body.scope == 'family' and not owner:
         raise HTTPException(status_code=403, detail='Só quem criou a família pode excluir a família inteira.')
-    if ctx.tenant is not None and (body.scope == 'family' or (owner and not others)):
-        name = ctx.tenant.name
-        count = account_deletion.delete_family(ctx.tenant)
-        return {'message': f'"{name}" foi excluída, com {count} pessoa(s) e todos os dados.', 'deleted': 'family'}
-    if owner and others:
+    if owner and others and not whole_family:
         raise HTTPException(status_code=409, detail=(
             'Você criou a família: para sair, remova antes as outras pessoas em Família, '
             'ou exclua a família inteira.'))
-    account_deletion.delete_member(user)
-    return {'message': 'Sua conta e os seus dados foram excluídos.', 'deleted': 'me'}
+    _confirm_deletion(body, request, user)
+    pluggy_note = (' Não consegui desconectar algum banco na Pluggy: confira no painel da Pluggy '
+                   '(dashboard.pluggy.ai) e remova por lá.')
+    if whole_family:
+        name = ctx.tenant.name
+        count, banks_ok = account_deletion.delete_family(ctx.tenant)
+        return {'message': f'"{name}" foi excluída, com {count} pessoa(s) e todos os dados.'
+                           + ('' if banks_ok else pluggy_note), 'deleted': 'family'}
+    banks_ok = account_deletion.delete_member(user)
+    return {'message': 'Sua conta e os seus dados foram excluídos.' + ('' if banks_ok else pluggy_note),
+            'deleted': 'me'}

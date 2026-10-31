@@ -145,33 +145,33 @@ def my_2fa_disable(body: DisableIn, admin: User = Depends(get_admin)):
     return {'message': 'Verificação em duas etapas desativada no login do administrador.'}
 
 
-def _json(path) -> dict:
-    import json
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return {}
+def _env_set(name: str) -> bool:
+    import os
+    return bool(os.environ.get(name, '').split('#')[0].strip())
+
+
+def _monitor_health(state: dict) -> dict:
+    problems = [{'check': k, 'problem': v.get('problem'), 'since': v.get('since')}
+                for k, v in state.items() if isinstance(v, dict) and v.get('problem')]
+    return {'configured': _env_set('MONITOR_USER_EMAIL') or _env_set('MONITOR_CHAT_ID'),
+            'checked_at': state.get('_checked_at'), 'problems': problems}
+
+
+def _backup_health(state: dict) -> dict:
+    return {'configured': _env_set('BACKUP_PASSWORD') and (_env_set('BACKUP_CHAT_ID') or _env_set('BACKUP_RCLONE_REMOTE')
+                                                           or _env_set('BACKUP_DIR_EXTRA')),
+            'last_ok': state.get('last_ok'), 'last_run': state.get('last_run'),
+            'destinations': state.get('last_destinations') or [], 'errors': state.get('last_errors') or [],
+            'size': state.get('last_size')}
 
 
 @router.get('/health', summary='Saúde do sistema: monitor e backup fora do Raspberry')
 def system_health(_: User = Depends(get_admin)):
     """O que o cron escreveu por último (scripts.monitor e scripts.backup_offsite). Sem segredos."""
-    import os
     from app.core.config import INSTANCE_DIR
-    monitor = _json(INSTANCE_DIR / 'monitor_state.json')
-    backup = _json(INSTANCE_DIR / 'backup_state.json')
-    problems = [{'check': k, 'problem': v.get('problem'), 'since': v.get('since')}
-                for k, v in monitor.items() if isinstance(v, dict) and v.get('problem')]
-    env = lambda k: bool(os.environ.get(k, '').split('#')[0].strip())  # noqa: E731
-    return {
-        'monitor': {'configured': env('MONITOR_USER_EMAIL') or env('MONITOR_CHAT_ID'),
-                    'checked_at': monitor.get('_checked_at'), 'problems': problems},
-        'backup': {'configured': env('BACKUP_PASSWORD') and (env('BACKUP_CHAT_ID') or env('BACKUP_RCLONE_REMOTE')
-                                                              or env('BACKUP_DIR_EXTRA')),
-                   'last_ok': backup.get('last_ok'), 'last_run': backup.get('last_run'),
-                   'destinations': backup.get('last_destinations') or [], 'errors': backup.get('last_errors') or [],
-                   'size': backup.get('last_size')},
-    }
+    from app.core.state_file import read_state
+    return {'monitor': _monitor_health(read_state(INSTANCE_DIR / 'monitor_state.json') or {}),
+            'backup': _backup_health(read_state(INSTANCE_DIR / 'backup_state.json') or {})}
 
 
 @router.get('/dashboard', summary='Visão geral das famílias e usuários')

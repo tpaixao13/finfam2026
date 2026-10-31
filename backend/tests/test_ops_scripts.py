@@ -96,3 +96,47 @@ def test_backup_and_monitor_find_private_chat_by_email(client, family, tmp_path,
     monkeypatch.setenv('MONITOR_USER_EMAIL', 'ninguem@test.com')
     assert 'nenhuma conta' in mon.alert_target()[1]
     session.remove()
+
+
+def test_old_backup_format_still_opens_and_output_is_private(tmp_path):
+    import base64
+    import hashlib
+    import os
+    import stat
+    from cryptography.fernet import Fernet
+    salt = os.urandom(16)
+    key = base64.urlsafe_b64encode(hashlib.scrypt(b'senha-forte-do-backup', salt=salt, n=2 ** 15, r=8, p=1,
+                                                  maxmem=64 * 1024 * 1024, dklen=32))
+    old = tmp_path / 'velho.db.gz.enc'
+    old.write_bytes(bo.OLD_MAGIC + salt + Fernet(key).encrypt(b'conteudo'))  # formato de 31/10 (FFBK1)
+    out = bo.decrypt(old, 'senha-forte-do-backup')
+    assert out.read_bytes() == b'conteudo' and stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
+def test_monitor_escapes_html_and_retries_when_telegram_refuses(tmp_path, monkeypatch):
+    monkeypatch.setattr(mon, 'STATE', tmp_path / 'm.json')
+    monkeypatch.setattr(mon, 'checks', lambda: {'backup': 'rclone falhou: <nil> & cia'})
+    sent = []
+    monkeypatch.setattr(mon, 'notify', lambda text: (sent.append(text), False)[1])  # Telegram recusou
+    mon.run()
+    mon.run()  # 2ª falha: tenta avisar, não consegue
+    assert '&lt;nil&gt; &amp; cia' in sent[-1]
+    mon.run()  # avisa de novo na próxima checagem
+    assert len(sent) == 2
+
+
+def test_deleting_family_removes_its_admin_backups(client, family, monkeypatch, tmp_path):
+    from app.services import family_backup as fb
+    from conftest import API
+    monkeypatch.setattr(fb, 'BACKUP_DIR', tmp_path)
+    mine = tmp_path / f"familia_{family.tenant['id']}_20261031_120000.json.gz"
+    other = tmp_path / 'familia_99999_20261031_120000.json.gz'
+    mine.write_bytes(b'x')
+    other.write_bytes(b'y')
+    r = family.post('/auth/delete-account', json={'password': 'senha-segura', 'confirm': 'EXCLUIR'})
+    assert r.status_code == 200 and not mine.exists() and other.exists()
+    old = tmp_path / 'familia_5_20200101_000000.json.gz'
+    old.write_bytes(b'z')
+    os_time = __import__('os')
+    os_time.utime(old, (0, 0))
+    assert bo.prune_family_backups(30) == 1 and not old.exists() and other.exists()

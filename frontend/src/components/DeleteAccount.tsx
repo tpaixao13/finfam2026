@@ -40,7 +40,8 @@ export function DeleteAccountPanel({ isOwner, members }: { isOwner: boolean; mem
           e todos os dados dela, e desconecta os bancos na Pluggy.</p>}
         {isOwner && others && <p className="muted">Você criou a família. Para sair, remova antes as outras pessoas em
           {' '}<b>Família</b> — ou exclua a <b>família inteira</b>: todas as {members} pessoas e todos os dados.</p>}
-        <p className="muted small">Não dá para desfazer. Quer guardar algo? Exporte as despesas (Excel/PDF) em Despesas antes.</p>
+        <p className="muted small">Não dá para desfazer. Quer guardar algo? Exporte as despesas (Excel/PDF) em Despesas antes.
+          Se você deixou a família usar a sua chave Pluggy, os bancos que ela conectou com essa chave também são desconectados.</p>
         <div>
           {isOwner && others
             ? <Button variant="danger" onClick={() => setScope('family')}>Excluir a família inteira</Button>

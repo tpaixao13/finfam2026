@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026.10.1 — revisão de segurança e unix (31/10/2026)
+
+- **Excluir a família** apaga também os backups dela que o admin gerou no servidor (`instance/backups`); e esses
+  backups por família passam a expirar sozinhos (`BACKUP_KEEP_DAYS`, no backup diário).
+- **Privacidade corrigida:** o texto prometia que as cópias de segurança expiravam em 30 dias, o que não vale para
+  o Telegram (o bot não consegue apagar mensagens antigas). Agora diz o que acontece de fato. Como mudou o texto,
+  cada pessoa aceita de novo no próximo acesso (`TERMS_VERSION = 2026-10-31.2`).
+- **Excluir conta:** as regras (quem pode, família com outras pessoas) são conferidas antes da senha/código, para não
+  gastar o código do app; se a Pluggy falhar ao desconectar um banco, a mensagem avisa para conferir no painel dela;
+  a tela avisa que os bancos da família ligados à sua chave Pluggy também saem.
+- **Monitor:** o texto do aviso é escapado (um "<" num erro do rclone fazia o Telegram recusar a mensagem) e, se o
+  aviso não sair, tenta de novo na checagem seguinte.
+- **Backup:** chave mais forte (scrypt n=2^17, guardado no arquivo; os backups de 31/10 continuam abrindo); o arquivo
+  aberto pelo `--decrypt` fica legível só pelo dono; a senha pedida na tela não aparece.
+- CSP: imagens só do próprio site (e da Pluggy).
+- Unix: `core/state_file.py` (leitura/gravação dos JSON de estado num lugar só), `/admin/health` e a exclusão de
+  conta em funções menores, Saúde do sistema em dois componentes.
+
 ## 2026.10.0 — a própria pessoa exclui a conta (31/10/2026)
 
 - **Perfil e acesso → Excluir conta** (LGPD): pede a senha, o código do app (se a verificação em duas etapas
