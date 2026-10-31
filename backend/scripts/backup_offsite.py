@@ -10,7 +10,8 @@ Cron (todo dia às 03:30):
 Configuração no backend/.env (use um ou mais destinos):
     BACKUP_PASSWORD=...          senha da criptografia (OBRIGATÓRIA; guarde fora do Raspberry — sem ela
                                  o backup não abre)
-    BACKUP_CHAT_ID=...           Telegram: o seu chat privado com o bot (arquivo até 50 MB)
+    BACKUP_USER_EMAIL=...        Telegram: o seu e-mail do FinFam — vai para o chat privado que você conectou ao bot
+    BACKUP_CHAT_ID=...           (ou o id do chat direto; arquivo até 50 MB)
     BACKUP_RCLONE_REMOTE=...     rclone (Google Drive, OneDrive, Dropbox, S3…), ex.: gdrive:FinFamBackup
                                  (configure antes com `rclone config`, como o usuário finfam)
     BACKUP_DIR_EXTRA=...         uma pasta de outro disco (HD/pendrive USB montado), ex.: /mnt/hd/finfam
@@ -37,7 +38,7 @@ from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import INSTANCE_DIR, settings
-from scripts.backup_telegram import _env, db_path, send_document, snapshot
+from scripts.backup_telegram import _env, chat_of, db_path, send_document, snapshot
 
 MAGIC = b'FFBK1'
 STATE = INSTANCE_DIR / 'backup_state.json'
@@ -123,10 +124,23 @@ def to_folder(file: Path, folder: Path, keep_days: int) -> str:
     return f'pasta {folder}'
 
 
+def telegram_chat() -> str:
+    """BACKUP_CHAT_ID, ou o chat privado da conta BACKUP_USER_EMAIL (ou MONITOR_USER_EMAIL)."""
+    if _env('BACKUP_CHAT_ID'):
+        return _env('BACKUP_CHAT_ID')
+    email = _env('BACKUP_USER_EMAIL') or _env('MONITOR_USER_EMAIL')
+    if not email:
+        return ''
+    chat, why = chat_of(email)
+    if not chat:
+        raise RuntimeError(why)
+    return chat
+
+
 def destinations(keep_days: int) -> list:
     out = []
-    if _env('BACKUP_CHAT_ID'):
-        out.append(('Telegram', lambda f: to_telegram(f, _env('BACKUP_CHAT_ID'))))
+    if _env('BACKUP_CHAT_ID') or _env('BACKUP_USER_EMAIL') or _env('MONITOR_USER_EMAIL'):
+        out.append(('Telegram', lambda f: to_telegram(f, telegram_chat())))
     if _env('BACKUP_RCLONE_REMOTE'):
         out.append(('rclone', lambda f: to_rclone(f, _env('BACKUP_RCLONE_REMOTE'), keep_days)))
     if _env('BACKUP_DIR_EXTRA'):

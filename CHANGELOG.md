@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.9.1 — backup e monitor acham o seu Telegram pelo e-mail (31/10/2026)
+
+- Backup e monitor podem usar só o **e-mail da sua conta** (`MONITOR_USER_EMAIL`, ou `BACKUP_USER_EMAIL`): vão
+  para o chat **privado** que essa conta conectou ao bot — não precisa descobrir o id do chat. `BACKUP_CHAT_ID`
+  continua valendo e tem prioridade.
+- Mensagens claras quando não acha o destino ("nenhuma conta com o e-mail…", "a conta não conectou o Telegram")
+  e quando o grupo virou supergrupo (mostra o id novo). Aspas em volta do valor no .env são ignoradas.
+
 ## 2026.9.0 — backup fora do Raspberry, monitor, termos e privacidade (31/10/2026)
 
 - **Backup automático fora do Raspberry** (`scripts/backup_offsite.py`): cópia consistente do banco, confere a

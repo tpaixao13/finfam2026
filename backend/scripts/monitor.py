@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.core.config import INSTANCE_DIR, settings
-from scripts.backup_telegram import _env
+from scripts.backup_telegram import _env, chat_of
 
 STATE = INSTANCE_DIR / 'monitor_state.json'
 BACKUP_STATE = INSTANCE_DIR / 'backup_state.json'
@@ -109,28 +109,27 @@ def checks() -> dict:
 
 # ── avisos ───────────────────────────────────────────────────────────────────
 
+def alert_target() -> tuple[str | None, str]:
+    """(chat, motivo se não achou): MONITOR_CHAT_ID, ou o chat privado da conta MONITOR_USER_EMAIL."""
+    if _env('MONITOR_CHAT_ID'):
+        return _env('MONITOR_CHAT_ID'), ''
+    if not _env('MONITOR_USER_EMAIL'):
+        return None, 'MONITOR_USER_EMAIL (ou MONITOR_CHAT_ID) não está no backend/.env'
+    return chat_of(_env('MONITOR_USER_EMAIL'))
+
+
 def alert_chat() -> str | None:
-    chat = _env('MONITOR_CHAT_ID')
-    if chat:
-        return chat
-    email = _env('MONITOR_USER_EMAIL').lower()
-    if not email:
-        return None
-    from app.core.db import db
-    from app.models import TelegramLink, User
-    try:
-        user = User.query.filter_by(email=email).first()
-        link = TelegramLink.query.filter_by(user_id=user.id).first() if user else None
-        return link.chat_id if link else None
-    finally:
-        db.session.remove()
+    return alert_target()[0]
 
 
 def notify(text: str) -> bool:
     from app.services.telegram import send_message
-    chat, token = alert_chat(), settings.telegram_bot_token
-    if not chat or not token:
-        print('Sem destino para o aviso: defina MONITOR_USER_EMAIL (ou MONITOR_CHAT_ID) e TELEGRAM_BOT_TOKEN.')
+    (chat, why), token = alert_target(), settings.telegram_bot_token
+    if not token:
+        print('Sem destino para o aviso: TELEGRAM_BOT_TOKEN não está no backend/.env.')
+        return False
+    if not chat:
+        print(f'Sem destino para o aviso: {why}.')
         return False
     ok, err = send_message(token, chat, text)
     if not ok:

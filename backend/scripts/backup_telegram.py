@@ -38,8 +38,30 @@ TELEGRAM_LIMIT = 49 * 1024 * 1024
 
 
 def _env(name: str) -> str:
+    """Valor do .env sem comentário no fim da linha e sem aspas em volta ("valor" ou 'valor')."""
     import re
-    return re.split(r'(?:^|\s+)#', os.environ.get(name, '').strip(), maxsplit=1)[0].strip()
+    value = re.split(r'(?:^|\s+)#', os.environ.get(name, '').strip(), maxsplit=1)[0].strip()
+    return value[1:-1].strip() if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'' else value
+
+
+def chat_of(email: str) -> tuple[str | None, str]:
+    """Chat privado do Telegram que a conta (e-mail do FinFam) conectou ao bot. (chat, motivo se não achou)."""
+    from app.core.db import db
+    from app.models import TelegramLink, User
+    email = (email or '').strip().lower()
+    if not email:
+        return None, 'e-mail não definido'
+    try:
+        user = User.query.filter_by(email=email).first()
+        if user is None:
+            return None, f'nenhuma conta do FinFam com o e-mail {email}'
+        link = (TelegramLink.query.filter_by(user_id=user.id)
+                .filter(~TelegramLink.chat_id.like('-%')).order_by(TelegramLink.id.desc()).first())
+        if link is None:
+            return None, f'a conta {email} não conectou o Telegram (Telegram e IA → Conectar Telegram)'
+        return link.chat_id, ''
+    finally:
+        db.session.remove()
 
 
 def db_path() -> Path:
@@ -110,6 +132,10 @@ def send_document(token: str, chat_id: str, file: Path, caption: str) -> None:
         except ValueError:
             raise RuntimeError(f'Telegram respondeu {exc.code}') from None
     if not result.get('ok'):
+        new_id = (result.get('parameters') or {}).get('migrate_to_chat_id')
+        if new_id:  # o grupo virou supergrupo: o id mudou
+            raise RuntimeError(f'o grupo virou supergrupo e mudou de id: use BACKUP_CHAT_ID={new_id} '
+                               '(ou apague BACKUP_CHAT_ID para mandar no seu chat privado com o bot)')
         raise RuntimeError(result.get('description', result))
 
 

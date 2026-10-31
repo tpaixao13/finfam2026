@@ -75,3 +75,24 @@ def test_admin_sees_system_health(client, family):
     r = client.get(f'{API}/admin/health', headers=_admin(client))
     assert r.status_code == 200 and set(r.json()) == {'monitor', 'backup'}
     assert client.get(f'{API}/admin/health', headers=family.headers).status_code in (401, 403)
+
+
+def test_backup_and_monitor_find_private_chat_by_email(client, family, tmp_path, monkeypatch):
+    from app.core.db import session
+    from app.models import TelegramLink
+    from scripts import backup_telegram as bt
+    monkeypatch.setattr(bo, 'STATE', tmp_path / 's.json')
+    monkeypatch.setenv('BACKUP_PASSWORD', 'senha-forte-do-backup')
+    for k in ('BACKUP_CHAT_ID', 'BACKUP_RCLONE_REMOTE', 'BACKUP_DIR_EXTRA', 'MONITOR_CHAT_ID'):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv('MONITOR_USER_EMAIL', '"tiago@test.com"')  # aspas no .env também valem
+    assert mon.alert_target() == (None, 'a conta tiago@test.com não conectou o Telegram (Telegram e IA → Conectar Telegram)')
+    session.add(TelegramLink(user_id=family.user['id'], chat_id='-100555'))  # um grupo não serve
+    session.add(TelegramLink(user_id=family.user['id'], chat_id='777001'))
+    session.commit()
+    sent = []
+    monkeypatch.setattr(bo, 'send_document', lambda token, chat, file, caption: sent.append(chat))
+    assert bo.run() == 0 and sent == ['777001']
+    monkeypatch.setenv('MONITOR_USER_EMAIL', 'ninguem@test.com')
+    assert 'nenhuma conta' in mon.alert_target()[1]
+    session.remove()
