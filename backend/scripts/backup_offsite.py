@@ -60,6 +60,9 @@ def encrypt(src: Path, password: str) -> Path:
 
 
 def decrypt(src: Path, password: str) -> Path:
+    if not src.is_file():
+        raise SystemExit(f'Arquivo não encontrado: {src.resolve()}\n'
+                         'Baixe o backup do Telegram para o Raspberry (ou passe o caminho completo dele).')
     data = src.read_bytes()
     if not data.startswith(MAGIC):
         raise SystemExit('Arquivo não é um backup criptografado do FinFam.')
