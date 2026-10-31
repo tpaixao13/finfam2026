@@ -4,6 +4,8 @@ import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
@@ -364,3 +366,44 @@ def revoke_token(token_id: int, ctx: Ctx = Depends(get_ctx_session)):
     token.revoked = True
     db.session.commit()
     return {'message': 'Token revogado.'}
+
+
+# ── Excluir a conta (pela própria pessoa) ────────────────────────────────────
+
+class DeleteAccountIn(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+    code: str | None = Field(None, max_length=10, description='Código do app, se a verificação em duas etapas estiver ligada')
+    scope: Literal['me', 'family'] = Field('me', description='me: só a minha conta; family: a família inteira (só quem criou)')
+    confirm: str = Field(max_length=30, description='Digite EXCLUIR')
+
+
+@router.post('/auth/delete-account', summary='Exclui a minha conta (ou a família inteira, para quem criou)')
+def delete_account(body: DeleteAccountIn, request: Request, ctx: Ctx = Depends(get_ctx_session_allow_expired)):
+    """Pede a senha, o código do app (se houver) e a palavra EXCLUIR. Não dá para desfazer."""
+    from app.core.deps import is_owner
+    from app.services import account_deletion
+    user = ctx.user
+    ratelimit.check(request, 'delete-account', str(user.id), limit=5, window=900)
+    if body.confirm.strip().upper() != 'EXCLUIR':
+        raise HTTPException(status_code=422, detail='Para confirmar, digite EXCLUIR.')
+    if not user.check_password(body.password):
+        raise HTTPException(status_code=422, detail='Senha incorreta.')
+    if user.totp_enabled:
+        try:
+            tfa.verify_login(user, body.code or '')
+        except tfa.TwoFactorError as exc:
+            db.session.commit()  # guarda a tentativa errada (bloqueio depois de 3)
+            raise HTTPException(status_code=422, detail=str(exc))
+    owner, others = is_owner(ctx), len(ctx.members) > 1
+    if body.scope == 'family' and not owner:
+        raise HTTPException(status_code=403, detail='Só quem criou a família pode excluir a família inteira.')
+    if ctx.tenant is not None and (body.scope == 'family' or (owner and not others)):
+        name = ctx.tenant.name
+        count = account_deletion.delete_family(ctx.tenant)
+        return {'message': f'"{name}" foi excluída, com {count} pessoa(s) e todos os dados.', 'deleted': 'family'}
+    if owner and others:
+        raise HTTPException(status_code=409, detail=(
+            'Você criou a família: para sair, remova antes as outras pessoas em Família, '
+            'ou exclua a família inteira.'))
+    account_deletion.delete_member(user)
+    return {'message': 'Sua conta e os seus dados foram excluídos.', 'deleted': 'me'}

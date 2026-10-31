@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.10.0 — a própria pessoa exclui a conta (31/10/2026)
+
+- **Perfil e acesso → Excluir conta** (LGPD): pede a senha, o código do app (se a verificação em duas etapas
+  estiver ligada) e a palavra EXCLUIR. Não dá para desfazer.
+  - **Membro:** apaga a conta dele e tudo o que é dele (gastos, rendas, cartões, metas, investimentos, Telegram)
+    e desconecta os bancos dele na Pluggy; a família continua.
+  - **Quem criou a família**, sozinho nela: apaga a conta e a família.
+  - **Quem criou, com outras pessoas:** remove antes as pessoas em Família, ou exclui a **família inteira**.
+  - A chave Pluggy de quem sai é revogada para quem a usava (bancos conectados com ela são desconectados).
+- `POST /auth/delete-account` (só com o login do site; token de API e bot não excluem). Termos e privacidade
+  passam a citar o botão.
+
 ## 2026.9.1 — backup e monitor acham o seu Telegram pelo e-mail (31/10/2026)
 
 - Backup e monitor podem usar só o **e-mail da sua conta** (`MONITOR_USER_EMAIL`, ou `BACKUP_USER_EMAIL`): vão

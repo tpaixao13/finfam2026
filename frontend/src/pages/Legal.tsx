@@ -73,8 +73,8 @@ export function TermsPage() {
       <h2>7. Planos, teste e encerramento</h2>
       <ul>
         <li>Novas famílias têm um período de teste. Depois, o acesso depende do plano contratado.</li>
-        <li>Você pode pedir o encerramento da conta e a exclusão dos dados a qualquer momento pelo e-mail
-          {' '}<a href={`mailto:${CONTACT}`}>{CONTACT}</a> (veja a <Link to="/privacidade">Política de privacidade</Link>).</li>
+        <li>Você pode excluir a sua conta a qualquer momento em <b>Perfil e acesso → Excluir conta</b> (quem criou a
+          família também pode excluir a família inteira), ou pedir pelo e-mail <a href={`mailto:${CONTACT}`}>{CONTACT}</a>.</li>
       </ul>
 
       <h2>8. Disponibilidade e responsabilidade</h2>
@@ -146,16 +146,17 @@ export function PrivacyPage() {
       <ul>
         <li>Enquanto a sua conta existir.</li>
         <li>Ao desconectar um banco, os dados que vieram dele são apagados (as despesas e rendas que você aprovou ficam).</li>
-        <li>Ao excluir a conta, apagamos os dados em até 30 dias; as cópias de segurança criptografadas expiram em até
-          30 dias. Podemos manter o mínimo exigido por lei pelo prazo legal.</li>
+        <li>Ao excluir a conta (em Perfil e acesso → Excluir conta), os dados são apagados na hora e os bancos
+          conectados são desconectados na Pluggy; as cópias de segurança criptografadas expiram em até 30 dias. Podemos
+          manter o mínimo exigido por lei pelo prazo legal.</li>
       </ul>
 
       <h2>7. Seus direitos</h2>
       <p>Você pode pedir a qualquer momento: confirmação de que tratamos seus dados, acesso, correção, portabilidade,
         anonimização ou exclusão, informação sobre com quem compartilhamos e revogação do consentimento. Escreva para
         {' '}<a href={`mailto:${CONTACT}`}>{CONTACT}</a> com o e-mail da conta; respondemos em até 15 dias. Pelo próprio
-        site você já pode corrigir seus dados, exportar as despesas (Excel/PDF), desconectar bancos e o Telegram e
-        remover a chave de IA. Você também pode reclamar à Autoridade Nacional de Proteção de Dados (ANPD).</p>
+        site você já pode corrigir seus dados, exportar as despesas (Excel/PDF), desconectar bancos e o Telegram,
+        remover a chave de IA e excluir a conta. Você também pode reclamar à Autoridade Nacional de Proteção de Dados (ANPD).</p>
 
       <h2>8. Armazenamento no navegador</h2>
       <p>O site guarda o seu login no próprio navegador (armazenamento local) para você não precisar entrar toda hora.

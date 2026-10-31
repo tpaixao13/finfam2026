@@ -1258,3 +1258,14 @@ def test_income_like_last_month_is_suggested_as_fixed(client, family, bank, txs)
     sug = bi.suggestion(BankIncome.query.filter_by(pluggy_id='in-m').one())
     assert sug['recurring'] is True and sug['income_type'] == 'fixa' and sug['label'] == 'PIX recebido'
     session.remove()
+
+
+def test_deleting_account_disconnects_banks_at_pluggy(client, family, bank, txs):  # noqa: F811
+    from test_pluggy_items import ITEM
+    _connect(client, family, bank, txs)
+    _post_item(family)
+    r = family.post('/auth/delete-account', json={'password': 'senha-segura', 'confirm': 'excluir'})
+    assert r.status_code == 200, r.text
+    assert any(c[0] == 'DELETE' and c[1] == f'/items/{ITEM}' for c in bank['calls'])
+    assert BankConnection.query.count() == 0 and PluggyConfig.query.count() == 0
+    session.remove()

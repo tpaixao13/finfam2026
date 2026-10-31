@@ -122,3 +122,39 @@ def test_terms_must_be_accepted(client, family):
     assert client.get(f'{API}/auth/me', headers=g).json()['terms']['accepted'] is False  # convidada: aceita no 1º acesso
     assert client.post(f'{API}/auth/accept-terms', headers=g).json()['terms']['accepted'] is True
     session.remove()
+
+
+def test_delete_account_member_owner_and_family(client, family, other_family):
+    from app.core.db import session
+    from app.models import Expense, Tenant, User
+    session.get(Tenant, family.tenant['id']).plan = 'anual'
+    session.commit()
+    family.post('/family/members', json={'name': 'Greyce', 'email': 'gd@test.com', 'password': 'senha-segura',
+                                         'confirm_password': 'senha-segura'})
+    tok = client.post(f'{API}/auth/login', json={'email': 'gd@test.com', 'password': 'senha-segura'}).json()['access_token']
+    g = {'Authorization': f'Bearer {tok}'}
+    client.post(f'{API}/expenses', headers=g, json={'description': 'Farmácia', 'amount': '30', 'category': 'Saúde',
+                                                   'payment_method': 'PIX'})
+    body = {'password': 'senha-segura', 'confirm': 'EXCLUIR'}
+    # quem criou a família, com outras pessoas, não sai sozinho
+    assert family.post('/auth/delete-account', json=body).status_code == 409
+    # confirmações
+    assert client.post(f'{API}/auth/delete-account', headers=g, json={**body, 'confirm': 'sim'}).status_code == 422
+    assert client.post(f'{API}/auth/delete-account', headers=g, json={**body, 'password': 'errada'}).status_code == 422
+    assert client.post(f'{API}/auth/delete-account', headers=g, json={**body, 'scope': 'family'}).status_code == 403
+    # token de API não exclui conta
+    raw = family.post('/auth/tokens', json={'name': 'mcp'}).json()['token']
+    assert client.post(f'{API}/auth/delete-account', headers={'Authorization': f'Bearer {raw}'}, json=body).status_code == 403
+    # a Greyce sai: ela e os gastos dela somem; a família continua
+    r = client.post(f'{API}/auth/delete-account', headers=g, json=body)
+    assert r.status_code == 200 and r.json()['deleted'] == 'me'
+    assert User.query.filter_by(email='gd@test.com').first() is None
+    assert Expense.query.filter_by(description='Farmácia').count() == 0
+    assert client.get(f'{API}/auth/me', headers=g).status_code == 401
+    session.remove()
+    # agora sozinho: quem criou exclui a conta e a família vai junto; a outra família não é tocada
+    r = family.post('/auth/delete-account', json=body)
+    assert r.status_code == 200 and r.json()['deleted'] == 'family'
+    assert session.get(Tenant, family.tenant['id']) is None and User.query.filter_by(email='tiago@test.com').first() is None
+    assert other_family.get('/auth/me').status_code == 200
+    session.remove()

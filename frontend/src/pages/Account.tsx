@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Avatar, Badge, Button, ConfirmButton, ErrorBox, Field, IconButton, Input, Modal, PageHeader,
   Panel, Spinner } from '../components/ui'
 import { TwoFactorPanel } from '../components/TwoFactor'
+import { DeleteAccountPanel } from '../components/DeleteAccount'
 import { api, tokens as authTokens } from '../lib/api'
 import { dateBR } from '../lib/format'
 import { useApi } from '../lib/hooks'
@@ -147,6 +148,8 @@ export function SettingsPage() {
             <Button type="submit">Trocar senha</Button>
           </form>
         </Panel>
+        {me && <DeleteAccountPanel members={me.members.length}
+          isOwner={me.members.length > 0 && me.user.id === Math.min(...me.members.map((m) => m.id))} />}
       </div>
     </div>
   )
