@@ -30,6 +30,11 @@ const NAV: { section: string; items: NavItem[] }[] = [
   ] },
 ]
 
+// Atalho "Nova despesa" no topo: só nas telas do dia a dia que não têm botão próprio.
+// Despesas, Rendas, Investimentos e Metas já trazem a ação delas; telas de conta/configuração não lançam gastos.
+const QUICK_EXPENSE = ['/', '/bills', '/cards', '/alerts']
+const showQuickExpense = (pathname: string) => QUICK_EXPENSE.some((to) => isActive(to, pathname))
+
 function isActive(to: string, pathname: string) {
   return to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(to + '/')
 }
@@ -102,7 +107,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <Icon name={alerts ? 'bell-fill' : 'bell'} />
             {alerts > 0 && <span>{alerts}</span>}
           </Link>
-          <Button icon="plus" onClick={() => openExpense()}>Nova despesa</Button>
+          {showQuickExpense(pathname) && <Button icon="plus" onClick={() => openExpense()}>Nova despesa</Button>}
         </header>
         <main className="content"><TermsBanner /><TwoFactorBanner />{children}</main>
       </div>

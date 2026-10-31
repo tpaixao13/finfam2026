@@ -36,7 +36,7 @@ class _HideHookToken(logging.Filter):
 
 logging.getLogger('uvicorn.access').addFilter(_HideHookToken())
 
-VERSION = '2026.10.1'
+VERSION = '2026.10.2'
 MAX_BODY_BYTES = 12 * 1024 * 1024
 # O site só carrega o que é dele, as fontes do Google e o Pluggy Connect (script e janela do banco).
 # Se um dia o Pluggy Connect parar de abrir por causa disto, CSP_REPORT_ONLY=1 no .env só avisa no console.

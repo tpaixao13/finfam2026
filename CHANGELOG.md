@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.10.2 — botão "Nova despesa" só onde faz sentido (31/10/2026)
+
+- O atalho **+ Nova despesa** do topo aparece só no Painel, Contas a pagar, Cartões (e fatura) e Alertas.
+  Some em Despesas (a tela já tem o botão dela), em Rendas, Investimentos e Metas (que têm a ação própria) e nas
+  telas de conta e configuração (Perfil, Família, Telegram, Contas conectadas, Regras, Importar).
+
 ## 2026.10.1 — revisão de segurança e unix (31/10/2026)
 
 - **Excluir a família** apaga também os backups dela que o admin gerou no servidor (`instance/backups`); e esses
