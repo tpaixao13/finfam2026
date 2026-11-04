@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.10.3 — backup tenta de novo e aviso de "voltou ao normal" mais claro (04/11/2026)
+
+- **Backup fora do Raspberry:** se um destino falhar (ex.: internet/DNS caiu na hora, "Temporary failure in name
+  resolution"), tenta de novo depois de 1, 5 e 15 minutos antes de dar erro. Antes, uma queda de segundos às 03:30
+  deixava o dia sem backup.
+- **Monitor:** o aviso "✅ voltou ao normal" agora diz o que voltou ("O backup fora do Raspberry voltou a funcionar")
+  e mostra o problema antigo em itálico como "Antes: …", em vez de repetir só o texto do erro (parecia um problema novo).
+
 ## 2026.10.2 — botão "Nova despesa" só onde faz sentido (31/10/2026)
 
 - O atalho **+ Nova despesa** do topo aparece só no Painel, Contas a pagar, Cartões (e fatura) e Alertas.

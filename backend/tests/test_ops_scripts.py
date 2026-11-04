@@ -50,7 +50,7 @@ def test_monitor_alerts_after_two_fails_and_when_back():
     state, down, up = mon.transitions(state, {'api': 'a API não responde'})
     assert down == []  # não repete
     state, down, up = mon.transitions(state, {'api': None})
-    assert up == ['a API não responde'] and state['api']['fails'] == 0
+    assert up == [('api', 'a API não responde')] and state['api']['fails'] == 0
 
 
 def test_monitor_finds_admin_chat_by_email(client, family, monkeypatch):
@@ -140,3 +140,32 @@ def test_deleting_family_removes_its_admin_backups(client, family, monkeypatch, 
     os_time = __import__('os')
     os_time.utime(old, (0, 0))
     assert bo.prune_family_backups(30) == 1 and not old.exists() and other.exists()
+
+
+def test_backup_retries_destination_that_failed_for_a_moment(client, family, tmp_path, monkeypatch):
+    monkeypatch.setattr(bo, 'STATE', tmp_path / 's.json')
+    monkeypatch.setenv('BACKUP_PASSWORD', 'senha-forte-do-backup')
+    monkeypatch.setenv('BACKUP_CHAT_ID', '777001')
+    for k in ('BACKUP_RCLONE_REMOTE', 'BACKUP_DIR_EXTRA'):
+        monkeypatch.delenv(k, raising=False)
+    waits, calls = [], []
+
+    def flaky(token, chat, file, caption):
+        calls.append(chat)
+        if len(calls) < 3:
+            raise OSError('<urlopen error [Errno -3] Temporary failure in name resolution>')
+    monkeypatch.setattr(bo, 'send_document', flaky)
+    monkeypatch.setattr(bo.time, 'sleep', waits.append)
+    assert bo.run() == 0 and len(calls) == 3 and waits == [60, 300]
+    state = __import__('json').loads((tmp_path / 's.json').read_text())
+    assert state['last_ok'] and state['last_errors'] == []
+    calls.clear(); waits.clear()
+    monkeypatch.setattr(bo, 'send_document', lambda *a: (_ for _ in ()).throw(OSError('sem internet')))
+    assert bo.run() == 1 and waits == list(bo.RETRY_WAITS)
+    assert 'sem internet' in __import__('json').loads((tmp_path / 's.json').read_text())['last_errors'][0]
+
+
+def test_monitor_recovery_message_says_what_is_back():
+    text = mon._recovered('backup', 'último backup há 1d23h (Telegram: <urlopen error>)')
+    assert text.startswith('• O backup fora do Raspberry voltou a funcionar') and '&lt;urlopen error&gt;' in text
+    assert 'finfam2026-bot está no ar' in mon._recovered('service:finfam2026-bot', 'parado')

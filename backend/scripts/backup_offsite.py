@@ -46,6 +46,7 @@ OLD_MAGIC = b'FFBK1'      # backups de 31/10/2026: scrypt n=2^15, sem o byte do 
 SCRYPT_LOG_N = 17         # n = 2^17 (recomendação atual); usa ~128 MB de RAM por alguns segundos
 STATE = INSTANCE_DIR / 'backup_state.json'
 TELEGRAM_LIMIT = 49 * 1024 * 1024
+RETRY_WAITS = (60, 300, 900)   # segundos: um destino que falhou (internet/DNS caiu um instante) tenta de novo
 
 
 # ── criptografia ─────────────────────────────────────────────────────────────
@@ -180,6 +181,26 @@ def prune_family_backups(keep_days: int) -> int:
     return removed
 
 
+def send_with_retries(targets: list, file: Path, ts: str) -> tuple[list[str], list[str]]:
+    """Manda para cada destino; o que falhar tenta de novo depois de 1, 5 e 15 min (o erro só fica se todas falharem)."""
+    ok, pending = [], list(targets)
+    for wait in (0, *RETRY_WAITS):
+        if wait:
+            print(f'{ts} {", ".join(n for n, _ in pending)} falhou; tentando de novo em {wait // 60} min…', flush=True)
+            time.sleep(wait)
+        failed, errors = [], []
+        for name, send in pending:
+            try:
+                ok.append(send(file))
+            except Exception as exc:
+                failed.append((name, send))
+                errors.append(f'{name}: {exc}')
+        pending = failed
+        if not pending:
+            return ok, []
+    return ok, errors
+
+
 def save_state(ok: list[str], errors: list[str], size: int) -> None:
     previous = read_state(STATE) or {}
     now = datetime.now().isoformat(timespec='seconds')
@@ -215,11 +236,7 @@ def run() -> int:
             print(f'{ts} ERRO ao copiar o banco: {exc}')
             save_state([], [f'cópia: {exc}'], 0)
             return 1
-        for name, send in targets:
-            try:
-                ok.append(send(enc))
-            except Exception as exc:
-                errors.append(f'{name}: {exc}')
+        ok, errors = send_with_retries(targets, enc, ts)
     prune_family_backups(keep)
     save_state(ok, errors, size)
     print(f'{ts} Backup de {size // 1024} KB → ' + (', '.join(ok) or 'nenhum destino')

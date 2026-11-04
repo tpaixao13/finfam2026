@@ -39,6 +39,12 @@ FAILS_TO_ALERT = 2
 SYNC_STALE_HOURS = 26      # o cron do Open Finance relê quem está há 24 h sem leitura (scripts.pluggy_sync)
 BACKUP_STALE_HOURS = 30    # backup diário
 DISK_MIN_FREE = 0.10
+RECOVERED = {                # como fica o aviso de "voltou ao normal" de cada checagem
+    'api': 'A API voltou a responder',
+    'sync': 'Os bancos conectados voltaram a atualizar',
+    'backup': 'O backup fora do Raspberry voltou a funcionar',
+    'disk': 'O disco voltou a ter espaço livre',
+}
 
 
 # ── checagens: cada uma devolve None (ok) ou o problema em uma frase ─────────
@@ -138,8 +144,9 @@ def notify(text: str) -> bool:
     return ok
 
 
-def transitions(previous: dict, current: dict) -> tuple[dict, list[str], list[str]]:
-    """(novo estado, problemas novos, problemas resolvidos). Problema só conta depois de 2 checagens seguidas."""
+def transitions(previous: dict, current: dict) -> tuple[dict, list[str], list[tuple[str, str]]]:
+    """(novo estado, problemas novos, resolvidos como (checagem, problema que havia)).
+    Problema só conta depois de 2 checagens seguidas."""
     state, down, up = {}, [], []
     now = datetime.now().isoformat(timespec='seconds')
     for name, problem in current.items():
@@ -153,7 +160,7 @@ def transitions(previous: dict, current: dict) -> tuple[dict, list[str], list[st
             state[name] = {'fails': fails, 'alerted': alerted, 'problem': problem, 'since': old.get('since') or now}
         else:
             if old.get('alerted'):
-                up.append(old.get('problem') or name)
+                up.append((name, old.get('problem') or ''))
             state[name] = {'fails': 0, 'alerted': False, 'problem': None, 'since': None}
     state['_checked_at'] = now
     return state, down, up
@@ -174,8 +181,15 @@ def run(send: bool = True) -> int:
                 state[name]['alerted'] = False
         write_state(STATE, state)
     if send and up:
-        notify('✅ <b>FinFam 2026 — voltou ao normal</b>\n\n' + _bullets(up))
+        notify('✅ <b>FinFam 2026 — voltou ao normal</b>\n\n' + '\n\n'.join(_recovered(n, p) for n, p in up))
     return 1 if problems else 0
+
+
+def _recovered(name: str, problem: str) -> str:
+    """'• O backup voltou a funcionar' + o problema que havia, em letra menor (não parece um problema novo)."""
+    label = RECOVERED.get(name) or f'O serviço {name.split(":", 1)[-1]} está no ar de novo'
+    was = html.escape(problem, quote=False)
+    return f'• {label}' + (f'\n<i>Antes: {was}</i>' if was else '')
 
 
 def _bullets(items: list[str]) -> str:
