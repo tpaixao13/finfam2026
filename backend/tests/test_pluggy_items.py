@@ -290,6 +290,8 @@ def test_card_limit_comes_from_bank_and_create_card(client, family, bank):
     conn = family.post('/pluggy/items', json={'item_id': ITEM}).json()['item']
     cards = {c['id']: c for c in family.get('/cards?light=true').json()['cards']}
     assert cards[card['id']]['effective_limit'] == 5000.0  # ligado sozinho → limite do banco
+    # o formulário de Cartões mostra o limite do banco (e avisa que vem de lá)
+    assert cards[card['id']]['credit_limit'] == 5000.0 and cards[card['id']]['limit_from_bank'] is True
 
     # outro banco: cartão que ainda não existe no FinFam → "Criar cartão"
     bank['add'](ITEM2, accounts=[{'id': 'inter-cc', 'type': 'CREDIT', 'subtype': 'CREDIT_CARD', 'name': 'Inter Black',
@@ -308,6 +310,19 @@ def test_card_limit_comes_from_bank_and_create_card(client, family, bank):
     assert family.post(f"/pluggy/accounts/{acc['id']}/card").status_code == 422  # já ligado
     conta = next(a for a in conn['accounts'] if a['type'] == 'BANK')
     assert family.post(f"/pluggy/accounts/{conta['id']}/card").status_code == 422  # conta não vira cartão
+    session.remove()
+
+
+def test_card_without_limit_gets_bank_limit_in_its_settings(client, family, bank):
+    """Cartão cadastrado sem limite (o limite ia só para a conta compartilhada e o formulário ficava vazio)."""
+    _ready(client, family)
+    card = family.post('/cards', json={'supports_credit': True, 'last_digits': '5162', 'bank': 'Nubank',
+                                       'due_day': 10, 'best_buy_day': 3}).json()['card']
+    assert card['credit_limit'] is None and card['limit_from_bank'] is False
+    bank['add'](ITEM)
+    assert family.post('/pluggy/items', json={'item_id': ITEM}).status_code == 200
+    c = next(x for x in family.get('/cards?light=true').json()['cards'] if x['id'] == card['id'])
+    assert (c['credit_limit'], c['effective_limit'], c['limit_from_bank']) == (5000.0, 5000.0, True)
     session.remove()
 
 

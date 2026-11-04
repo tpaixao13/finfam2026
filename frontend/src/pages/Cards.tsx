@@ -31,7 +31,7 @@ function CardForm({ open, editing, onClose, onSaved }: { open: boolean; editing:
   const { f, set, busy, error, run } = useFormState(open, () => editing
     ? { user_id: String(editing.user_id), kind: kindOf(editing), nickname: editing.nickname ?? '',
       last_digits: editing.last_digits, bank: editing.bank ?? '', due_day: String(editing.due_day),
-      best_buy_day: String(editing.best_buy_day), credit_limit: editing.credit_limit ? String(editing.credit_limit).replace('.', ',') : '',
+      best_buy_day: String(editing.best_buy_day), credit_limit: (editing.effective_limit ?? editing.credit_limit) ? String(editing.effective_limit ?? editing.credit_limit).replace('.', ',') : '',
       monthly_amount: editing.monthly_amount ? String(editing.monthly_amount).replace('.', ',') : '',
       renewal_day: String(editing.renewal_day ?? 1), is_virtual: editing.is_virtual, is_additional: editing.is_additional }
     : blank)
@@ -77,7 +77,9 @@ function CardForm({ open, editing, onClose, onSaved }: { open: boolean; editing:
         {hasCredit && <>
           <Field label="Melhor dia de compra" hint="Compras depois deste dia vão para a próxima fatura"><Input type="number" min={1} max={31} value={f.best_buy_day} onChange={(e) => set('best_buy_day', e.target.value)} /></Field>
           <Field label="Dia de vencimento"><Input type="number" min={1} max={31} value={f.due_day} onChange={(e) => set('due_day', e.target.value)} /></Field>
-          <Field label="Limite (R$)" hint="Cartões do mesmo banco compartilham o limite"><Input inputMode="decimal" value={f.credit_limit} onChange={(e) => set('credit_limit', e.target.value)} /></Field>
+          <Field label="Limite (R$)" hint={editing?.limit_from_bank ? 'Vem do banco (Contas conectadas) e se atualiza sozinho' : 'Cartões do mesmo banco compartilham o limite'}>
+            <Input inputMode="decimal" value={f.credit_limit} onChange={(e) => set('credit_limit', e.target.value)} readOnly={Boolean(editing?.limit_from_bank)} />
+          </Field>
           <div className="checks"><Check label="Virtual" checked={f.is_virtual} onChange={(v) => set('is_virtual', v)} /><Check label="Adicional" checked={f.is_additional} onChange={(v) => set('is_additional', v)} /></div>
         </>}
         {isVr && <>

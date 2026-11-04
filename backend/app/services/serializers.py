@@ -92,6 +92,17 @@ def expense_out(e: Expense, today: _date | None = None) -> dict:
     }
 
 
+def limit_from_bank(c: CreditCard) -> bool:
+    """O limite vem do banco (Open Finance): o cartão, ou outro da mesma conta de crédito, está ligado
+    a um cartão de crédito do banco que informa o limite."""
+    from app.models import BankAccount
+    if not (c.card_type == 'credit' or c.supports_credit):
+        return False
+    ids = [c.id] + ([x.id for x in CreditCard.query.filter_by(account_id=c.account_id).all()] if c.account_id else [])
+    return BankAccount.query.filter(BankAccount.card_id.in_(ids), BankAccount.type == 'CREDIT',
+                                    BankAccount.credit_limit.isnot(None)).first() is not None
+
+
 def card_out(c: CreditCard) -> dict:
     return {
         'id': c.id, 'user_id': c.user_id, 'owner_name': c.owner.name if c.owner else None,
@@ -99,6 +110,7 @@ def card_out(c: CreditCard) -> dict:
         'due_day': c.due_day, 'best_buy_day': c.best_buy_day,
         'credit_limit': money(c.credit_limit) if c.credit_limit else None,
         'effective_limit': c.effective_limit,
+        'limit_from_bank': limit_from_bank(c),
         'card_type': c.card_type, 'type_label': c.type_label,
         'supports_credit': bool(c.supports_credit), 'supports_debit': bool(c.supports_debit),
         'is_virtual': bool(c.is_virtual), 'is_additional': bool(c.is_additional),

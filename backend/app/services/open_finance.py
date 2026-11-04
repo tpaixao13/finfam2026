@@ -162,13 +162,11 @@ def apply_card_limit(acc: BankAccount) -> bool:
     if not acc.credit_limit:
         return changed
     limit = Decimal(str(acc.credit_limit))
-    target = card.account if card.account is not None else card
-    if target.credit_limit is not None and Decimal(str(target.credit_limit)) == limit:
-        return changed
-    target.credit_limit = limit
-    if target is not card and card.credit_limit is not None:
-        card.credit_limit = limit
-    return True
+    targets = [card] + ([card.account] if card.account is not None else [])  # o cartão (aparece em Cartões) e a conta
+    stale = [t for t in targets if t.credit_limit is None or Decimal(str(t.credit_limit)) != limit]
+    for t in stale:
+        t.credit_limit = limit
+    return changed or bool(stale)
 
 
 def sync_bills(acc: BankAccount, client: pg.PluggyClient) -> None:

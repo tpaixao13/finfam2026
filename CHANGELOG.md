@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.10.4 — limite do banco aparece no cadastro do cartão (04/11/2026)
+
+- Cartão do FinFam ligado a um cartão do banco (Contas conectadas): o limite que o banco informa agora vai também
+  para o cadastro do cartão. Antes ia só para o limite compartilhado do banco: os cálculos usavam, mas o campo
+  **Limite** em Cartões → Editar ficava vazio (quando o cartão foi cadastrado sem limite) ou com o valor antigo.
+- Em Cartões → Editar, o campo Limite mostra o valor do banco, fica travado e avisa "Vem do banco (Contas conectadas)
+  e se atualiza sozinho". Cartões já ligados recebem o limite na próxima leitura do banco.
+
 ## 2026.10.3 — backup tenta de novo e aviso de "voltou ao normal" mais claro (04/11/2026)
 
 - **Backup fora do Raspberry:** se um destino falhar (ex.: internet/DNS caiu na hora, "Temporary failure in name
