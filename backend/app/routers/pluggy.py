@@ -30,8 +30,9 @@ from app.core.db import db
 from app.core.deps import Ctx, Period, get_ctx, get_ctx_session, get_ctx_site_or_bot, get_period
 from app.core.security import decrypt_field, encrypt_field
 from app.core.types import utcnow
-from app.models import BankAccount, BankInvestment, Expense, BankConnection, BankTransaction, CreditCard, PluggyConfig, Tenant, User
+from app.models import BankAccount, BankInvestment, Expense, BankConnection, BankTransaction, CreditCard, PluggyConfig, PluggyEvent, Tenant, User
 from app.services import bill_payments
+from app.services import pluggy_events
 from app.services import open_finance as of
 from app.services import pluggy as pg
 from app.services.pluggy_keys import (create_webhook, drop_connections, drop_webhook, family_key, hook_owner,
@@ -404,8 +405,10 @@ def add_item(body: ItemIn, ctx: Ctx = Depends(get_ctx_session)):
             except pg.PluggyError as exc:
                 log.warning('Não consegui apagar o item duplicado %s: %s', body.item_id, exc)
             raise HTTPException(status_code=409, detail='Esse banco já está conectado no FinFam.')
+    before, before_incomes = of.known_ids(conn) if conn.id else (set(), set())
     count = _pluggy(of.sync, conn, client)
     db.session.commit()
+    of.log_read(conn, before, before_incomes)  # histórico: a primeira leitura (ou a de "atualizar")
     msg = f'{conn.label} conectado!' if created else f'{conn.label} atualizado.'
     if count:
         msg += f' {count} lançamento(s) para revisar.'
@@ -634,6 +637,23 @@ def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_site_or_bot
     return {'message': msg, 'imported': done, 'already': known}
 
 
+@router.get('/events', summary='Histórico do Open Finance: avisos da Pluggy e leituras dos bancos')
+def events(connection_id: int | None = Query(None), limit: int = Query(200, ge=1, le=500),
+           ctx: Ctx = Depends(get_ctx_session)):
+    """Só dos bancos que a pessoa enxerga (os dela e os compartilhados pela família) e os avisos sem banco
+    da chave dela. Guardado por pluggy_events.KEEP_DAYS dias."""
+    _enabled_tenant(ctx)
+    seen = db.session.query(BankConnection.id).filter(_seen(ctx))
+    q = PluggyEvent.query.filter(or_(PluggyEvent.connection_id.in_(seen),
+                                     and_(PluggyEvent.connection_id.is_(None), PluggyEvent.user_id == ctx.user.id)))
+    if connection_id is not None:
+        q = q.filter(PluggyEvent.connection_id == connection_id)
+    rows = q.order_by(PluggyEvent.created_at.desc(), PluggyEvent.id.desc()).limit(limit).all()
+    banks = BankConnection.query.filter(_seen(ctx)).order_by(BankConnection.id).all()
+    return {'keep_days': pluggy_events.KEEP_DAYS, 'items': [pluggy_events.out(e) for e in rows],
+            'banks': [{'id': c.id, 'name': c.label} for c in banks]}
+
+
 class PayBillIn(BaseModel):
     expense_id: int = Field(description='A conta a pagar (despesa pendente, fora do cartão de crédito)')
 
@@ -817,6 +837,10 @@ async def webhook(hook_token: str, request: Request):
         return {'ok': True, 'ignored': 'open_finance_disabled'}  # 2XX: a Pluggy não fica reenviando
     log.info('Webhook Pluggy (user %s): %s', cfg.user_id, json.dumps(payload, ensure_ascii=False, default=str)[:2000])
     owner = _item_owner(cfg, str(payload.get('itemId') or ''))
+    conn = (BankConnection.query.filter_by(item_id=str(payload.get('itemId'))[:64], user_id=owner).first()
+            if owner else None)
+    pluggy_events.webhook(owner or cfg.user_id, payload, conn)  # histórico da família (Contas conectadas)
+    db.session.commit()
     if owner and _item_event(owner, str(event or ''), str(payload.get('itemId') or ''), payload.get('error')):
         of.schedule_sync(owner)  # relê já (lança sozinho se a conexão estiver no automático)
     # etapa 3: enfileirar a importação dos lançamentos (transactions/*)

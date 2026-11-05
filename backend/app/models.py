@@ -146,6 +146,7 @@ class User(Base):
     telegram_codes = relationship('TelegramLinkCode', lazy='dynamic', cascade='all, delete-orphan')
     pluggy_config = relationship('PluggyConfig', uselist=False, cascade='all, delete-orphan')
     bank_connections = relationship('BankConnection', lazy='dynamic', cascade='all, delete-orphan')
+    pluggy_events = relationship('PluggyEvent', lazy='dynamic', cascade='all, delete-orphan')
 
     def set_password(self, password: str) -> None:
         self.password_hash = hash_password(password)
@@ -263,6 +264,7 @@ class BankConnection(Base):
 
     accounts = relationship('BankAccount', backref='connection', lazy='dynamic', cascade='all, delete-orphan')
     investments = relationship('BankInvestment', backref='connection', lazy='dynamic', cascade='all, delete-orphan')
+    events = relationship('PluggyEvent', backref='connection', lazy='dynamic', cascade='all, delete-orphan')
 
     @property
     def label(self) -> str:
@@ -393,6 +395,20 @@ class BankTransaction(Base):
     bill_prev_bank = Column(Text, nullable=True)          # banco da conta antes ('' = sem banco), para desfazer
     created_at = Column(DateTime, default=utcnow)
     reviewed_at = Column(DateTime, nullable=True)
+
+
+class PluggyEvent(Base):
+    """Histórico do Open Finance: avisos (webhooks) da Pluggy e leituras dos bancos. Vai embora com o banco
+    (desconectar), com a pessoa (excluir conta) e depois de pluggy_events.KEEP_DAYS dias."""
+    __tablename__ = 'pluggy_events'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)       # dono do banco (ou da chave)
+    connection_id = Column(Integer, ForeignKey('bank_connections.id'), nullable=True, index=True)
+    kind = Column(String(10), nullable=False)             # webhook | read | error
+    title = Column(String(200), nullable=False)
+    detail = Column(Text, nullable=True)                  # JSON: o aviso da Pluggy, ou os lançamentos novos
+    created_at = Column(DateTime, default=utcnow, index=True)
 
 
 class BillAlias(Base):

@@ -35,6 +35,7 @@ function HeaderActions({ cfg, onConnected }: { cfg: PluggyConfig; onConnected: (
   return (
     <div className="row gap">
       <Link to="/bank/settings" className="btn btn-ghost"><Icon name="gear" /><span>Configurações</span></Link>
+      {cfg.configured && <Link to="/bank/history" className="btn btn-ghost"><Icon name="clock-history" /><span>Histórico</span></Link>}
       {(cfg.configured || cfg.to_review > 0) && <Link to="/bank/review" className="btn btn-ghost">
         Revisar importados{cfg.to_review ? <Badge tone="warning">{cfg.to_review}</Badge> : null}
       </Link>}

@@ -1309,3 +1309,50 @@ def test_income_in_one_persons_bank_marks_expected_income_of_another_member(clie
     pend = family.get('/pluggy/incomes').json()
     assert pend['counts']['pending'] == 1 and pend['items'][0]['suggestion']['expected']['id'] == cond.id
     session.remove()
+
+
+def test_open_finance_history_per_family_and_deleted_with_bank(client, family, other_family, bank, txs):  # noqa: F811
+    """Tela de histórico: o aviso da Pluggy (conteúdo) e a leitura com o que chegou; só da família; apagado junto."""
+    from app.core.security import decrypt_field
+    from app.models import PluggyConfig, PluggyEvent
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    _post_item(family)
+    cfg = PluggyConfig.query.filter_by(user_id=family.user['id']).first()
+    token, secret = cfg.hook_token, decrypt_field(cfg.hook_secret)
+    session.remove()
+    txs[acc].append({'id': 'h-1', 'type': 'DEBIT', 'amount': -42.5, 'date': day(1), 'description': 'PADARIA'})
+    r = client.post(f'{API}/pluggy/webhook/{token}', json={'event': 'transactions/created', 'itemId': ITEM},
+                    headers={'X-FinFam-Hook': secret, 'CF-Connecting-IP': '52.67.145.81'})
+    assert r.status_code == 200
+    family.get('/pluggy/transactions')  # lê o que o aviso trouxe
+    ev = family.get('/pluggy/events').json()
+    kinds = [(e['kind'], e['title']) for e in ev['items']]
+    assert ('webhook', 'Aviso da Pluggy: Lançamentos novos no banco') in kinds
+    read = next(e for e in ev['items'] if e['kind'] == 'read' and e['detail'])
+    assert read['bank_name'] == 'Nubank' and any(t['descricao'] == 'PADARIA' and t['valor'] == 42.5
+                                                for t in read['detail']['lancamentos'])
+    hook = next(e for e in ev['items'] if e['kind'] == 'webhook')
+    assert hook['detail'] == {'event': 'transactions/created', 'itemId': ITEM}
+    assert ev['banks'] == [{'id': hook['connection_id'], 'name': 'Nubank'}]
+    # outra família não vê nada
+    assert other_family.get('/pluggy/events').status_code in (200, 402, 403)
+    if other_family.get('/pluggy/events').status_code == 200:
+        assert other_family.get('/pluggy/events').json()['items'] == []
+    # desconectar o banco apaga o histórico dele
+    assert family.delete(f"/pluggy/items/{hook['connection_id']}").status_code == 200
+    assert PluggyEvent.query.filter(PluggyEvent.connection_id.isnot(None)).count() == 0
+    session.remove()
+
+
+def test_open_finance_history_goes_with_the_account(client, family, bank, txs):  # noqa: F811
+    from app.models import PluggyEvent, User
+    from app.services import account_deletion
+    _connect(client, family, bank, txs)
+    _post_item(family)
+    from app.services import pluggy_events
+    pluggy_events.record(family.user['id'], 'webhook', 'teste sem banco', {'event': 'x'})
+    session.commit()
+    assert PluggyEvent.query.filter_by(user_id=family.user['id']).count() >= 2
+    account_deletion.delete_member(session.get(User, family.user['id']))
+    assert PluggyEvent.query.count() == 0
+    session.remove()

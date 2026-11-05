@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.12.0 — Histórico do Open Finance por família (05/11/2026)
+
+- **Contas conectadas → Histórico** (`/bank/history`): cada família vê os avisos que a Pluggy mandou (webhook, com
+  o conteúdo) e cada leitura dos bancos, com o que chegou de novo (data, valor, descrição, cartão/conta e o que o
+  FinFam fez: lançado, para revisar, já estava, ignorado) e as falhas. Agrupado por dia, com filtro por banco.
+- **Só o que a pessoa enxerga:** os bancos dela e os que a família compartilhou (API `GET /pluggy/events`, login do
+  site). Outra família não vê nada.
+- **Apagado junto:** ao desconectar o banco, ao excluir a conta ou a família (tabela `pluggy_events`, em cascata), e
+  sozinho depois de 60 dias.
+- A primeira leitura ao conectar (e o "Atualizar") também entra no histórico.
+
 ## 2026.11.5 — log com o conteúdo dos webhooks e das leituras da Pluggy (05/11/2026)
 
 - O log da API (`journalctl -u finfam2026`) passa a mostrar as mensagens de nível INFO do FinFam:

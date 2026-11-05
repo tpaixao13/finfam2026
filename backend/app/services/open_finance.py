@@ -18,6 +18,7 @@ from app.core.types import utcnow
 from app.models import BankAccount, BankBill, BankConnection, BankIncome, BankInvestment, BankTransaction, CreditCard, Expense, PluggyConfig, User
 from app.services import bank_incomes
 from app.services import bill_payments
+from app.services import pluggy_events
 from app.services import bank_categories
 from app.services import pluggy as pg
 from app.services.categorizer import categorize
@@ -995,16 +996,15 @@ def sync_stale(user_id: int | None = None, max_age_hours: int | None = None, not
         client = client_for(conn.user_id)
         if client is None:
             continue
-        before = {i for (i,) in db.session.query(BankTransaction.id).join(BankAccount)
-                  .filter(BankAccount.connection_id == conn.id).all()}
-        before_incomes = {i for (i,) in db.session.query(BankIncome.id).join(BankAccount)
-                          .filter(BankAccount.connection_id == conn.id).all()}
+        before, before_incomes = known_ids(conn)
         try:
             total += sync(conn, client)
             db.session.commit()
         except pg.PluggyError as exc:
             db.session.rollback()
             log.warning('Sincronização do item %s falhou: %s', conn.item_id, exc)
+            pluggy_events.failed(conn, exc)
+            db.session.commit()
             continue
         log_read(conn, before, before_incomes)
         if notify:
@@ -1031,13 +1031,17 @@ def _notice_blocks(launched: list, pending: list, incomes: list, bills: list | N
     return blocks
 
 
+def known_ids(conn: BankConnection) -> tuple[set, set]:
+    """(lançamentos, entradas) que o FinFam já tem deste banco: o que vier depois é novo."""
+    tx = {i for (i,) in db.session.query(BankTransaction.id).join(BankAccount).filter(BankAccount.connection_id == conn.id)}
+    inc = {i for (i,) in db.session.query(BankIncome.id).join(BankAccount).filter(BankAccount.connection_id == conn.id)}
+    return tx, inc
+
+
 def log_read(conn: BankConnection, before: set, before_incomes: set) -> None:
-    """Uma linha no log por leitura do banco, e uma por lançamento novo (para conferir o que a Pluggy mandou)."""
-    new = (BankTransaction.query.join(BankAccount).filter(BankAccount.connection_id == conn.id,
-                                                         ~BankTransaction.id.in_(before or {0}))
-           .order_by(BankTransaction.date).all())
-    incomes = (BankIncome.query.join(BankAccount).filter(BankAccount.connection_id == conn.id,
-                                                        ~BankIncome.id.in_(before_incomes or {0})).count())
+    """Guarda a leitura no histórico da família (tela) e escreve no log do servidor."""
+    new, incomes = pluggy_events.read(conn, before, before_incomes)
+    db.session.commit()
     log.info('Leitura do banco %s (item %s): %s saída(s) nova(s), %s entrada(s) nova(s)',
              conn.label, conn.item_id, len(new), incomes)
     for t in new:

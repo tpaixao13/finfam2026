@@ -8,6 +8,7 @@ import { OpenFinancePage } from './pages/OpenFinance'
 import { OpenFinanceSettingsPage } from './pages/OpenFinanceSettings'
 import { ReviewImportsPage } from './pages/ReviewImports'
 import { ReviewIncomesPage } from './pages/ReviewIncomes'
+import { OpenFinanceLogPage } from './pages/OpenFinanceLog'
 import { FamilyPage, SettingsPage, UpgradePage } from './pages/Account'
 import { TelegramPage } from './pages/Telegram'
 import { AdminLoginPage, AdminPage } from './pages/admin/Admin'
@@ -40,6 +41,7 @@ const ROUTES: [string, (p: Record<string, string>) => React.ReactNode][] = [
   ['/bank', () => <OpenFinancePage />],
   ['/bank/review', () => <ReviewImportsPage />],
   ['/bank/incomes', () => <ReviewIncomesPage />],
+  ['/bank/history', () => <OpenFinanceLogPage />],
   ['/bank/settings', () => <OpenFinanceSettingsPage />],
   ['/upgrade', () => <UpgradePage />],
 ]
@@ -47,7 +49,7 @@ const ROUTES: [string, (p: Record<string, string>) => React.ReactNode][] = [
 const TITLES: Record<string, string> = {
   '/': 'Painel', '/expenses': 'Despesas', '/bills': 'Contas a pagar', '/incomes': 'Rendas', '/cards': 'Cartões',
   '/investments': 'Investimentos', '/goals': 'Metas', '/alerts': 'Alertas', '/import': 'Importar extrato',
-  '/rules': 'Regras de categoria', '/family': 'Família', '/settings': 'Perfil e acesso', '/telegram': 'Telegram e IA', '/bank': 'Contas conectadas', '/bank/review': 'Revisar importados', '/bank/incomes': 'Entradas do banco',
+  '/rules': 'Regras de categoria', '/family': 'Família', '/settings': 'Perfil e acesso', '/telegram': 'Telegram e IA', '/bank': 'Contas conectadas', '/bank/review': 'Revisar importados', '/bank/incomes': 'Entradas do banco', '/bank/history': 'Histórico do Open Finance',
   '/bank/settings': 'Configurações do Open Finance',
   '/upgrade': 'Planos', '/login': 'Entrar', '/register': 'Criar conta', '/termos': 'Termos de uso', '/privacidade': 'Política de privacidade',
   '/esqueci-senha': 'Esqueci minha senha', '/redefinir-senha': 'Nova senha', '/confirmar-email': 'Confirmar e-mail',

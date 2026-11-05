@@ -788,3 +788,30 @@ a.insight:hover { background: #e8edf1; }
 .legal-main a { color: var(--primary-ink); }
 .sidebar-legal { margin: .3rem 0 0; padding: 0 .75rem; font-size: .72rem; color: #8aa3b6; }
 .sidebar-legal a { color: #a9c2d3; }
+
+/* Histórico do Open Finance (/bank/history) */
+.log-day + .log-day { margin-top: 1rem; }
+.log-day h3 { margin: 0 0 .35rem; font-size: .8rem; font-weight: 600; color: var(--ink-3); text-transform: capitalize; }
+.log-list { list-style: none; margin: 0; padding: 0; border-left: 2px solid var(--line); margin-left: .65rem; }
+.log-row { display: grid; grid-template-columns: 1.6rem 1fr; gap: .55rem; padding: .4rem 0 .4rem 0; margin-left: -.85rem; }
+.log-icon { display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  background: var(--surface); border: 1px solid var(--line-strong); color: var(--ink-3); font-size: .8rem; }
+.log-webhook .log-icon { color: var(--info); border-color: color-mix(in srgb, var(--info) 35%, transparent); background: var(--info-tint); }
+.log-read .log-icon { color: var(--primary); border-color: color-mix(in srgb, var(--primary) 35%, transparent); background: var(--primary-tint); }
+.log-error .log-icon { color: var(--expense); border-color: color-mix(in srgb, var(--expense) 35%, transparent); background: var(--expense-tint); }
+.log-main { min-width: 0; padding-top: .15rem; }
+.log-head { display: flex; flex-wrap: wrap; gap: .1rem .5rem; align-items: baseline; overflow-wrap: anywhere; }
+.log-head time { font-variant-numeric: tabular-nums; color: var(--ink-3); font-size: .85rem; }
+.log-error .log-head > span { color: var(--expense); }
+.log-main details { margin-top: .2rem; }
+.log-main summary { cursor: pointer; color: var(--primary); width: fit-content; }
+.log-json { margin: .35rem 0 0; padding: .6rem .7rem; max-height: 22rem; overflow: auto; font-size: .78rem; line-height: 1.45;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-tx { list-style: none; margin: .35rem 0 0; padding: 0; display: grid; gap: .15rem; }
+.log-tx li { display: grid; grid-template-columns: 2.8rem 1fr auto; gap: 0 .6rem; align-items: baseline; padding: .25rem .5rem;
+  background: var(--bg); border-radius: var(--radius-sm); font-variant-numeric: tabular-nums; }
+.log-tx-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-tx li > .small { grid-column: 2; grid-row: 2; }
+.log-tx li > :last-child { grid-column: 3; grid-row: 1; text-align: right; }
+.log-in { color: var(--income); }
+@media (max-width: 600px) { .log-tx-desc { white-space: normal; overflow-wrap: anywhere; } }
