@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026.11.0 — saída do banco marca a conta a pagar como paga (05/11/2026)
+
+- **Contas a pagar pagas pelo banco:** quando sai da conta um PIX, débito ou boleto, o FinFam procura uma conta a
+  pagar ainda pendente da família (fora do cartão de crédito), com vencimento até 10 dias antes ou depois do
+  pagamento e valor entre metade e 1,5× o lançado (`services/bill_payments.py`).
+  - **Conta fixa** (internet, telefone): mesmo valor e só uma conta possível → marcada como paga sozinha.
+  - **Conta variável** (luz, água): em "Revisar importados" aparece "É a conta *Conta de luz*?" com o botão
+    **Marcar como paga** (ou a lista, se houver mais de uma). A conta fica paga com o valor que o banco pagou, e o
+    FinFam aprende como o banco chama essa conta: o CNPJ/CPF de quem recebeu (quando o banco manda) ou as palavras
+    da descrição (tabela `bill_aliases`). Nos meses seguintes ela é marcada sozinha.
+  - Mais de uma conta possível: nunca escolhe sozinho, pergunta.
+  - A saída que parece ser uma conta vem desmarcada em "Lançar" (lançar duplicaria a conta).
+  - **Revisar de novo** (aba "Já no FinFam") desfaz: a conta volta a pendente com o valor de antes.
+- **Bot:** no `/revisar`, botão "🧾 É a conta …". O aviso do banco no Telegram mostra as contas marcadas como pagas.
+- Lançamentos do banco guardam quem recebeu (`payee_doc`, `payee_name`) e o valor anterior da conta
+  (`bill_prev_amount`); migração automática.
+
 ## 2026.10.4 — limite do banco aparece no cadastro do cartão (04/11/2026)
 
 - Cartão do FinFam ligado a um cartão do banco (Contas conectadas): o limite que o banco informa agora vai também

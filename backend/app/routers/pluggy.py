@@ -30,6 +30,7 @@ from app.core.deps import Ctx, Period, get_ctx, get_ctx_session, get_ctx_site_or
 from app.core.security import decrypt_field, encrypt_field
 from app.core.types import utcnow
 from app.models import BankAccount, BankInvestment, Expense, BankConnection, BankTransaction, CreditCard, PluggyConfig, Tenant, User
+from app.services import bill_payments
 from app.services import open_finance as of
 from app.services import pluggy as pg
 from app.services.pluggy_keys import (create_webhook, drop_connections, drop_webhook, family_key, hook_owner,
@@ -529,7 +530,7 @@ def create_card(account_id: int, ctx: Ctx = Depends(get_ctx_session)):
 STATUSES = ('pending', 'duplicate', 'ignored', 'imported')
 
 
-def _tx_out(tx: BankTransaction, ctx: Ctx) -> dict:
+def _tx_out(tx: BankTransaction, ctx: Ctx, pool: bill_payments.Pool | None = None) -> dict:
     acc = tx.account
     match = db.session.get(Expense, tx.expense_id) if tx.expense_id else None
     out = {
@@ -548,6 +549,7 @@ def _tx_out(tx: BankTransaction, ctx: Ctx) -> dict:
     }
     if tx.status == 'pending':
         out.update(of.suggestion(tx, ctx.uids, ctx.tenant.id if ctx.tenant else None))
+        out['bills'] = bill_payments.options(tx, pool) if acc.type == 'BANK' else []  # "é a conta Energia?"
     return out
 
 
@@ -571,8 +573,9 @@ def list_transactions(status: Literal['pending', 'duplicate', 'ignored', 'import
         counts[st] = n
     rows = (BankTransaction.query.filter(_seen_tx(ctx), BankTransaction.status == status)
             .order_by(BankTransaction.date.desc(), BankTransaction.id.desc()).limit(500).all())
+    pool = bill_payments.Pool.of(ctx.user.id) if status == 'pending' else None
     return {'counts': counts, 'categories': tenant_categories(ctx.uids),
-            'items': [_tx_out(t, ctx) for t in rows]}
+            'items': [_tx_out(t, ctx, pool) for t in rows]}
 
 
 @router.get('/review/next', summary='Próximo lançamento do banco para revisar (um por vez, para o bot)')
@@ -630,6 +633,31 @@ def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_site_or_bot
     return {'message': msg, 'imported': done, 'already': known}
 
 
+class PayBillIn(BaseModel):
+    expense_id: int = Field(description='A conta a pagar (despesa pendente, fora do cartão de crédito)')
+
+
+@router.post('/transactions/{tx_id}/pay-bill', summary='"É a conta X": marca a conta como paga com esta saída do banco')
+def pay_bill(tx_id: int, body: PayBillIn, ctx: Ctx = Depends(get_ctx_site_or_bot)):
+    """Liga a saída à conta, marca como paga, fica com o valor que o banco pagou e aprende como o banco
+    chama essa conta: nos próximos meses ela é marcada sozinha."""
+    _enabled_tenant(ctx)
+    tx = _my_tx(ctx, [tx_id])[0]
+    if tx.status != 'pending' or tx.account.type != 'BANK' or tx.kind != 'expense':
+        raise HTTPException(status_code=422, detail='Lançamento: só saídas da conta que ainda estão para revisar.')
+    e = db.session.get(Expense, body.expense_id)
+    if e is None or e.user_id not in ctx.uids:
+        raise HTTPException(status_code=404, detail='Conta não encontrada.')
+    if e.paid or e.payment_method in bill_payments.NOT_BILLS:
+        raise HTTPException(status_code=422, detail='Conta: escolha uma conta a pagar que ainda está pendente.')
+    taken = BankTransaction.query.filter(BankTransaction.expense_id == e.id, BankTransaction.id != tx.id).first()
+    if taken is not None:
+        raise HTTPException(status_code=409, detail='Conta: já está ligada a outro lançamento do banco.')
+    msg = bill_payments.confirm(tx, e)
+    db.session.commit()
+    return {'message': msg, 'item': _tx_out(tx, ctx)}
+
+
 class IdsIn(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=500)
 
@@ -640,6 +668,9 @@ def ignore_transactions(body: IdsIn, ctx: Ctx = Depends(get_ctx_site_or_bot)):
     n = 0
     for tx in _my_tx(ctx, body.ids):
         if tx.status in ('pending', 'duplicate'):
+            if (tx.reason or '').startswith('Conta "'):  # tinha marcado uma conta como paga: desfaz
+                bill_payments.unsettle(tx)
+                tx.expense_id = None
             tx.status, tx.reason, tx.reviewed_at = 'ignored', 'Ignorado por você.', utcnow()
             n += 1
     db.session.commit()
@@ -652,6 +683,7 @@ def restore_transactions(body: IdsIn, ctx: Ctx = Depends(get_ctx_session)):
     n = 0
     for tx in _my_tx(ctx, body.ids):
         if tx.status in ('ignored', 'duplicate'):
+            bill_payments.unsettle(tx)  # a conta que esta saída marcou como paga volta a pendente
             tx.status, tx.reason, tx.expense_id, tx.reviewed_at = 'pending', None, None, utcnow()
             n += 1
     db.session.commit()

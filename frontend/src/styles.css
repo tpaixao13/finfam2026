@@ -527,6 +527,10 @@ a.insight:hover { background: #e8edf1; }
 .review-row.done { grid-template-columns: minmax(0, 1fr) auto auto; }
 .review-pick { width: 20px; height: 20px; accent-color: var(--primary); }
 .review-main { display: grid; gap: .25rem; min-width: 0; overflow-wrap: anywhere; }
+.review-bill { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; margin-top: .2rem; padding: .45rem .6rem;
+  border-left: 3px solid var(--income); border-radius: var(--radius-sm); background: var(--income-tint); }
+.review-bill .select, .review-bill select { max-width: 100%; }
+.review-bill .btn { padding-block: .3rem; }
 .review-fields { display: grid; gap: .4rem; min-width: 0; }
 .review-method { padding: .2rem 0; }
 .review-amount { text-align: right; }

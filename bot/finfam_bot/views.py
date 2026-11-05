@@ -370,6 +370,10 @@ def review_text(item: dict, total: int, offset: int, category: str, note: str = 
         lines.append(f'Parcela {item["installment"]["number"]}/{item["installment"]["total"]}')
     if item.get('bank_pending'):
         lines.append('⏳ Ainda pendente no banco')
+    bills = (item.get('bills') or [])[:3]
+    if bills:
+        lines.append('🧾 Pode ser uma conta a pagar: ' + '; '.join(
+            f'{h(b["description"])} (vence {dm(b["due"])}, {brl(b["amount"])})' for b in bills))
     lines.append(f'Categoria: <b>{h(category)}</b>')
     return '\n'.join(lines)
 

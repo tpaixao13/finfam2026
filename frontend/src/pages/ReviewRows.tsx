@@ -12,7 +12,11 @@ export interface BankTx {
   expense: { id: number; description: string; amount: number; date: string } | null
   category?: string; payment_method?: string; bank_category?: string | null
   owner_name?: string | null   // banco compartilhado por outra pessoa da família
+  bills?: BillOption[]         // contas a pagar que esta saída pode ter pago (a 1ª é a mais provável)
 }
+export interface BillOption { id: number; description: string; amount: number; category: string; due: string; match: 'alias' | 'exact' | 'words' | 'near' }
+/** Saída que marcou uma conta a pagar como paga (o motivo começa com 'Conta "…"'). */
+export const paidBill = (tx: BankTx) => tx.status === 'duplicate' && (tx.reason ?? '').startsWith('Conta "')
 export interface TxList { counts: Record<Status, number>; categories: string[]; items: BankTx[] }
 export const REVIEW_STATUSES: Status[] = ['pending', 'duplicate', 'ignored', 'imported']
 /** Só o que está ignorado ou repetido volta para a revisão. */
@@ -94,8 +98,27 @@ function CategoryField({ value, categories, label, onChange }:
   )
 }
 
-export function PendingRow({ tx, draft, categories, onChange }:
-  { tx: BankTx; draft: Draft; categories: string[]; onChange: (d: Partial<Draft>) => void }) {
+/** "É a conta Energia?": liga a saída à conta a pagar, que fica paga (e o FinFam aprende para os próximos meses). */
+function BillPick({ tx, onPay }: { tx: BankTx; onPay: (expenseId: number) => void }) {
+  const bills = tx.bills ?? []
+  const [chosen, setChosen] = useState(bills[0]?.id)
+  if (!bills.length) return null
+  const one = bills.length === 1 ? bills[0] : null
+  const label = (b: BillOption) => `${b.description} — vence ${dayMonth(b.due)}, ${brl(b.amount)}`
+  return (
+    <div className="review-bill">
+      {one ? <span className="small">É a {/^conta\b/i.test(one.description) ? '' : 'conta '}<b>{one.description}</b>? Vence {dayMonth(one.due)}, lançada com {brl(one.amount)}.</span> : <>
+        <span className="small">É uma destas contas?</span>
+        <Select aria-label={`Conta paga por ${tx.description}`} value={String(chosen)} onChange={(e) => setChosen(Number(e.target.value))}
+          options={bills.map((b) => ({ value: String(b.id), label: label(b) }))} />
+      </>}
+      <Button variant="ghost" icon="check2" onClick={() => chosen && onPay(chosen)}>Marcar como paga</Button>
+    </div>
+  )
+}
+
+export function PendingRow({ tx, draft, categories, onChange, onPayBill }:
+  { tx: BankTx; draft: Draft; categories: string[]; onChange: (d: Partial<Draft>) => void; onPayBill?: (expenseId: number) => void }) {
   const credit = tx.account_type === 'CREDIT'
   const parcelado = credit && tx.installment && tx.installment.number <= 1
   return (
@@ -108,6 +131,7 @@ export function PendingRow({ tx, draft, categories, onChange }:
         <Source tx={tx} />
         {parcelado && <span className="small">Vai lançar as {tx.installment!.total} parcelas, como no site.</span>}
         {credit && !tx.card_id && <span className="small warn-text">Cartão do banco não ligado: vai sem cartão do FinFam.</span>}
+        {onPayBill && <BillPick tx={tx} onPay={onPayBill} />}
       </div>
       <div className="review-fields">
         <CategoryField value={draft.category} categories={categories} label={tx.description} onChange={(category) => onChange({ category })} />
@@ -127,7 +151,7 @@ export function DoneRow({ tx, onRestore }: { tx: BankTx; onRestore?: () => void 
       <div className="review-main">
         <span>{tx.description}</span>
         <Source tx={tx} />
-        {tx.status === 'duplicate' && tx.expense && (
+        {paidBill(tx) ? <span className="small">🧾 {tx.reason}</span> : tx.status === 'duplicate' && tx.expense && (
           <span className="small">Igual a <b>{tx.expense.description}</b> de {dayMonth(tx.expense.date)} ({brl(tx.expense.amount)})</span>
         )}
         {tx.status === 'ignored' && tx.reason && <span className="small">{tx.reason}</span>}

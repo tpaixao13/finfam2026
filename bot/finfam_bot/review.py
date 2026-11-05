@@ -66,8 +66,12 @@ class Review:
 
     def _buttons(self, item_id: int, offset: int, seen: dict, total: int) -> list[list[dict]]:
         key = f'{item_id}:{offset}'
-        out = [[btn(self.ok_label(seen)[:40], f'{self.prefix}:ok:{key}')],
-               [btn(self.change_label, f'{self.prefix}:cat:{key}'), btn('🚫 Ignorar', f'{self.prefix}:ig:{key}')]]
+        # "é a conta Energia?": marca a conta a pagar como paga (o site aprende para os próximos meses)
+        out = [[btn(('🧾 É a ' if b['description'].lower().startswith('conta') else '🧾 É a conta ')
+                    + b['description'][:30], f'{self.prefix}:pb:{key}:{i}')]
+               for i, b in enumerate((seen['item'].get('bills') or [])[:3])]
+        out += [[btn(self.ok_label(seen)[:40], f'{self.prefix}:ok:{key}')],
+                [btn(self.change_label, f'{self.prefix}:cat:{key}'), btn('🚫 Ignorar', f'{self.prefix}:ig:{key}')]]
         if total > offset + 1:
             out.append([btn('⏭ Deixar para depois', f'{self.prefix}:go:{offset + 1}')])
         return out
@@ -109,6 +113,15 @@ class Review:
             self.shown.pop((self.prefix, chat_id, item_id), None)
             return self.show(chat_id, offset, message_id,
                              f'✅ {h(r.get("message", "Lançado!"))} ({h(self.choice_label(seen["choice"]))})')
+        if action == 'pb':
+            bills = (seen['item'].get('bills') or [])[:3]
+            index = int(parts[2]) if len(parts) > 2 and parts[2].isascii() and parts[2].isdigit() else -1
+            if not 0 <= index < len(bills):
+                return self.tg.answer(cq['id'])
+            self.tg.answer(cq['id'], 'Marcando como paga…')
+            r = self.api.post(chat_id, f'/pluggy/transactions/{item_id}/pay-bill', {'expense_id': bills[index]['id']})
+            self.shown.pop((self.prefix, chat_id, item_id), None)
+            return self.show(chat_id, offset, message_id, f'🧾 {h(r.get("message", "Conta marcada como paga."))}')
         if action == 'ig':
             self.tg.answer(cq['id'], 'Ignorando…')
             self.api.post(chat_id, self.ignore_path, {'ids': [item_id]})

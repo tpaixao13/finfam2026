@@ -17,6 +17,7 @@ from app.core.security import decrypt_field
 from app.core.types import utcnow
 from app.models import BankAccount, BankBill, BankConnection, BankIncome, BankInvestment, BankTransaction, CreditCard, Expense, PluggyConfig, User
 from app.services import bank_incomes
+from app.services import bill_payments
 from app.services import bank_categories
 from app.services import pluggy as pg
 from app.services.categorizer import categorize
@@ -626,7 +627,7 @@ def reconcile_payments(user_id: int) -> int:
         tx.reason, n = why + ' A despesa lançada antes foi removida (era pagamento de fatura).', n + 1
     db.session.flush()
     settle_paid_bills(uids)
-    return n
+    return n + bill_payments.reconcile_pending(user_id)
 
 
 def settle_paid_bills(uids: list) -> int:
@@ -677,6 +678,18 @@ def _apply_tx(tx: BankTransaction, raw: dict) -> None:
     ref = str(meta.get('billId') or '')
     tx.bill_ref = ref if _ID.fullmatch(ref) else None
     tx.card_digits = last4(meta.get('cardNumber'))
+    tx.payee_doc, tx.payee_name = _payee(raw, pay if isinstance(pay, dict) else {})
+
+
+def _payee(raw: dict, pay: dict) -> tuple[str | None, str | None]:
+    """Quem recebeu (PIX/boleto/débito): paymentData.receiver ou o estabelecimento (merchant)."""
+    rec = pay.get('receiver') if isinstance(pay.get('receiver'), dict) else {}
+    merchant = raw.get('merchant') if isinstance(raw.get('merchant'), dict) else {}
+    doc = rec.get('documentNumber')
+    doc = doc.get('value') if isinstance(doc, dict) else doc
+    digits = re.sub(r'\D', '', str(doc or merchant.get('cnpj') or ''))
+    name = str(rec.get('name') or merchant.get('businessName') or merchant.get('name') or '').strip()
+    return (digits if len(digits) in (11, 14) else None), (re.sub(r'\s+', ' ', name)[:120] or None)
 
 
 _CARD_PAYMENT = re.compile(r'pagamento|pagto|pgto|pag fatura|pag\.? ?boleto|pagamento recebido|cr[eé]dito de pagamento', re.I)
@@ -863,6 +876,7 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
             elif tx.reviewed_at is not None:
                 continue  # você já mexeu: não reclassifica
             else:  # classificado sozinho antes: classifica de novo (regras podem ter melhorado)
+                bill_payments.unsettle(tx)  # conta marcada como paga por esta saída: volta, e é refeita abaixo
                 tx.status, tx.reason, tx.expense_id = 'pending', None, None
             _apply_tx(tx, raw)
             tx.kind = tx_kind(acc, raw) or 'expense'
@@ -880,6 +894,8 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
             elif not why and acc.type == 'BANK':
                 why = reconcile_bill_payment(tx, bills_only=True, max_gap=10)  # boleto/"C6 BANK" que paga fatura
             match = None if why else find_existing(tx, acc.card_id)
+            if match is not None and acc.type == 'BANK' and not match.paid and match.payment_method != CREDIT:
+                match = None  # conta a pagar com o mesmo valor: decide abaixo (pode haver outra igual)
             if why:
                 tx.status, tx.reason = 'ignored', why
             elif match:
@@ -888,6 +904,8 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
                 take_bank_amount(match, tx)
             elif acc.type == 'BANK' and bank_incomes.pair_with_income(tx):
                 pass  # transferência para outra conta sua: some junto com a entrada
+            elif acc.type == 'BANK' and tx.kind == 'expense' and (paid := bill_payments.auto_match(tx)):
+                bill_payments.settle(tx, paid[0])  # internet, luz, telefone… lançada como conta a pagar
             elif fresh:
                 new_pending += 1
             db.session.flush()
@@ -993,10 +1011,14 @@ def sync_stale(user_id: int | None = None, max_age_hours: int | None = None, not
     return total
 
 
-def _notice_blocks(launched: list, pending: list, incomes: list) -> list[tuple[str, list[str]]]:
+def _notice_blocks(launched: list, pending: list, incomes: list, bills: list | None = None) -> list[tuple[str, list[str]]]:
     """Blocos do aviso: (linha de resumo, detalhes que só vão no privado)."""
     from app.services.telegram import _h
     blocks = []
+    if bills:
+        names = {e.id: e.description for e in Expense.query.filter(Expense.id.in_([t.expense_id for t in bills])).all()}
+        blocks.append((f'🧾 {len(bills)} conta(s) marcada(s) como paga(s) ({brl(sum(float(t.amount) for t in bills))})',
+                       [f'• Conta {_h(names.get(t.expense_id, t.description)[:40])} — {brl(float(t.amount))}' for t in bills[-5:]]))
     if launched:
         blocks.append((f'✅ {len(launched)} lançado(s) automaticamente ({brl(sum(float(t.amount) for t in launched))}).', []))
     if pending:
@@ -1017,8 +1039,10 @@ def notify_new(conn: BankConnection, before: set[int], before_incomes: set[int] 
     if cfg is None or not cfg.notify or not settings.telegram_bot_token:
         return False
     new = (BankTransaction.query.join(BankAccount)
-           .filter(BankAccount.connection_id == conn.id, BankTransaction.status.in_(('pending', 'imported')),
+           .filter(BankAccount.connection_id == conn.id, BankTransaction.status.in_(('pending', 'imported', 'duplicate')),
                    ~BankTransaction.id.in_(before or {0})).all())
+    bills = [t for t in new if t.status == 'duplicate' and (t.reason or '').startswith('Conta "')]
+    new = [t for t in new if t.status != 'duplicate'] + bills
     incomes = [] if before_incomes is None else (
         BankIncome.query.join(BankAccount)
         .filter(BankAccount.connection_id == conn.id, BankIncome.status == 'pending',
@@ -1034,11 +1058,12 @@ def notify_new(conn: BankConnection, before: set[int], before_incomes: set[int] 
         return False
     pending = sorted((t for t in new if t.status == 'pending'), key=lambda t: t.date)
     launched = [t for t in new if t.status == 'imported']
+    bills.sort(key=lambda t: t.date)
     whose = f' (de {tg._h(owner.name)})' if conn.shared and owner is not None else ''
     head = [f'🏦 <b>{tg._h(conn.label)}</b>{whose}: '
             + ', '.join(p for p in (f'{len(new)} saída(s)' if new else '', f'{len(incomes)} entrada(s)' if incomes else '')
                         if p) + ' nova(s) do banco.']
-    blocks = _notice_blocks(launched, pending, incomes)
+    blocks = _notice_blocks(launched, pending, incomes, bills)
     base = settings.public_url
     link = [f'{base}/bank/review'] if base.startswith('https://') else []
     # no privado: com os lançamentos e os botões (o toque chega ao bot, que mostra um por um);
@@ -1155,6 +1180,10 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
         bill = tx_bill(acc, tx)  # as faturas do banco podem ter chegado depois da classificação
         tx.bill_year, tx.bill_month = bill if bill else (None, None)
     existing = find_existing(tx, acc.card_id)
+    if existing is not None and not credit and not existing.paid and existing.payment_method != CREDIT:
+        bill_payments.settle(tx, existing)  # era a conta a pagar lançada antes: fica paga
+        tx.reviewed_at = utcnow()
+        return existing
     if existing is not None:
         tx.status, tx.expense_id, tx.reason, tx.reviewed_at = 'duplicate', existing.id, 'Já estava no FinFam.', utcnow()
         if credit and tx.bill_year and tx.bill_month:

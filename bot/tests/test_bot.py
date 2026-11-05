@@ -612,6 +612,9 @@ class ReviewApi(StubApi):
         if path == '/pluggy/transactions/ignore':
             self.queue = [t for t in self.queue if t['id'] not in body['ids']]
             return {'message': 'ok'}
+        if path.endswith('/pay-bill'):
+            self.queue = [t for t in self.queue if f"/{t['id']}/" not in path]
+            return {'message': 'Conta "Conta de luz" marcada como paga.'}
         return super().post(chat_id, path, body)
 
 
@@ -633,6 +636,19 @@ def test_review_bank_transactions_with_buttons():
     b.reviews.clear()  # bot reiniciou: o botão antigo só atualiza a lista
     b.handle(_click(70, 'rv:ok:7:0'))
     assert len(api.posted) == 2 and 'Toque de novo' in tg.answers[-1]
+
+
+def test_review_marks_bill_as_paid():
+    tg, api = FakeTelegram(), ReviewApi()
+    api.queue[0] = dict(api.queue[1], id=9, description='PIX ENEL', amount=231.55,
+                        bills=[{'id': 41, 'description': 'Conta de luz', 'amount': 200.0, 'due': '2026-10-25',
+                                'category': 'Moradia', 'match': 'near'}])
+    b = Bot(tg, api)
+    b.handle(_click(70, 'rv:go:0'))
+    assert 'Pode ser uma conta a pagar: Conta de luz (vence 25/10' in tg.last['text']
+    b.handle(_click(70, tg.button('🧾 É a Conta de luz')))
+    assert api.posted[-1] == ('/pluggy/transactions/9/pay-bill', {'expense_id': 41})
+    assert 'marcada como paga' in tg.last['text'] and 'UBER' in tg.last['text']
 
 
 def test_pick_person():

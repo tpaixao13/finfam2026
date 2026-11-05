@@ -28,8 +28,9 @@ export function ReviewImportsPage() {
 
   useEffect(() => {
     if (!list || tab !== 'pending') return
+    // a que parece ser uma conta a pagar vem desmarcada: lançar duplicaria a conta (use "Marcar como paga")
     setDrafts(Object.fromEntries(list.items.map((t) => [t.id, {
-      selected: true, category: t.category ?? 'Outros', description: t.description, payment_method: t.payment_method ?? 'PIX',
+      selected: !t.bills?.length, category: t.category ?? 'Outros', description: t.description, payment_method: t.payment_method ?? 'PIX',
     }])))
   }, [list, tab])
 
@@ -68,6 +69,7 @@ export function ReviewImportsPage() {
     return { message: `${ids.length} lançamento(s) ignorado(s).` }
   })
   const restore = (id: number) => run(() => api.post('/pluggy/transactions/restore', { ids: [id] }))
+  const payBill = (id: number, expenseId: number) => run(() => api.post(`/pluggy/transactions/${id}/pay-bill`, { expense_id: expenseId }))
   const total = picked.reduce((s, t) => s + (t.refund ? -t.amount : t.amount), 0)
 
   return (
@@ -91,7 +93,8 @@ export function ReviewImportsPage() {
           </ReviewBar>
           <ul className="review-list">
             {list.items.map((t) => drafts[t.id] && (
-              <PendingRow key={t.id} tx={t} draft={drafts[t.id]} categories={categories} onChange={(d) => edit(t.id, d)} />
+              <PendingRow key={t.id} tx={t} draft={drafts[t.id]} categories={categories} onChange={(d) => edit(t.id, d)}
+                onPayBill={(expenseId) => payBill(t.id, expenseId)} />
             ))}
           </ul>
         </Panel>

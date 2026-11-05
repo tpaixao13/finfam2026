@@ -84,6 +84,7 @@ class Tenant(Base):
 
     users = relationship('User', backref='tenant', lazy='dynamic', cascade='all, delete-orphan')
     category_rules = relationship('CategoryRule', lazy='dynamic', cascade='all, delete-orphan')
+    bill_aliases = relationship('BillAlias', lazy='dynamic', cascade='all, delete-orphan')
     ai_config = relationship('AiConfig', uselist=False, cascade='all, delete-orphan')
 
     @property
@@ -386,8 +387,25 @@ class BankTransaction(Base):
     status = Column(String(12), nullable=False, default='pending', index=True)
     reason = Column(Text, nullable=True)
     expense_id = Column(Integer, ForeignKey('expenses.id', ondelete='SET NULL'), nullable=True)
+    payee_doc = Column(String(20), nullable=True)         # CNPJ/CPF de quem recebeu (PIX/boleto), se o banco manda
+    payee_name = Column(String(120), nullable=True)       # nome de quem recebeu
+    bill_prev_amount = Column(Numeric(12, 2), nullable=True)  # valor da conta antes de pagar pelo banco (para desfazer)
     created_at = Column(DateTime, default=utcnow)
     reviewed_at = Column(DateTime, nullable=True)
+
+
+class BillAlias(Base):
+    """Como o banco chama uma conta a pagar da família (aprendido quando a pessoa confirma
+    "é a conta Energia"): nos meses seguintes a saída do banco marca a conta como paga sozinha."""
+    __tablename__ = 'bill_aliases'
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey('tenants.id'), nullable=False, index=True)
+    bill_key = Column(String(200), nullable=False)        # descrição da conta, normalizada
+    payee_doc = Column(String(20), nullable=True)
+    payee_words = Column(String(200), nullable=True)      # palavras que identificam quem recebe
+    created_at = Column(DateTime, default=utcnow)
+    used_at = Column(DateTime, nullable=True)
 
 
 class SalaryGroup(Base):

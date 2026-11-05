@@ -95,6 +95,9 @@ _ALTERS = [
     'ALTER TABLE users ADD COLUMN totp_last_step INTEGER',
     'ALTER TABLE investments ADD COLUMN fx_buy_rate NUMERIC(14,6)',
     'ALTER TABLE expenses ADD COLUMN purchase_year INTEGER',
+    'ALTER TABLE bank_transactions ADD COLUMN payee_doc VARCHAR(20)',
+    'ALTER TABLE bank_transactions ADD COLUMN payee_name VARCHAR(120)',
+    'ALTER TABLE bank_transactions ADD COLUMN bill_prev_amount NUMERIC(12,2)',
     # limpeza de dados órfãos (usuário/família já excluídos) — não podem ser herdados
     'DELETE FROM goals WHERE user_id NOT IN (SELECT id FROM users)',
     'DELETE FROM category_rules WHERE tenant_id NOT IN (SELECT id FROM tenants)',
