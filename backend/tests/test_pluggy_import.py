@@ -1269,3 +1269,43 @@ def test_deleting_account_disconnects_banks_at_pluggy(client, family, bank, txs)
     assert any(c[0] == 'DELETE' and c[1] == f'/items/{ITEM}' for c in bank['calls'])
     assert BankConnection.query.count() == 0 and PluggyConfig.query.count() == 0
     session.remove()
+
+
+def test_income_in_one_persons_bank_marks_expected_income_of_another_member(client, family, bank, txs):  # noqa: F811
+    """O PIX do condomínio cai na conta de um, mas a renda prevista está no nome do outro: marca a prevista."""
+    from app.models import BankIncome, Salary
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    session.get(Tenant, family.tenant['id']).plan = 'anual'  # plano com mais de uma pessoa
+    session.commit()
+    r = family.post('/family/members', json={'name': 'Greyce', 'email': 'greyce@test.com', 'password': 'senha-segura',
+                                             'confirm_password': 'senha-segura'})
+    assert r.status_code == 201, r.text
+    greyce = r.json()['member']['id']
+    month, year = TODAY.month, TODAY.year
+    for company in ('CONDOMINIO EDIFICIO GENERATION I', 'ESCOLA ABC'):  # a da escola tem o mesmo valor, outro pagador
+        family.post('/incomes', json={'amount': '1000', 'company': company, 'income_type': 'fixa', 'month': month,
+                                      'year': year, 'user_id': greyce})
+    txs[acc].append({'id': 'in-cond', 'type': 'CREDIT', 'amount': 1000.0, 'date': day(0), 'description': 'PIX RECEBIDO',
+                     'paymentData': {'paymentMethod': 'PIX', 'payer': {'name': 'Condominio Edificio Generation I'}}})
+    _post_item(family)
+    item = family.get('/pluggy/incomes').json()['items'][0]
+    assert item['suggestion']['expected']['company'] == 'CONDOMINIO EDIFICIO GENERATION I'
+    ok = family.post('/pluggy/incomes/approve', json={'items': [{'id': item['id'], 'income_type': 'fixa'}]})
+    assert ok.json()['marked'] == 1 and ok.json()['imported'] == 0, ok.text
+    cond = Salary.query.filter_by(company='CONDOMINIO EDIFICIO GENERATION I').one()
+    assert cond.received and cond.user_id == greyce and Salary.query.count() == 2  # não criou renda nova
+    session.remove()
+
+    # renda criada errada e apagada depois: a entrada volta para a revisão
+    inc = BankIncome.query.one()
+    cond = Salary.query.filter_by(company='CONDOMINIO EDIFICIO GENERATION I').one()
+    wrong = Salary(user_id=family.user['id'], year=year, month=month, amount=1000, company='Errada', received=True)
+    session.add(wrong)
+    session.flush()
+    inc.salary_id = wrong.id
+    cond.received = False
+    session.commit()
+    assert family.delete(f'/incomes/{wrong.id}').status_code == 200
+    pend = family.get('/pluggy/incomes').json()
+    assert pend['counts']['pending'] == 1 and pend['items'][0]['suggestion']['expected']['id'] == cond.id
+    session.remove()

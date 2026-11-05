@@ -123,12 +123,12 @@ def classify(inc: BankIncome) -> None:
             return
     if _pair(inc):
         return
-    received = (Salary.query.filter(Salary.user_id == inc.user_id, Salary.year == inc.date.year,
-                                    Salary.month == inc.date.month, Salary.received.is_(True),
-                                    Salary.amount == Decimal(str(inc.amount)))
-                .filter(~Salary.id.in_(db.session.query(BankIncome.salary_id).filter(BankIncome.salary_id.isnot(None),
-                                                                                     BankIncome.id != inc.id)))
-                .first())
+    taken = db.session.query(BankIncome.salary_id).filter(BankIncome.salary_id.isnot(None), BankIncome.id != inc.id)
+    rows = (Salary.query.filter(Salary.user_id.in_(_family(inc.user_id)), Salary.year == inc.date.year,
+                                Salary.month == inc.date.month, Salary.received.is_(True),
+                                Salary.amount == Decimal(str(inc.amount)))
+            .filter(~Salary.id.in_(taken)).all())
+    received = _best(inc, rows, tolerance=0)
     if received is not None:
         inc.status, inc.salary_id, inc.reason = 'duplicate', received.id, 'Já estava em Rendas.'
 
@@ -217,13 +217,41 @@ def _repeats(inc: BankIncome, source: str) -> bool:
     return False
 
 
+def _same_payer(a: str | None, b: str | None) -> bool:
+    """Mesmo pagador, com mais certeza que _same_source: nome igual ou 2+ palavras em comum
+    ("CONDOMINIO EDIFICIO GENERATION I" × "Condominio Edificio Generation I")."""
+    wa, wb = set(_norm(a).split()), set(_norm(b).split())
+    return bool(wa and wb) and (wa == wb or len({w for w in wa & wb if len(w) >= 3}) >= 2)
+
+
+def _best(inc: BankIncome, rows: list, tolerance: float) -> Salary | None:
+    """A renda da família que esta entrada é: valor até `tolerance` de diferença; de outra pessoa da família
+    só com o mesmo pagador (a entrada pode cair na conta de um e a renda estar no nome do outro).
+    Preferência: mesmo pagador, depois a própria pessoa, depois o valor mais perto."""
+    amount, source = float(inc.amount), _source(inc)
+    close = [s for s in rows if abs(float(s.amount) - amount) <= tolerance * amount + 0.005
+             and (s.user_id == inc.user_id or _same_payer(s.company, source))]
+    return min(close, key=lambda s: (not _same_payer(s.company, source), s.user_id != inc.user_id,
+                                     abs(float(s.amount) - amount))) if close else None
+
+
 def _expected(inc: BankIncome) -> Salary | None:
     """Renda do mês ainda não recebida, de valor parecido (até 15%): é ela que chegou."""
-    amount = float(inc.amount)
-    rows = Salary.query.filter(Salary.user_id == inc.user_id, Salary.year == inc.date.year,
+    rows = Salary.query.filter(Salary.user_id.in_(_family(inc.user_id)), Salary.year == inc.date.year,
                                Salary.month == inc.date.month, Salary.received.isnot(True)).all()
-    close = [s for s in rows if abs(float(s.amount) - amount) <= 0.15 * amount]
-    return min(close, key=lambda s: abs(float(s.amount) - amount)) if close else None
+    return _best(inc, rows, tolerance=0.15)
+
+
+def revive_orphans(seen) -> int:
+    """Entrada já lançada cuja renda foi apagada (ex.: criou renda nova em vez de marcar a prevista):
+    volta para a revisão, para ser aprovada de novo."""
+    rows = (BankIncome.query.outerjoin(Salary, Salary.id == BankIncome.salary_id)
+            .filter(seen, BankIncome.status == 'imported', Salary.id.is_(None)).all())
+    for inc in rows:
+        inc.status, inc.salary_id, inc.reason, inc.reviewed_at = 'pending', None, None, None
+    if rows:
+        db.session.flush()
+    return len(rows)
 
 
 def suggestion(inc: BankIncome) -> dict:

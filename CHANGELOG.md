@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.11.4 — entrada do banco acha a renda prevista de outra pessoa da família (05/11/2026)
+
+- **Entradas → Rendas:** a renda prevista era procurada só no nome de quem tem o banco. Um PIX do condomínio que caiu
+  na conta da Greyce, com a renda prevista no nome do Tiago, virava uma renda nova em vez de marcar a prevista como
+  recebida. Agora procura na família toda: de outra pessoa só com o **mesmo pagador** (nome igual ou 2+ palavras em
+  comum) e valor até 15% diferente; o mesmo vale para reconhecer "já estava em Rendas".
+- **Consertar o que entrou errado:** apague em Rendas a renda criada por engano; a entrada do banco volta sozinha para
+  **Entradas** (para revisar) e, aprovada de novo, marca a renda prevista certa.
+
 ## 2026.11.3 — revisão unix e de segurança (05/11/2026)
 
 - **Segurança:** auditoria das mudanças desde a 2026.10.1 sem falhas altas ou médias (isolamento entre famílias em
