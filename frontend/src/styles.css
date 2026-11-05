@@ -294,6 +294,7 @@ a.insight:hover { background: #e8edf1; }
 .bills-title { display: inline-flex; gap: .6rem; align-items: baseline; }
 .bills-title.tone-danger { color: var(--expense); }
 .bills-title.tone-warning { color: var(--warning); }
+.bills-title.tone-pending { color: var(--warning); }
 
 /* ── Tabelas ──────────────────────────────────────────────────── */
 .table-wrap { overflow-x: auto; }
@@ -718,6 +719,7 @@ a.insight:hover { background: #e8edf1; }
 .cal-totals dd { margin: 0; font-weight: 700; color: var(--ink); }
 .cal-totals .t-paid { color: var(--income); }
 .cal-totals .t-overdue { color: var(--expense); }
+.cal-totals .t-pending { color: var(--warning); }
 .cal { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .8rem; }
 .cal-week, .cal-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
 .cal-week span { font-size: .75rem; font-weight: 600; color: var(--ink-3); text-align: center; padding-bottom: .3rem; }
@@ -736,13 +738,13 @@ a.insight:hover { background: #e8edf1; }
 .cal-day.tone-vencida.is-picked { background: var(--expense-tint); }
 .cal-chip { font-size: .7rem; font-weight: 600; line-height: 1.25; padding: 2px 5px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-chip.s-pago { background: var(--income-tint); color: var(--income); }
-.cal-chip.s-pendente { background: var(--primary-tint); color: var(--primary-ink); }
+.cal-chip.s-pendente { background: var(--warning-tint); color: var(--warning); }
 .cal-chip.s-vencida { background: var(--expense); color: #fff; }
 .cal-more { font-size: .7rem; color: var(--ink-3); padding-left: 2px; }
 .cal-dot { display: none; }
 .cal-legend { display: flex; gap: 1.1rem; margin-top: .7rem; font-size: .78rem; color: var(--ink-2); }
 .cal-legend span::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: .35rem; }
-.l-paid::before { background: var(--income); } .l-pending::before { background: var(--primary); } .l-overdue::before { background: var(--expense); }
+.l-paid::before { background: var(--income); } .l-pending::before { background: #d99a2b; } .l-overdue::before { background: var(--expense); }
 .cal-list { list-style: none; margin: 0; padding: 0; }
 .cal-list li + li { border-top: 1px solid var(--line); }
 .cal-item { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .8rem;
@@ -762,6 +764,7 @@ a.insight:hover { background: #e8edf1; }
   .cal-day .cal-dot { display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); margin-top: auto; }
   .cal-day.tone-vencida .cal-dot { background: var(--expense); }
   .cal-day.tone-pago .cal-dot { background: var(--income); }
+  .cal-day.tone-pendente .cal-dot { background: #d99a2b; }
   .cal-item { grid-template-columns: minmax(0, 1fr) auto; }
   .cal-item .badge { grid-column: 1 / -1; justify-self: start; }
 }

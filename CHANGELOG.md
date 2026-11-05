@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.11.1 — cores de Contas a pagar e botão do topo só no Painel (05/11/2026)
+
+- **Contas a pagar:** cada situação tem uma cor só: **pago verde, a pagar amarelo, vencida vermelho**. Antes, "a pagar"
+  usava o verde-azulado do app e se misturava com o verde de "pago". Vale para as etiquetas do calendário, a
+  legenda, as bolinhas no celular, a lista do dia, o total "A pagar" e o título "Próximos dias".
+- **Botão "+ Nova despesa" do topo:** agora só aparece no Painel (antes também em Contas a pagar, Cartões e Alertas).
+
 ## 2026.11.0 — saída do banco marca a conta a pagar como paga (05/11/2026)
 
 - **Contas a pagar pagas pelo banco:** quando sai da conta um PIX, débito ou boleto, o FinFam procura uma conta a

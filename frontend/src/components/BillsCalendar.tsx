@@ -20,7 +20,7 @@ interface CalendarData {
 
 const WEEK = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const STATUS_LABEL: Record<Status, string> = { pago: 'Pago', pendente: 'A pagar', vencida: 'Vencida' }
-const STATUS_TONE: Record<Status, 'success' | 'info' | 'danger'> = { pago: 'success', pendente: 'info', vencida: 'danger' }
+const STATUS_TONE: Record<Status, 'success' | 'warning' | 'danger'> = { pago: 'success', pendente: 'warning', vencida: 'danger' }
 const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 
 /** A situação que manda no dia: vencida > a pagar > pago. */
@@ -90,7 +90,7 @@ export function BillsCalendar({ month, year, onPeriod }: { month: number; year: 
         <dl className="cal-totals">
           <div><dt>No mês</dt><dd><Money value={d.totals.total} /></dd></div>
           <div><dt>Pago</dt><dd className="t-paid"><Money value={d.totals.paid} /></dd></div>
-          <div><dt>A pagar</dt><dd><Money value={d.totals.pending} /></dd></div>
+          <div><dt>A pagar</dt><dd className="t-pending"><Money value={d.totals.pending} /></dd></div>
           {d.totals.overdue > 0 && <div><dt>Vencido</dt><dd className="t-overdue"><Money value={d.totals.overdue} /></dd></div>}
         </dl>
       </div>

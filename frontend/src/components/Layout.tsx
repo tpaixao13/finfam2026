@@ -30,9 +30,9 @@ const NAV: { section: string; items: NavItem[] }[] = [
   ] },
 ]
 
-// Atalho "Nova despesa" no topo: só nas telas do dia a dia que não têm botão próprio.
-// Despesas, Rendas, Investimentos e Metas já trazem a ação delas; telas de conta/configuração não lançam gastos.
-const QUICK_EXPENSE = ['/', '/bills', '/cards', '/alerts']
+// Atalho "Nova despesa" no topo: só no Painel. Nas outras telas não aparece (Despesas tem o botão dela;
+// pelo celular, o bot do Telegram lança mais rápido).
+const QUICK_EXPENSE = ['/']
 const showQuickExpense = (pathname: string) => QUICK_EXPENSE.some((to) => isActive(to, pathname))
 
 function isActive(to: string, pathname: string) {

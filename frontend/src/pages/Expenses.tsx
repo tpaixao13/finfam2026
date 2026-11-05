@@ -164,7 +164,7 @@ export function BillsPage() {
         <div className="stack-lg">
           {section('Em atraso', b.overdue, b.totals.overdue, 'danger')}
           {section('Vencem hoje', b.today, b.totals.today, 'warning')}
-          {section(`Próximos ${days} dias`, b.upcoming, b.totals.upcoming, 'neutral')}
+          {section(`Próximos ${days} dias`, b.upcoming, b.totals.upcoming, 'pending')}
         </div>
       )}
     </div>
