@@ -1041,7 +1041,7 @@ def notify_new(conn: BankConnection, before: set[int], before_incomes: set[int] 
     new = (BankTransaction.query.join(BankAccount)
            .filter(BankAccount.connection_id == conn.id, BankTransaction.status.in_(('pending', 'imported', 'duplicate')),
                    ~BankTransaction.id.in_(before or {0})).all())
-    bills = [t for t in new if t.status == 'duplicate' and (t.reason or '').startswith('Conta "')]
+    bills = [t for t in new if t.status == 'duplicate' and bill_payments.pays_bill(t)]
     new = [t for t in new if t.status != 'duplicate'] + bills
     incomes = [] if before_incomes is None else (
         BankIncome.query.join(BankAccount)

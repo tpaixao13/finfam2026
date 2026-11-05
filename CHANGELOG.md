@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.11.3 — revisão unix e de segurança (05/11/2026)
+
+- **Segurança:** auditoria das mudanças desde a 2026.10.1 sem falhas altas ou médias (isolamento entre famílias em
+  "Marcar como paga", nada de quem recebeu o PIX em JSON, grupo do Telegram só com contagem e total, token de API
+  barrado). Testes novos: token de API e conta de outra família em `pay-bill`.
+- **Desfazer "conta paga pelo banco"** não apaga mais o que você corrigiu depois: o valor e o banco só voltam ao de
+  antes se ainda estiverem como o banco deixou.
+- **Unix (sem mudar comportamento):** `bill_payments` sem código repetido (`pays_bill`, `is_exact`, `_plain`), bot com
+  `bill_options` e `_index`, Cartões com `moneyField`, CSS sem regra duplicada.
+
 ## 2026.11.2 — conta paga pelo banco guarda o banco que pagou (05/11/2026)
 
 - Quando a saída do banco marca uma conta a pagar como paga (sozinha ou pelo botão "Marcar como paga"), o campo

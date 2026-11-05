@@ -668,7 +668,7 @@ def ignore_transactions(body: IdsIn, ctx: Ctx = Depends(get_ctx_site_or_bot)):
     n = 0
     for tx in _my_tx(ctx, body.ids):
         if tx.status in ('pending', 'duplicate'):
-            if (tx.reason or '').startswith('Conta "'):  # tinha marcado uma conta como paga: desfaz
+            if bill_payments.pays_bill(tx):  # tinha marcado uma conta como paga: desfaz
                 bill_payments.unsettle(tx)
                 tx.expense_id = None
             tx.status, tx.reason, tx.reviewed_at = 'ignored', 'Ignorado por você.', utcnow()

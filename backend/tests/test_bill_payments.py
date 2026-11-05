@@ -103,3 +103,39 @@ def test_words_and_alias_matching():
     assert bp.alias_matches(alias, tx, bp.tx_words(tx))
     tx = BankTransaction(description='PIX MARIA BRASIL')
     assert not bp.alias_matches(alias, tx, bp.tx_words(tx))
+
+
+def test_pay_bill_isolation_and_api_token(client, family, other_family, bank, txs):  # noqa: F811
+    from conftest import API
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    luz = _bill(family, 'Conta de luz', '200.00', days_ago=3)
+    txs[acc].append({'id': 't-x', 'type': 'DEBIT', 'amount': -231.55, 'date': day(1),
+                     'description': 'PIX ENVIADO ENEL', 'paymentData': ENEL})
+    _post_item(family)
+    tx_id = family.get('/pluggy/transactions').json()['items'][0]['id']
+    # token de API (MCP/scripts) não paga conta
+    raw = family.post('/auth/tokens', json={'name': 'mcp'}).json()['token']
+    r = client.post(f'{API}/pluggy/transactions/{tx_id}/pay-bill', headers={'Authorization': f'Bearer {raw}'},
+                    json={'expense_id': luz})
+    assert r.status_code == 403
+    # minha saída + despesa de outra família: 404 e nada muda
+    theirs = _bill(other_family, 'Conta de luz', '200.00', days_ago=3)
+    assert family.post(f'/pluggy/transactions/{tx_id}/pay-bill', json={'expense_id': theirs}).status_code == 404
+    assert not session.get(Expense, theirs).paid and not session.get(Expense, luz).paid
+    session.remove()
+
+
+def test_undo_keeps_what_the_person_edited_after(client, family, bank, txs):  # noqa: F811
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    vivo = _bill(family, 'Vivo', '95.00', days_ago=4)
+    txs[acc].append({'id': 't-vivo', 'type': 'DEBIT', 'amount': -95.0, 'date': day(1), 'description': 'PIX VIVO'})
+    _post_item(family)
+    e = session.get(Expense, vivo)
+    assert e.paid and e.bank == 'Nubank'
+    e.amount, e.bank = 97, 'Inter'  # a pessoa corrigiu depois
+    session.commit()
+    tx = BankTransaction.query.filter_by(pluggy_id='t-vivo').one()
+    assert family.post('/pluggy/transactions/restore', json={'ids': [tx.id]}).status_code == 200
+    e = session.get(Expense, vivo)
+    assert e.paid is False and float(e.amount) == 97.0 and e.bank == 'Inter'
+    session.remove()

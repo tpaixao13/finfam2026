@@ -293,8 +293,7 @@ a.insight:hover { background: #e8edf1; }
 .pager { display: flex; align-items: center; justify-content: center; gap: .75rem; font-size: .9rem; color: var(--ink-2); }
 .bills-title { display: inline-flex; gap: .6rem; align-items: baseline; }
 .bills-title.tone-danger { color: var(--expense); }
-.bills-title.tone-warning { color: var(--warning); }
-.bills-title.tone-pending { color: var(--warning); }
+.bills-title.tone-warning, .bills-title.tone-pending { color: var(--warning); }
 
 /* ── Tabelas ──────────────────────────────────────────────────── */
 .table-wrap { overflow-x: auto; }

@@ -5,7 +5,7 @@ import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton
   PageHeader, Panel, Progress, Segmented, Select, Spinner } from '../components/ui'
 import { api } from '../lib/api'
 import { InvoiceCheck } from './open-finance/InvoiceCheck'
-import { brl, parseMoney } from '../lib/format'
+import { brl, decimalBR, parseMoney } from '../lib/format'
 import { useApi, useFormState, usePeriod } from '../lib/hooks'
 import { Link, navigate } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
@@ -24,6 +24,9 @@ function kindOf(c: Card): Kind {
 
 const STATUS_LABEL: Record<string, string> = { aberta: 'Fatura aberta', fechada: 'Fatura fechada', futura: 'Fatura futura' }
 
+/** Valor para o campo de texto: 1500.5 → "1500,5"; vazio quando não há (ou é zero). */
+const moneyField = (value: number | null) => (value ? decimalBR(value) : '')
+
 function CardForm({ open, editing, onClose, onSaved }: { open: boolean; editing: Card | null; onClose: () => void; onSaved: () => void }) {
   const { me, meta, toast } = useSession()
   const blank = { user_id: String(me?.user.id ?? ''), kind: 'credit' as Kind, nickname: '', last_digits: '', bank: '',
@@ -31,8 +34,8 @@ function CardForm({ open, editing, onClose, onSaved }: { open: boolean; editing:
   const { f, set, busy, error, run } = useFormState(open, () => editing
     ? { user_id: String(editing.user_id), kind: kindOf(editing), nickname: editing.nickname ?? '',
       last_digits: editing.last_digits, bank: editing.bank ?? '', due_day: String(editing.due_day),
-      best_buy_day: String(editing.best_buy_day), credit_limit: (editing.effective_limit ?? editing.credit_limit) ? String(editing.effective_limit ?? editing.credit_limit).replace('.', ',') : '',
-      monthly_amount: editing.monthly_amount ? String(editing.monthly_amount).replace('.', ',') : '',
+      best_buy_day: String(editing.best_buy_day), credit_limit: moneyField(editing.effective_limit ?? editing.credit_limit),
+      monthly_amount: moneyField(editing.monthly_amount),
       renewal_day: String(editing.renewal_day ?? 1), is_virtual: editing.is_virtual, is_additional: editing.is_additional }
     : blank)
   const isVr = f.kind === 'vr' || f.kind === 'va'

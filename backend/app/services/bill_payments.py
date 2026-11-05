@@ -16,7 +16,7 @@ from decimal import Decimal
 
 from app.core.db import db
 from app.core.types import utcnow
-from app.models import BankTransaction, BillAlias, Expense, User
+from app.models import BankAccount, BankTransaction, BillAlias, Expense, User
 from app.services.finance import CREDIT, brl
 
 WINDOW_DAYS = 10                    # vencimento até 10 dias antes/depois do pagamento
@@ -31,18 +31,27 @@ _GENERIC = {
     'qr', 'code', 'mensal', 'mes', 'fatura', 'ref', 'referente', 'ag', 'cc', 'agendado', 'agendamento', 'nao',
 }
 RANK = {'alias': 0, 'exact': 1, 'words': 2, 'near': 3}
+REASON_PREFIX = 'Conta "'           # motivo de uma saída que marcou uma conta como paga (settle)
+
+
+def _plain(text: str | None) -> str:
+    """Sem acento e em minúsculas."""
+    return unicodedata.normalize('NFKD', text or '').encode('ascii', 'ignore').decode().lower()
 
 
 def words(text: str | None) -> set[str]:
     """Palavras que identificam: sem acento, minúsculas, 3+ letras, sem as genéricas e sem números."""
-    t = unicodedata.normalize('NFKD', text or '').encode('ascii', 'ignore').decode().lower()
-    return {w for w in re.findall(r'[a-z0-9]+', t) if len(w) >= 3 and not w.isdigit() and w not in _GENERIC}
+    return {w for w in re.findall(r'[a-z0-9]+', _plain(text)) if len(w) >= 3 and not w.isdigit() and w not in _GENERIC}
 
 
 def bill_key(e: Expense) -> str:
     """A "conta" como a família a chama (a mesma em todos os meses da recorrência)."""
-    t = unicodedata.normalize('NFKD', e.description or '').encode('ascii', 'ignore').decode().lower()
-    return ' '.join(re.findall(r'[a-z]+', t))[:200]
+    return ' '.join(re.findall(r'[a-z]+', _plain(e.description)))[:200]
+
+
+def pays_bill(tx: BankTransaction) -> bool:
+    """Esta saída marcou uma conta a pagar como paga (settle)."""
+    return (tx.reason or '').startswith(REASON_PREFIX)
 
 
 def tx_words(tx: BankTransaction) -> set[str]:
@@ -84,9 +93,13 @@ def alias_matches(alias: BillAlias, tx: BankTransaction, seen: set[str]) -> bool
     return bool(known) and len(known & seen) / len(known) >= ALIAS_MIN_SHARE
 
 
+def is_exact(e: Expense, amount: Decimal) -> bool:
+    return abs(Decimal(str(e.amount)) - amount) <= EXACT
+
+
 def in_range(e: Expense, amount: Decimal) -> bool:
     ref = Decimal(str(e.amount))
-    return abs(ref - amount) <= EXACT or ref * MIN_RATIO <= amount <= ref * MAX_RATIO
+    return is_exact(e, amount) or ref * MIN_RATIO <= amount <= ref * MAX_RATIO
 
 
 def candidates(tx: BankTransaction, pool: Pool | None = None) -> list[tuple[str, Expense]]:
@@ -108,7 +121,7 @@ def candidates(tx: BankTransaction, pool: Pool | None = None) -> list[tuple[str,
         key = bill_key(e)
         if any(a.bill_key == key and alias_matches(a, tx, seen) for a in pool.aliases):
             how = 'alias'
-        elif abs(Decimal(str(e.amount)) - amount) <= EXACT:
+        elif is_exact(e, amount):
             how = 'exact'
         elif words(e.description) & seen:
             how = 'words'
@@ -140,19 +153,21 @@ def settle(tx: BankTransaction, e: Expense) -> None:
         tx.bill_prev_bank, e.bank = e.bank or '', bank
     e.paid = True
     tx.status, tx.expense_id = 'duplicate', e.id
-    tx.reason = f'Conta "{e.description}" marcada como paga' + (f' pelo {bank}' if bank else '') + f'.{note}'
+    tx.reason = f'{REASON_PREFIX}{e.description}" marcada como paga' + (f' pelo {bank}' if bank else '') + f'.{note}'
 
 
 def unsettle(tx: BankTransaction) -> None:
-    """Desfaz settle (a saída voltou para a revisão): a conta volta a pendente, com o valor de antes."""
-    if not (tx.expense_id and (tx.reason or '').startswith('Conta "')):
+    """Desfaz settle (a saída voltou para a revisão): a conta volta a pendente, com o valor e o banco de
+    antes — só o que ainda está como o banco deixou (se a pessoa editou depois, fica o que ela pôs)."""
+    if not (tx.expense_id and pays_bill(tx)):
         return
     e = db.session.get(Expense, tx.expense_id)
     if e is not None:
         e.paid = False
-        if tx.bill_prev_amount is not None:
+        if tx.bill_prev_amount is not None and Decimal(str(e.amount)) == Decimal(str(tx.amount)):
             e.amount = tx.bill_prev_amount
-        if tx.bill_prev_bank is not None:
+        paid_by = tx.account.connection.label[:60] if tx.account and tx.account.connection else None
+        if tx.bill_prev_bank is not None and e.bank == paid_by:
             e.bank = tx.bill_prev_bank or None
     tx.bill_prev_amount = tx.bill_prev_bank = None
 
@@ -185,11 +200,9 @@ def confirm(tx: BankTransaction, e: Expense) -> str:
 
 def reconcile_pending(user_id: int) -> int:
     """Saídas ainda para revisar que já dá para ligar sozinho (a conta pode ter sido lançada depois)."""
-    from app.models import BankAccount
-    uids, _ = _family(user_id)
     pool, n = Pool.of(user_id), 0
     rows = (BankTransaction.query.join(BankAccount)
-            .filter(BankTransaction.user_id.in_(uids), BankTransaction.status == 'pending',
+            .filter(BankTransaction.user_id.in_(pool.uids), BankTransaction.status == 'pending',
                     BankTransaction.reviewed_at.is_(None), BankAccount.type == 'BANK').all())
     for tx in rows:
         found = auto_match(tx, pool)

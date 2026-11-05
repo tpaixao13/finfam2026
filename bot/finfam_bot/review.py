@@ -11,7 +11,7 @@ import time
 
 from finfam_bot.fmt import btn, h, rows
 from finfam_bot.http import ApiError
-from finfam_bot.views import income_text, review_text
+from finfam_bot.views import bill_options, income_text, review_text
 
 OFF = '🏦 O Open Finance (bancos conectados) não está liberado para a sua família.'
 
@@ -69,7 +69,7 @@ class Review:
         # "é a conta Energia?": marca a conta a pagar como paga (o site aprende para os próximos meses)
         out = [[btn(('🧾 É a ' if b['description'].lower().startswith('conta') else '🧾 É a conta ')
                     + b['description'][:30], f'{self.prefix}:pb:{key}:{i}')]
-               for i, b in enumerate((seen['item'].get('bills') or [])[:3])]
+               for i, b in enumerate(bill_options(seen['item']))]
         out += [[btn(self.ok_label(seen)[:40], f'{self.prefix}:ok:{key}')],
                 [btn(self.change_label, f'{self.prefix}:cat:{key}'), btn('🚫 Ignorar', f'{self.prefix}:ig:{key}')]]
         if total > offset + 1:
@@ -102,7 +102,7 @@ class Review:
             return self.tg.edit(chat_id, message_id, self.pick_title,
                                 buttons + [[btn('↩️ Voltar', f'{self.prefix}:go:{offset}')]])
         if action == 'set':
-            index = int(parts[2]) if len(parts) > 2 and parts[2].isascii() and parts[2].isdigit() else -1
+            index = _index(parts)
             if not 0 <= index < len(seen['choices']):
                 return self.tg.answer(cq['id'])
             seen['choice'] = seen['choices'][index]
@@ -114,8 +114,8 @@ class Review:
             return self.show(chat_id, offset, message_id,
                              f'✅ {h(r.get("message", "Lançado!"))} ({h(self.choice_label(seen["choice"]))})')
         if action == 'pb':
-            bills = (seen['item'].get('bills') or [])[:3]
-            index = int(parts[2]) if len(parts) > 2 and parts[2].isascii() and parts[2].isdigit() else -1
+            bills = bill_options(seen['item'])
+            index = _index(parts)
             if not 0 <= index < len(bills):
                 return self.tg.answer(cq['id'])
             self.tg.answer(cq['id'], 'Marcando como paga…')
@@ -160,6 +160,11 @@ class IncomeReview(Review):
     def approve_item(self, item_id: int, seen: dict) -> dict:
         sug = seen['item'].get('suggestion') or {}
         return {'id': item_id, 'income_type': seen['choice'], 'company': sug.get('company')}
+
+
+def _index(parts: list[str]) -> int:
+    """O índice escolhido no botão (3ª parte do callback), ou -1 se não veio um número."""
+    return int(parts[2]) if len(parts) > 2 and parts[2].isascii() and parts[2].isdigit() else -1
 
 
 def _int(value) -> int:

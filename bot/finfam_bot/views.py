@@ -357,6 +357,11 @@ def week_text(r: dict) -> str:
     return '\n'.join(lines)
 
 
+def bill_options(item: dict) -> list[dict]:
+    """As contas a pagar que a saída pode ter pago (no máximo 3, as mais prováveis primeiro)."""
+    return (item.get('bills') or [])[:3]
+
+
 def review_text(item: dict, total: int, offset: int, category: str, note: str = '') -> str:
     """Um lançamento do banco para revisar (/revisar)."""
     head = f'{note}\n\n' if note else ''
@@ -370,7 +375,7 @@ def review_text(item: dict, total: int, offset: int, category: str, note: str = 
         lines.append(f'Parcela {item["installment"]["number"]}/{item["installment"]["total"]}')
     if item.get('bank_pending'):
         lines.append('⏳ Ainda pendente no banco')
-    bills = (item.get('bills') or [])[:3]
+    bills = bill_options(item)
     if bills:
         lines.append('🧾 Pode ser uma conta a pagar: ' + '; '.join(
             f'{h(b["description"])} (vence {dm(b["due"])}, {brl(b["amount"])})' for b in bills))
