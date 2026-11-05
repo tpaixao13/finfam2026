@@ -32,9 +32,9 @@ def test_fixed_bill_same_value_is_marked_paid(client, family, bank, txs):  # noq
                      'description': 'PIX ENVIADO TELEFONICA BRASIL', 'paymentData': {'paymentMethod': 'PIX'}})
     _post_item(family)
     e = session.get(Expense, internet)
-    assert e.paid is True and float(e.amount) == 99.9
+    assert e.paid is True and float(e.amount) == 99.9 and e.bank == 'Nubank'  # o banco que pagou
     dup = family.get('/pluggy/transactions?status=duplicate').json()['items']
-    assert dup[0]['reason'] == 'Conta "Internet Vivo" marcada como paga.' and dup[0]['expense']['id'] == internet
+    assert dup[0]['reason'] == 'Conta "Internet Vivo" marcada como paga pelo Nubank.' and dup[0]['expense']['id'] == internet
     session.remove()
 
 
@@ -75,7 +75,7 @@ def test_variable_bill_asks_once_then_learns(client, family, other_family, bank,
     # desfazer: volta para a revisão, a conta volta a pendente com o valor de antes
     assert family.post('/pluggy/transactions/restore', json={'ids': [tx.id]}).status_code == 200
     e2 = session.get(Expense, luz2)
-    assert e2.paid is False and float(e2.amount) == 200.0
+    assert e2.paid is False and float(e2.amount) == 200.0 and e2.bank is None  # banco de antes (nenhum)
     session.remove()
 
 

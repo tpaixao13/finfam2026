@@ -129,15 +129,18 @@ def auto_match(tx: BankTransaction, pool: Pool | None = None) -> tuple[Expense, 
 
 
 def settle(tx: BankTransaction, e: Expense) -> None:
-    """Liga a saída à conta, marca como paga e fica com o valor que o banco pagou."""
+    """Liga a saída à conta, marca como paga e fica com o valor e o banco que pagaram."""
     paid_amount, before = Decimal(str(tx.amount)), Decimal(str(e.amount))
     note = ''
     if paid_amount != before:
         tx.bill_prev_amount, e.amount = before, paid_amount
         note = f' Valor ajustado de {brl(before)} para {brl(paid_amount)}.'
+    bank = (tx.account.connection.label if tx.account and tx.account.connection else '')[:60]
+    if bank and e.bank != bank:
+        tx.bill_prev_bank, e.bank = e.bank or '', bank
     e.paid = True
     tx.status, tx.expense_id = 'duplicate', e.id
-    tx.reason = f'Conta "{e.description}" marcada como paga.{note}'
+    tx.reason = f'Conta "{e.description}" marcada como paga' + (f' pelo {bank}' if bank else '') + f'.{note}'
 
 
 def unsettle(tx: BankTransaction) -> None:
@@ -149,7 +152,9 @@ def unsettle(tx: BankTransaction) -> None:
         e.paid = False
         if tx.bill_prev_amount is not None:
             e.amount = tx.bill_prev_amount
-    tx.bill_prev_amount = None
+        if tx.bill_prev_bank is not None:
+            e.bank = tx.bill_prev_bank or None
+    tx.bill_prev_amount = tx.bill_prev_bank = None
 
 
 def learn(tx: BankTransaction, e: Expense) -> None:

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.11.2 — conta paga pelo banco guarda o banco que pagou (05/11/2026)
+
+- Quando a saída do banco marca uma conta a pagar como paga (sozinha ou pelo botão "Marcar como paga"), o campo
+  **Banco** da conta passa a ser o banco de onde saiu o dinheiro (o nome do banco em Contas conectadas: C6 Bank,
+  Inter…). O aviso diz "Conta "Vivo" marcada como paga pelo C6 Bank."
+- **Revisar de novo** devolve também o banco que a conta tinha antes (coluna `bill_prev_bank`, migração automática).
+
 ## 2026.11.1 — cores de Contas a pagar e botão do topo só no Painel (05/11/2026)
 
 - **Contas a pagar:** cada situação tem uma cor só: **pago verde, a pagar amarelo, vencida vermelho**. Antes, "a pagar"

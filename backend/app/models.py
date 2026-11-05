@@ -390,6 +390,7 @@ class BankTransaction(Base):
     payee_doc = Column(String(20), nullable=True)         # CNPJ/CPF de quem recebeu (PIX/boleto), se o banco manda
     payee_name = Column(String(120), nullable=True)       # nome de quem recebeu
     bill_prev_amount = Column(Numeric(12, 2), nullable=True)  # valor da conta antes de pagar pelo banco (para desfazer)
+    bill_prev_bank = Column(Text, nullable=True)          # banco da conta antes ('' = sem banco), para desfazer
     created_at = Column(DateTime, default=utcnow)
     reviewed_at = Column(DateTime, nullable=True)
 
