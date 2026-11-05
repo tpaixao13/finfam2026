@@ -14,6 +14,7 @@
 from datetime import date
 from typing import Literal
 import hmac
+import json
 import logging
 import secrets
 
@@ -814,7 +815,7 @@ async def webhook(hook_token: str, request: Request):
     tenant = db.session.get(Tenant, user.tenant_id) if user and user.tenant_id else None
     if tenant is None or not tenant.open_finance_enabled:
         return {'ok': True, 'ignored': 'open_finance_disabled'}  # 2XX: a Pluggy não fica reenviando
-    log.info('Webhook Pluggy de user %s: %s', cfg.user_id, str(event)[:60])
+    log.info('Webhook Pluggy (user %s): %s', cfg.user_id, json.dumps(payload, ensure_ascii=False, default=str)[:2000])
     owner = _item_owner(cfg, str(payload.get('itemId') or ''))
     if owner and _item_event(owner, str(event or ''), str(payload.get('itemId') or ''), payload.get('error')):
         of.schedule_sync(owner)  # relê já (lança sozinho se a conexão estiver no automático)

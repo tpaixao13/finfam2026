@@ -24,6 +24,18 @@ from app.routers import (admin, ai, auth, bank_incomes, cards, dashboard, expens
 log = logging.getLogger('finfam')
 
 
+def _log_to_journal() -> None:
+    """Os logs do FinFam (nível INFO, ex.: webhooks e leituras da Pluggy) vão para a saída padrão,
+    que o systemd guarda: journalctl -u finfam2026."""
+    if any(getattr(h, '_finfam', False) for h in log.handlers):
+        return
+    handler = logging.StreamHandler()
+    handler._finfam = True
+    handler.setFormatter(logging.Formatter('%(levelname)s %(name)s: %(message)s'))
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+
+
 class _HideHookToken(logging.Filter):
     """O log de acesso do uvicorn não grava o token do webhook da Pluggy (fica /pluggy/webhook/***)."""
     _rx = __import__('re').compile(r'(/pluggy/webhook/)[^\s"?]+')
@@ -36,7 +48,7 @@ class _HideHookToken(logging.Filter):
 
 logging.getLogger('uvicorn.access').addFilter(_HideHookToken())
 
-VERSION = '2026.11.4'
+VERSION = '2026.11.5'
 MAX_BODY_BYTES = 12 * 1024 * 1024
 # O site só carrega o que é dele, as fontes do Google e o Pluggy Connect (script e janela do banco).
 # Se um dia o Pluggy Connect parar de abrir por causa disto, CSP_REPORT_ONLY=1 no .env só avisa no console.
@@ -107,6 +119,7 @@ def _validation_handler(_: Request, exc: RequestValidationError):
 
 
 def create_app() -> FastAPI:
+    _log_to_journal()
     app = FastAPI(
         title='FinFam API', version=VERSION, lifespan=lifespan,
         description='API do FinFam 2026 — controle financeiro familiar. '

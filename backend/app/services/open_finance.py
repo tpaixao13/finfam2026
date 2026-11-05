@@ -1006,6 +1006,7 @@ def sync_stale(user_id: int | None = None, max_age_hours: int | None = None, not
             db.session.rollback()
             log.warning('Sincronização do item %s falhou: %s', conn.item_id, exc)
             continue
+        log_read(conn, before, before_incomes)
         if notify:
             notify_new(conn, before, before_incomes)
     return total
@@ -1028,6 +1029,20 @@ def _notice_blocks(launched: list, pending: list, incomes: list, bills: list | N
         blocks.append((f'💰 {len(incomes)} entrada(s) para revisar como renda ({brl(sum(float(i.amount) for i in incomes))})',
                        [f'• {_h((i.counterpart or i.description)[:40])} — {brl(float(i.amount))}' for i in incomes[-5:]]))
     return blocks
+
+
+def log_read(conn: BankConnection, before: set, before_incomes: set) -> None:
+    """Uma linha no log por leitura do banco, e uma por lançamento novo (para conferir o que a Pluggy mandou)."""
+    new = (BankTransaction.query.join(BankAccount).filter(BankAccount.connection_id == conn.id,
+                                                         ~BankTransaction.id.in_(before or {0}))
+           .order_by(BankTransaction.date).all())
+    incomes = (BankIncome.query.join(BankAccount).filter(BankAccount.connection_id == conn.id,
+                                                        ~BankIncome.id.in_(before_incomes or {0})).count())
+    log.info('Leitura do banco %s (item %s): %s saída(s) nova(s), %s entrada(s) nova(s)',
+             conn.label, conn.item_id, len(new), incomes)
+    for t in new:
+        log.info('  nova: %s %s R$ %s %s [%s] %s', t.account.type, t.date.isoformat(), t.amount,
+                 (t.description or '')[:40], t.status, t.pluggy_id)
 
 
 def notify_new(conn: BankConnection, before: set[int], before_incomes: set[int] | None = None) -> bool:

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.11.5 — log com o conteúdo dos webhooks e das leituras da Pluggy (05/11/2026)
+
+- O log da API (`journalctl -u finfam2026`) passa a mostrar as mensagens de nível INFO do FinFam:
+  - **Webhook:** o conteúdo de cada aviso da Pluggy (`event`, `itemId`, ids de lançamentos…), até 2.000 caracteres.
+  - **Leitura do banco:** uma linha por leitura ("Leitura do banco Nubank: 3 saída(s) nova(s), 1 entrada(s) nova(s)")
+    e uma por lançamento novo, com tipo de conta, data, valor, descrição curta, situação no FinFam e id da Pluggy.
+- Ver: `journalctl -u finfam2026 --since today | grep finfam.pluggy`
+
 ## 2026.11.4 — entrada do banco acha a renda prevista de outra pessoa da família (05/11/2026)
 
 - **Entradas → Rendas:** a renda prevista era procurada só no nome de quem tem o banco. Um PIX do condomínio que caiu
