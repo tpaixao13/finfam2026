@@ -1033,9 +1033,9 @@ def _notice_blocks(launched: list, pending: list, incomes: list, bills: list | N
 
 def known_ids(conn: BankConnection) -> tuple[set, set]:
     """(lançamentos, entradas) que o FinFam já tem deste banco: o que vier depois é novo."""
-    tx = {i for (i,) in db.session.query(BankTransaction.id).join(BankAccount).filter(BankAccount.connection_id == conn.id)}
-    inc = {i for (i,) in db.session.query(BankIncome.id).join(BankAccount).filter(BankAccount.connection_id == conn.id)}
-    return tx, inc
+    def ids(model) -> set:
+        return {i for (i,) in pluggy_events.of_bank(model, conn).with_entities(model.id)}
+    return ids(BankTransaction), ids(BankIncome)
 
 
 def log_read(conn: BankConnection, before: set, before_incomes: set) -> None:

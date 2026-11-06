@@ -55,11 +55,16 @@ def _mine(ctx: Ctx, ids: list[int]) -> list[BankIncome]:
     return rows
 
 
+def _revive(ctx: Ctx) -> None:
+    """Antes de listar: entradas lançadas cuja renda foi apagada voltam para a revisão."""
+    if bi.revive_orphans(_seen_inc(ctx)):
+        db.session.commit()
+
+
 @router.get('', summary='Entradas que chegaram do banco, por situação')
 def list_incomes(status: Status = 'pending', ctx: Ctx = Depends(get_ctx_session)):
     _enabled_tenant(ctx)
-    if bi.revive_orphans(_seen_inc(ctx)):
-        db.session.commit()
+    _revive(ctx)
     rows = (BankIncome.query.filter(_seen_inc(ctx), BankIncome.status == status)
             .order_by(BankIncome.date.desc(), BankIncome.id.desc()).limit(500).all())
     return {'counts': _counts(ctx), 'items': [_out(i, ctx) for i in rows]}
@@ -68,8 +73,7 @@ def list_incomes(status: Status = 'pending', ctx: Ctx = Depends(get_ctx_session)
 @router.get('/next', summary='Próxima entrada para revisar (uma por vez, para o bot)')
 def next_income(offset: int = Query(0, ge=0, le=500), ctx: Ctx = Depends(get_ctx_site_or_bot)):
     _enabled_tenant(ctx)
-    if bi.revive_orphans(_seen_inc(ctx)):
-        db.session.commit()
+    _revive(ctx)
     q = BankIncome.query.filter(_seen_inc(ctx), BankIncome.status == 'pending')
     total = q.count()
     inc = q.order_by(BankIncome.date, BankIncome.id).offset(offset).first() if offset < total else None

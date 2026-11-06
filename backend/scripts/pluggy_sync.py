@@ -13,6 +13,7 @@ from app.core.db import session
 from app.core.migrations import run_migrations
 from app.models import Tenant, User
 from app.services import open_finance as of
+from app.services import pluggy_events
 
 
 def main(argv: list[str]) -> int:
@@ -30,6 +31,8 @@ def main(argv: list[str]) -> int:
     users = {u.id for u in User.query.filter(User.tenant_id.in_(enabled)).all()} if enabled else set()
     for user_id in sorted(users):
         total += of.sync_stale(user_id, max_age_hours=hours, notify=True)
+    pluggy_events.prune()  # histórico com mais de 60 dias, de todas as famílias
+    session.commit()
     session.remove()
     print(f'Open Finance: {total} lançamento(s) novo(s) para revisar.')
     return 0

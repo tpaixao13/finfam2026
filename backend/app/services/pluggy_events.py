@@ -19,12 +19,18 @@ EVENTS = {   # nome do evento da Pluggy → o que aconteceu, em português
 
 
 def record(user_id: int, kind: str, title: str, detail=None, conn: BankConnection | None = None) -> None:
-    """Guarda um evento (o chamador faz o commit) e descarta os da pessoa com mais de KEEP_DAYS dias."""
+    """Guarda um evento (o chamador faz o commit) e descarta os antigos."""
     text = json.dumps(detail, ensure_ascii=False, default=str)[:MAX_DETAIL] if detail is not None else None
     db.session.add(PluggyEvent(user_id=user_id, connection_id=conn.id if conn else None, kind=kind,
                                title=title[:200], detail=text))
-    (PluggyEvent.query.filter(PluggyEvent.user_id == user_id, PluggyEvent.created_at < utcnow() - timedelta(days=KEEP_DAYS))
-     .delete(synchronize_session=False))
+    prune()
+
+
+def prune() -> int:
+    """Apaga os eventos de TODO mundo com mais de KEEP_DAYS dias (também de quem parou de usar).
+    Roda a cada evento novo e no cron de hora em hora (scripts.pluggy_sync)."""
+    return (PluggyEvent.query.filter(PluggyEvent.created_at < utcnow() - timedelta(days=KEEP_DAYS))
+            .delete(synchronize_session=False))
 
 
 def webhook(user_id: int, payload: dict, conn: BankConnection | None) -> None:
@@ -32,21 +38,31 @@ def webhook(user_id: int, payload: dict, conn: BankConnection | None) -> None:
     record(user_id, 'webhook', f'Aviso da Pluggy: {EVENTS.get(event, event or "evento sem nome")}', payload, conn)
 
 
+def of_bank(model, conn: BankConnection):
+    """Lançamentos (BankTransaction) ou entradas (BankIncome) deste banco."""
+    return model.query.join(BankAccount).filter(BankAccount.connection_id == conn.id)
+
+
+def _new_since(model, conn: BankConnection, before: set) -> list:
+    return of_bank(model, conn).filter(~model.id.in_(before or {0})).order_by(model.date).all()
+
+
+def _tx_line(t: BankTransaction) -> dict:
+    return {'data': t.date.isoformat(), 'valor': float(t.amount), 'descricao': t.description[:60],
+            'onde': 'cartão' if t.account.type == 'CREDIT' else 'conta', 'situacao': t.status, 'id_pluggy': t.pluggy_id}
+
+
+def _income_line(i: BankIncome) -> dict:
+    return {'data': i.date.isoformat(), 'valor': float(i.amount), 'descricao': i.description[:60], 'situacao': i.status}
+
+
 def read(conn: BankConnection, before: set, before_incomes: set) -> tuple[list, int]:
     """Leitura do banco: guarda o que chegou de novo. Devolve (saídas novas, quantas entradas novas)."""
-    new = (BankTransaction.query.join(BankAccount).filter(BankAccount.connection_id == conn.id,
-                                                         ~BankTransaction.id.in_(before or {0}))
-           .order_by(BankTransaction.date).all())
-    incomes = (BankIncome.query.join(BankAccount).filter(BankAccount.connection_id == conn.id,
-                                                        ~BankIncome.id.in_(before_incomes or {0}))
-               .order_by(BankIncome.date).all())
+    new = _new_since(BankTransaction, conn, before)
+    incomes = _new_since(BankIncome, conn, before_incomes)
     parts = [f'{len(new)} lançamento(s) novo(s)' if new else '', f'{len(incomes)} entrada(s) nova(s)' if incomes else '']
     title = 'Leitura do banco: ' + (' e '.join(p for p in parts if p) or 'nada novo')
-    detail = {'lancamentos': [{'data': t.date.isoformat(), 'valor': float(t.amount), 'descricao': t.description[:60],
-                               'onde': 'cartão' if t.account.type == 'CREDIT' else 'conta', 'situacao': t.status,
-                               'id_pluggy': t.pluggy_id} for t in new],
-              'entradas': [{'data': i.date.isoformat(), 'valor': float(i.amount), 'descricao': i.description[:60],
-                            'situacao': i.status} for i in incomes]}
+    detail = {'lancamentos': [_tx_line(t) for t in new], 'entradas': [_income_line(i) for i in incomes]}
     record(conn.user_id, 'read', title, detail if (new or incomes) else None, conn)
     return new, len(incomes)
 

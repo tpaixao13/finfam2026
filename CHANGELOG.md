@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.12.1 — revisão unix e de segurança das versões 2026.11.4 a 2026.12.0 (06/11/2026)
+
+- **Segurança:** sem falhas. Conferidos: o histórico só mostra bancos que a pessoa enxerga (outra família e banco
+  não compartilhado de outro membro ficam de fora); o webhook só grava depois de validar token, segredo e IP; renda
+  prevista só da própria família; o histórico some ao desconectar o banco e ao excluir conta ou família; sem XSS.
+- **LGPD:** a limpeza de 60 dias do histórico vale para todas as famílias (antes só apagava quando a mesma pessoa
+  gerava um evento novo). Roda a cada evento e no cron de hora em hora (`scripts.pluggy_sync`).
+- **Unix (sem mudar comportamento):** `pluggy_events.of_bank` no lugar de 4 consultas iguais, `read` montado por
+  partes, `_revive` nas rotas de entradas, `item_id` único no webhook, tipos enxutos em `OpenFinanceLog.tsx`.
+
 ## 2026.12.0 — Histórico do Open Finance por família (05/11/2026)
 
 - **Contas conectadas → Histórico** (`/bank/history`): cada família vê os avisos que a Pluggy mandou (webhook, com

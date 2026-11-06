@@ -836,12 +836,12 @@ async def webhook(hook_token: str, request: Request):
     if tenant is None or not tenant.open_finance_enabled:
         return {'ok': True, 'ignored': 'open_finance_disabled'}  # 2XX: a Pluggy não fica reenviando
     log.info('Webhook Pluggy (user %s): %s', cfg.user_id, json.dumps(payload, ensure_ascii=False, default=str)[:2000])
-    owner = _item_owner(cfg, str(payload.get('itemId') or ''))
-    conn = (BankConnection.query.filter_by(item_id=str(payload.get('itemId'))[:64], user_id=owner).first()
-            if owner else None)
+    item_id = str(payload.get('itemId') or '')
+    owner = _item_owner(cfg, item_id)
+    conn = BankConnection.query.filter_by(item_id=item_id[:64], user_id=owner).first() if owner else None
     pluggy_events.webhook(owner or cfg.user_id, payload, conn)  # histórico da família (Contas conectadas)
     db.session.commit()
-    if owner and _item_event(owner, str(event or ''), str(payload.get('itemId') or ''), payload.get('error')):
+    if owner and _item_event(owner, str(event or ''), item_id, payload.get('error')):
         of.schedule_sync(owner)  # relê já (lança sozinho se a conexão estiver no automático)
     # etapa 3: enfileirar a importação dos lançamentos (transactions/*)
     return {'ok': True}

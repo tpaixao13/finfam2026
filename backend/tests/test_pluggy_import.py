@@ -1356,3 +1356,19 @@ def test_open_finance_history_goes_with_the_account(client, family, bank, txs): 
     account_deletion.delete_member(session.get(User, family.user['id']))
     assert PluggyEvent.query.count() == 0
     session.remove()
+
+
+
+def test_open_finance_history_expires_for_everyone(client, family, other_family):
+    """Os 60 dias valem para todos, até para quem não gera evento novo."""
+    from datetime import timedelta
+    from app.core.types import utcnow
+    from app.models import PluggyEvent
+    from app.services import pluggy_events
+    pluggy_events.record(family.user['id'], 'webhook', 'antigo', None)
+    session.flush()
+    PluggyEvent.query.update({'created_at': utcnow() - timedelta(days=pluggy_events.KEEP_DAYS + 1)})
+    pluggy_events.record(other_family.user['id'], 'webhook', 'novo de outra família', None)
+    session.commit()
+    assert [e.title for e in PluggyEvent.query.all()] == ['novo de outra família']
+    session.remove()

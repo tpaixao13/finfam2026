@@ -9,17 +9,14 @@ import { useApi } from '../lib/hooks'
 import { Link } from '../lib/router'
 
 interface TxLine { data: string; valor: number; descricao: string; onde?: string; situacao: string; id_pluggy?: string }
+interface ReadInfo { lancamentos: TxLine[]; entradas: TxLine[] }   // o que chegou numa leitura do banco
 interface Event {
   id: number; at: string; kind: 'webhook' | 'read' | 'error'; title: string; bank_name: string | null
-  connection_id: number | null; detail: Record<string, unknown> | { lancamentos: TxLine[]; entradas: TxLine[] } | null
+  connection_id: number | null; detail: Record<string, unknown> | ReadInfo | null
 }
 interface Log { keep_days: number; items: Event[]; banks: { id: number; name: string }[] }
 
-const KIND = {
-  webhook: { icon: 'bell', label: 'Aviso da Pluggy' },
-  read: { icon: 'arrow-repeat', label: 'Leitura do banco' },
-  error: { icon: 'exclamation-octagon', label: 'Erro' },
-} as const
+const KIND_ICON = { webhook: 'bell', read: 'arrow-repeat', error: 'exclamation-octagon' } as const
 const SITUACAO: Record<string, string> = {
   pending: 'para revisar', imported: 'lançado', duplicate: 'já estava no FinFam', ignored: 'ignorado',
 }
@@ -30,11 +27,14 @@ const shortDate = (iso: string) => iso.slice(8, 10) + '/' + iso.slice(5, 7)
 
 function byDay(items: Event[]): [string, Event[]][] {
   const out = new Map<string, Event[]>()
-  for (const e of items) out.set(day(e.at), [...(out.get(day(e.at)) ?? []), e])
+  for (const e of items) {
+    const label = day(e.at)
+    out.set(label, [...(out.get(label) ?? []), e])
+  }
   return [...out]
 }
 
-function ReadDetail({ detail }: { detail: { lancamentos: TxLine[]; entradas: TxLine[] } }) {
+function ReadDetail({ detail }: { detail: ReadInfo }) {
   const rows = [...detail.lancamentos.map((t) => ({ ...t, sinal: '−' })), ...detail.entradas.map((t) => ({ ...t, sinal: '+', onde: 'entrada' }))]
   return (
     <ul className="log-tx">
@@ -51,11 +51,10 @@ function ReadDetail({ detail }: { detail: { lancamentos: TxLine[]; entradas: TxL
 }
 
 function Row({ e }: { e: Event }) {
-  const k = KIND[e.kind]
   const read = e.kind === 'read' && e.detail && 'lancamentos' in e.detail
   return (
     <li className={`log-row log-${e.kind}`}>
-      <span className="log-icon" aria-hidden><Icon name={k.icon} /></span>
+      <span className="log-icon" aria-hidden><Icon name={KIND_ICON[e.kind]} /></span>
       <div className="log-main">
         <div className="log-head">
           <time dateTime={e.at}>{time(e.at)}</time>
@@ -65,7 +64,7 @@ function Row({ e }: { e: Event }) {
         {e.detail && (
           <details>
             <summary className="small">{read ? 'Ver o que chegou' : 'Ver o conteúdo do aviso'}</summary>
-            {read ? <ReadDetail detail={e.detail as { lancamentos: TxLine[]; entradas: TxLine[] }} />
+            {read ? <ReadDetail detail={e.detail as ReadInfo} />
               : <pre className="log-json">{JSON.stringify(e.detail, null, 2)}</pre>}
           </details>
         )}
