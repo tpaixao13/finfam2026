@@ -34,10 +34,11 @@ _BRT = timezone(timedelta(hours=-3))
 _ID = re.compile(r'[A-Za-z0-9-]{1,64}')
 
 # Saídas que não são gasto novo (as compras já vêm pelo cartão / é dinheiro seu mudando de lugar)
+_BILL_REASON = 'Pagamento de fatura: as compras já vêm pelo cartão.'
 _SKIP = (
     (re.compile(r'credit card payment|(pagamento|pagto|pgto|pag)\.?\s*(de\s+|da\s+)?fat(ura)?\b|pagto cartao|pagamento cartao',
                 re.I),  # "PGTO FAT CARTAO C6", "PAG FATURA", "PAGAMENTO DE FATURA"…
-     'Pagamento de fatura: as compras já vêm pelo cartão.'),
+     _BILL_REASON),
     (re.compile(r'same person transfer|transfer.*same ownership|mesma titularidade|entre contas', re.I),
      'Transferência entre contas suas.'),
     (re.compile(r'^investments?$|aplica[cç][aã]o|resgate|investimento', re.I),
@@ -656,7 +657,7 @@ def settle_paid_bills(uids: list) -> int:
 def _skip_reason(description: str, category: str | None) -> str | None:
     debit_buy = bool(_DEBIT_CARD.search(description))  # C6 "DÉBITO DE CARTÃO": compra no débito, não fatura
     for rx, why in _SKIP:
-        if debit_buy and why.startswith('Pagamento de fatura') and not rx.search(description):
+        if debit_buy and why == _BILL_REASON and not rx.search(description):
             continue
         if rx.search(category or '') or rx.search(description):
             return why
@@ -891,7 +892,7 @@ def sync_transactions(conn: BankConnection, client: pg.PluggyClient, today: date
                     db.session.expunge(tx)
                 continue
             why = _skip_reason(tx.description, tx.pluggy_category) if tx.kind == 'expense' else None
-            if why and acc.type == 'BANK' and why.startswith('Pagamento de fatura'):
+            if why == _BILL_REASON and acc.type == 'BANK':
                 why = reconcile_bill_payment(tx) or why
             elif not why and acc.type == 'BANK':
                 why = reconcile_bill_payment(tx, bills_only=True, max_gap=10)  # boleto/"C6 BANK" que paga fatura
@@ -1189,23 +1190,25 @@ def suggestion(tx: BankTransaction, uids: list, tenant_id: int | None) -> dict:
 
 
 def is_bill_payment(tx: BankTransaction) -> bool:
-    return (_skip_reason(tx.description, tx.pluggy_category) or '').startswith('Pagamento de fatura')
+    return _skip_reason(tx.description, tx.pluggy_category) == _BILL_REASON
 
 
 def approve(tx: BankTransaction, uids: list, category: str, description: str | None = None,
-            payment_method: str | None = None) -> Expense:
+            payment_method: str | None = None) -> Expense | None:
     """Lança a despesa (mesma regra do site: fatura, parcelas) e marca como importado.
     Parcela do meio (k/n, k>1) lança k..n: as que faltam aparecem nas faturas seguintes, como
     numa compra parcelada lançada à mão. Se já existe (outra parcela lançada no mesmo lote
-    criou), vira "já no FinFam" em vez de duplicar."""
+    criou), vira "já no FinFam" em vez de duplicar. Pagamento de fatura saindo da conta não vira
+    despesa: fica ignorado e devolve None."""
     from app.models import InstallmentGroup
     from app.services.finance import month_offset
     acc, conn = tx.account, tx.account.connection
     credit = acc.type == 'CREDIT'
-    if not credit and tx.kind == 'expense' and is_bill_payment(tx):
+    # (vindo de "Ignorados" é escolha da pessoa: lança mesmo assim, para corrigir um engano do FinFam)
+    if not credit and tx.kind == 'expense' and tx.status != 'ignored' and is_bill_payment(tx):
         # pagamento de fatura não é gasto novo (as compras já estão no cartão): marca a fatura como paga
         tx.status, tx.reviewed_at = 'ignored', utcnow()
-        tx.reason = reconcile_bill_payment(tx) or _skip_reason(tx.description, tx.pluggy_category)
+        tx.reason = reconcile_bill_payment(tx) or _BILL_REASON
         return None
     if credit and not (tx.bill_year and tx.bill_month):
         bill = tx_bill(acc, tx)  # as faturas do banco podem ter chegado depois da classificação

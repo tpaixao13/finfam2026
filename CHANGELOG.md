@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.12.3 — revisão unix e de segurança da 2026.12.1 e 2026.12.2 (08/11/2026)
+
+- **Segurança:** sem falhas. Conferidos: a nova ordenação mantém o filtro por família; o pagamento de fatura só marca
+  faturas da própria família; a limpeza de 60 dias só apaga pelo prazo; regex sem risco de lentidão (ReDoS) e sem
+  falso positivo nos casos comuns ("PAG FARMACIA", "PGTO FATEC", "PAG FATURAMENTO" não casam); sem XSS.
+- **Engano do FinFam tem volta:** uma saída tomada por pagamento de fatura, aprovada a partir de **Ignorados**, é
+  lançada como despesa (antes ficava travada).
+- **Unix (sem mudar comportamento):** `_BILL_REASON` no lugar do texto repetido em 4 lugares; `approve` documentado
+  como `Expense | None`; `by_purchase_date` mais legível.
+
 ## 2026.12.2 — ordem pela data da compra, "fatura de nov" e pagamento de fatura abreviado (08/11/2026)
 
 - **Painel → Últimos lançamentos, Despesas, fatura do cartão e exportação:** ordenados pela data **real** da compra.

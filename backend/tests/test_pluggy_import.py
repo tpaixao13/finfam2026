@@ -1358,7 +1358,6 @@ def test_open_finance_history_goes_with_the_account(client, family, bank, txs): 
     session.remove()
 
 
-
 def test_open_finance_history_expires_for_everyone(client, family, other_family):
     """Os 60 dias valem para todos, até para quem não gera evento novo."""
     from datetime import timedelta
@@ -1393,4 +1392,7 @@ def test_bill_payment_abbreviated_is_not_an_expense(client, family, bank, txs): 
     r = family.post('/pluggy/transactions/approve', json={'items': [{'id': tx.id, 'category': 'Outros'}]})
     assert r.status_code == 200 and r.json()['imported'] == 0 and 'pagamento(s) de fatura' in r.json()['message']
     assert Expense.query.count() == before
+    # engano do FinFam: aprovar de "Ignorados" lança mesmo assim
+    r = family.post('/pluggy/transactions/approve', json={'items': [{'id': tx.id, 'category': 'Outros'}]})
+    assert r.json()['imported'] == 1 and Expense.query.count() == before + 1
     session.remove()

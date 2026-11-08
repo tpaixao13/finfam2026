@@ -505,8 +505,9 @@ class Expense(Base):
     def by_purchase_date(cls, desc: bool = False) -> tuple:
         """Ordem pela data REAL da compra. year/month é a competência (no crédito, o mês da fatura):
         a fatura de novembro tem compras de outubro, e ordenar só pelo dia põe 01/11 antes de 31/10."""
-        cols = (func.coalesce(cls.purchase_year, cls.year), func.coalesce(cls.purchase_month, cls.month), cls.day)
-        return tuple(c.desc() for c in cols) + (cls.created_at.desc(),) if desc else cols + (cls.created_at,)
+        cols = (func.coalesce(cls.purchase_year, cls.year), func.coalesce(cls.purchase_month, cls.month),
+                cls.day, cls.created_at)
+        return tuple(c.desc() for c in cols) if desc else cols
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
