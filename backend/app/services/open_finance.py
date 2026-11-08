@@ -35,7 +35,8 @@ _ID = re.compile(r'[A-Za-z0-9-]{1,64}')
 
 # Saídas que não são gasto novo (as compras já vêm pelo cartão / é dinheiro seu mudando de lugar)
 _SKIP = (
-    (re.compile(r'credit card payment|pagamento de fatura|pgto fatura|pag fatura|pagto cartao|pagamento cartao', re.I),
+    (re.compile(r'credit card payment|(pagamento|pagto|pgto|pag)\.?\s*(de\s+|da\s+)?fat(ura)?\b|pagto cartao|pagamento cartao',
+                re.I),  # "PGTO FAT CARTAO C6", "PAG FATURA", "PAGAMENTO DE FATURA"…
      'Pagamento de fatura: as compras já vêm pelo cartão.'),
     (re.compile(r'same person transfer|transfer.*same ownership|mesma titularidade|entre contas', re.I),
      'Transferência entre contas suas.'),
@@ -954,6 +955,8 @@ def auto_approve(conn: BankConnection) -> int:
             db.session.rollback()
             log.warning('Lançamento automático %s ficou para revisar: %s', tx.pluggy_id, exc)
             continue
+        if tx.status != 'imported':
+            continue  # pagamento de fatura ou já existente: não é despesa nova
         tx.reason = 'Lançado automaticamente.'
         done += 1
     db.session.flush()
@@ -1185,6 +1188,10 @@ def suggestion(tx: BankTransaction, uids: list, tenant_id: int | None) -> dict:
             'bank_category': bank_categories.translate(tx.pluggy_category)}
 
 
+def is_bill_payment(tx: BankTransaction) -> bool:
+    return (_skip_reason(tx.description, tx.pluggy_category) or '').startswith('Pagamento de fatura')
+
+
 def approve(tx: BankTransaction, uids: list, category: str, description: str | None = None,
             payment_method: str | None = None) -> Expense:
     """Lança a despesa (mesma regra do site: fatura, parcelas) e marca como importado.
@@ -1195,6 +1202,11 @@ def approve(tx: BankTransaction, uids: list, category: str, description: str | N
     from app.services.finance import month_offset
     acc, conn = tx.account, tx.account.connection
     credit = acc.type == 'CREDIT'
+    if not credit and tx.kind == 'expense' and is_bill_payment(tx):
+        # pagamento de fatura não é gasto novo (as compras já estão no cartão): marca a fatura como paga
+        tx.status, tx.reviewed_at = 'ignored', utcnow()
+        tx.reason = reconcile_bill_payment(tx) or _skip_reason(tx.description, tx.pluggy_category)
+        return None
     if credit and not (tx.bill_year and tx.bill_month):
         bill = tx_bill(acc, tx)  # as faturas do banco podem ter chegado depois da classificação
         tx.bill_year, tx.bill_month = bill if bill else (None, None)

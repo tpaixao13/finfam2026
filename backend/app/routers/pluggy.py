@@ -609,7 +609,7 @@ def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_site_or_bot
     _enabled_tenant(ctx)
     rows = {t.id: t for t in _my_tx(ctx, [i.id for i in body.items])}
     allowed = tenant_categories(ctx.uids)
-    done = known = 0
+    done = known = bills = 0
     # mais antigos primeiro: a parcela 6/12 cria a série e a 7/12 do mesmo lote é reconhecida
     items = [i for i in body.items if i.id in rows]
     for item in sorted(items, key=lambda i: (rows[i.id].date, rows[i.id].installment_number or 0)):
@@ -626,6 +626,8 @@ def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_site_or_bot
             raise HTTPException(status_code=422, detail=f'{tx.description}: {exc}')
         if tx.status == 'imported':
             done += 1
+        elif tx.status == 'ignored':
+            bills += 1  # pagamento de fatura: não vira despesa
         else:
             known += 1
     for owner in {t.user_id for t in rows.values()}:
@@ -634,6 +636,8 @@ def approve_transactions(body: ApproveIn, ctx: Ctx = Depends(get_ctx_site_or_bot
     msg = f'{done} despesa(s) lançada(s) no FinFam.' if done else 'Nada para lançar.'
     if known:
         msg += f' {known} já estava(m) no FinFam (outra parcela da mesma compra).'
+    if bills:
+        msg += f' {bills} pagamento(s) de fatura: não vira(m) despesa (as compras já estão no cartão).'
     return {'message': msg, 'imported': done, 'already': known}
 
 

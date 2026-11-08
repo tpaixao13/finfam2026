@@ -9,7 +9,7 @@ import calendar
 from datetime import datetime, date as _date, timedelta
 
 from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, Integer,
-                        Numeric, String, Text)
+                        Numeric, String, Text, func)
 from sqlalchemy.orm import relationship
 
 from app.core.types import utcnow
@@ -500,6 +500,13 @@ class RecurringGroup(Base):
 
 class Expense(Base):
     __tablename__ = 'expenses'
+
+    @classmethod
+    def by_purchase_date(cls, desc: bool = False) -> tuple:
+        """Ordem pela data REAL da compra. year/month é a competência (no crédito, o mês da fatura):
+        a fatura de novembro tem compras de outubro, e ordenar só pelo dia põe 01/11 antes de 31/10."""
+        cols = (func.coalesce(cls.purchase_year, cls.year), func.coalesce(cls.purchase_month, cls.month), cls.day)
+        return tuple(c.desc() for c in cols) + (cls.created_at.desc(),) if desc else cols + (cls.created_at,)
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False)

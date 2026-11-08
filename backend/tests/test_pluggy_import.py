@@ -797,7 +797,7 @@ def test_installment_cents_merge_and_refund(client, family, bank, txs, monkeypat
 
     def iso(d):
         return f'{d.isoformat()}T15:00:00Z'
-    d1 = TODAY - timedelta(days=70)
+    d1 = TODAY - timedelta(days=60)  # a 2ª parcela (d1 + 1 mês) precisa cair na releitura de 40 dias
     txs[cc] += [{'id': 't1', 'type': 'DEBIT', 'amount': 166.68, 'date': iso(d1), 'description': 'TELLERINA COMERCIO DE',
                  'creditCardMetadata': {'installmentNumber': 1, 'totalInstallments': 3}}]
     _post_item(family, months=6)
@@ -1371,4 +1371,26 @@ def test_open_finance_history_expires_for_everyone(client, family, other_family)
     pluggy_events.record(other_family.user['id'], 'webhook', 'novo de outra família', None)
     session.commit()
     assert [e.title for e in PluggyEvent.query.all()] == ['novo de outra família']
+    session.remove()
+
+
+def test_bill_payment_abbreviated_is_not_an_expense(client, family, bank, txs):  # noqa: F811
+    """"PGTO FAT CARTAO C6" (C6 abreviado) é pagamento de fatura: não vira despesa, nem aprovando à mão."""
+    from app.models import Expense
+    from app.services import open_finance as of_
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    for d in ('PGTO FAT CARTAO C608/11', 'PAG FATURA NUBANK', 'Pagamento da fatura Inter'):
+        assert of_._skip_reason(d, None).startswith('Pagamento de fatura'), d
+    assert of_._skip_reason('PAGTO FARMACIA SAO JOAO', None) is None   # "fa…" sem ser fatura
+    txs[acc].append({'id': 'pf', 'type': 'DEBIT', 'amount': -9394.5, 'date': day(1), 'description': 'PGTO FAT CARTAO C608/11'})
+    _post_item(family)
+    tx = BankTransaction.query.filter_by(pluggy_id='pf').one()
+    assert tx.status == 'ignored' and tx.reason.startswith('Pagamento')
+    # mesmo se tivesse ficado para revisar, aprovar não cria despesa
+    tx.status, tx.reason = 'pending', None
+    session.commit()
+    before = Expense.query.count()
+    r = family.post('/pluggy/transactions/approve', json={'items': [{'id': tx.id, 'category': 'Outros'}]})
+    assert r.status_code == 200 and r.json()['imported'] == 0 and 'pagamento(s) de fatura' in r.json()['message']
+    assert Expense.query.count() == before
     session.remove()

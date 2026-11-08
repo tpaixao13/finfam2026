@@ -815,3 +815,5 @@ a.insight:hover { background: #e8edf1; }
 .log-tx li > :last-child { grid-column: 3; grid-row: 1; text-align: right; }
 .log-in { color: var(--income); }
 @media (max-width: 600px) { .log-tx-desc { white-space: normal; overflow-wrap: anywhere; } }
+
+.tx-invoice { color: var(--card); white-space: nowrap; }

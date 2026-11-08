@@ -304,17 +304,17 @@ def get_invoice(card: CreditCard, month: int, year: int,
     if sc:
         credit_expenses = (credit_q
             .filter(Expense.payment_method == 'Cartão de Crédito')
-            .order_by(Expense.day, Expense.created_at).all())
+            .order_by(*Expense.by_purchase_date()).all())
     elif not sd:
         # Cartão sem flags (legado) — trata tudo como crédito
-        credit_expenses = credit_q.order_by(Expense.day, Expense.created_at).all()
+        credit_expenses = credit_q.order_by(*Expense.by_purchase_date()).all()
     else:
         credit_expenses = []
 
     # Despesas de débito (apenas cartão principal — débito é por cartão físico)
     debit_expenses = (debit_q
         .filter(Expense.payment_method == 'Cartão de Débito')
-        .order_by(Expense.day, Expense.created_at).all()) if sd else []
+        .order_by(*Expense.by_purchase_date()).all()) if sd else []
 
     expenses = credit_expenses  # retrocompatibilidade
 

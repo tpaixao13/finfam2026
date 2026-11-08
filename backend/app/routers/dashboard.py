@@ -55,7 +55,7 @@ def dashboard(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx))
                                     Expense.paid.isnot(True))
                .order_by(Expense.day, Expense.created_at).all())
     recent = (Expense.query.filter(Expense.user_id.in_(uids), Expense.year == year, Expense.month == month)
-              .order_by(Expense.day.desc(), Expense.created_at.desc()).limit(10).all())
+              .order_by(*Expense.by_purchase_date(desc=True)).limit(10).all())
     goals = (Goal.query.filter(Goal.user_id.in_(uids), Goal.active == True)  # noqa: E712
              .order_by(Goal.created_at).all())
 

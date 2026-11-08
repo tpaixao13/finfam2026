@@ -1,6 +1,6 @@
 // Lista de despesas reutilizada no painel, despesas, contas a pagar e fatura.
 import { api } from '../lib/api'
-import { dayMonth } from '../lib/format'
+import { MONTHS_SHORT, dayMonth } from '../lib/format'
 import { useAction, useSession } from '../lib/session'
 import type { Expense } from '../lib/types'
 import { CATEGORY_ICONS, Icon } from './Icon'
@@ -23,6 +23,9 @@ const STATUS: Record<Expense['status'], { tone: 'success' | 'warning' | 'danger'
   vencida: { tone: 'danger', label: 'Vencida' },
 }
 
+/** Compra de um mês que entrou na fatura de outro (no crédito, year/month é o mês da fatura). */
+const otherMonth = (e: Expense) => e.purchase_month !== e.month || e.purchase_year !== e.year
+
 export function ExpenseList({ items, onChange, showPerson = true, dateField = 'purchase_date', selectable,
   selected, onToggleSelect, compact }: Props) {
   const { openExpense, bumpData } = useSession()
@@ -44,6 +47,8 @@ export function ExpenseList({ items, onChange, showPerson = true, dateField = 'p
               {e.series && <span className="tx-series">{e.series.type === 'parcelado' ? e.series.label : `↻ ${e.series.label}`}</span>}
             </span>
             <span className="tx-meta">
+              {otherMonth(e) && <><span className="tx-invoice" title={`Compra de ${dayMonth(e.purchase_date)}: no cartão de crédito entra no mês da fatura`}>
+                fatura de {MONTHS_SHORT[e.month - 1].toLowerCase()}</span> · </>}
               {e.category} · {e.card_label ?? e.payment_method}{showPerson && e.user_name ? ` · ${e.user_name}` : ''}
             </span>
           </div>

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.12.2 — ordem pela data da compra, "fatura de nov" e pagamento de fatura abreviado (08/11/2026)
+
+- **Painel → Últimos lançamentos, Despesas, fatura do cartão e exportação:** ordenados pela data **real** da compra.
+  No crédito, a fatura de novembro tem compras de outubro; ordenar só pelo dia punha 31/10 antes de 04/11
+  (`Expense.by_purchase_date`).
+- **"fatura de nov"** aparece na lista quando a compra é de outro mês (no crédito ela entra no mês da fatura), para
+  ficar claro por que uma compra de outubro está em novembro.
+- **Pagamento de fatura abreviado** ("PGTO FAT CARTAO C6", "PAG FAT…") não era reconhecido e podia virar despesa
+  nova (contando a fatura duas vezes). Agora é ignorado e marca a fatura como paga; e aprovar um pagamento de fatura,
+  à mão ou no lançamento automático, nunca cria despesa.
+- Teste das parcelas do C6 deixou de depender do dia do mês.
+
 ## 2026.12.1 — revisão unix e de segurança das versões 2026.11.4 a 2026.12.0 (06/11/2026)
 
 - **Segurança:** sem falhas. Conferidos: o histórico só mostra bancos que a pessoa enxerga (outra família e banco

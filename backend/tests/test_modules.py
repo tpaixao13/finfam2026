@@ -307,3 +307,26 @@ def test_monthly_invoices_filter_by_bank_and_card(family):
     assert r['filtered'] and [i['total'] for i in r['invoices']] == [17.25] and r['total'] == 17.25
     r = family.get('/cards/invoices', params={'month': 11, 'year': 2026, 'card_id': c6['id']}).json()
     assert [i['total'] for i in r['invoices']] == [500]
+
+
+def test_dashboard_recent_orders_by_real_purchase_date(family):
+    """Fatura de novembro com compra de 31/10: a de 04/11 vem antes (antes vinha o dia 31 primeiro)."""
+    from app.models import Expense
+    uid = family.user['id']
+    for desc, day, pm in (('Compra 31/10', 31, 10), ('Compra 04/11', 4, 11), ('Compra 01/11', 1, 11)):
+        session.add(Expense(user_id=uid, description=desc, amount=10, category='Outros', payment_method='Cartão de Crédito',
+                            year=2026, month=11, day=day, purchase_month=pm, purchase_year=2026, paid=False))
+    session.commit()
+    recent = family.get('/dashboard?month=11&year=2026').json()['recent']
+    assert [e['description'] for e in recent] == ['Compra 04/11', 'Compra 01/11', 'Compra 31/10']
+    listed = family.get('/expenses', params={'month': 11, 'year': 2026}).json()
+    listed = listed.get('items', listed.get('expenses', listed)) if isinstance(listed, dict) else listed
+    assert [e['description'] for e in listed][:3] == ['Compra 04/11', 'Compra 01/11', 'Compra 31/10']
+    # a fatura do cartão: da compra mais antiga para a mais nova
+    card = family.post('/cards', json={'supports_credit': True, 'last_digits': '4594', 'bank': 'C6 Bank',
+                                       'due_day': 15, 'best_buy_day': 8}).json()['card']
+    Expense.query.filter_by(user_id=uid).update({'card_id': card['id']})
+    session.commit()
+    inv = family.get(f"/cards/{card['id']}/invoice", params={'month': 11, 'year': 2026}).json()
+    assert [e['description'] for e in inv['credit']['expenses']] == ['Compra 31/10', 'Compra 01/11', 'Compra 04/11']
+    session.remove()

@@ -136,8 +136,7 @@ def list_expenses(f: dict = Depends(_filters), page: int = Query(1, ge=1),
     q = _filtered_query(ctx, **f)
     total_amount = float(q.with_entities(func.sum(Expense.amount)).scalar() or 0)
     total = q.count()
-    rows = (q.order_by(Expense.year.desc(), Expense.month.desc(), Expense.day.desc(),
-                       Expense.created_at.desc())
+    rows = (q.order_by(Expense.year.desc(), Expense.month.desc(), *Expense.by_purchase_date(desc=True))
             .offset((page - 1) * per_page).limit(per_page).all())
     today = _date.today()
     return {'items': [expense_out(e, today) for e in rows], 'page': page, 'per_page': per_page,
@@ -190,7 +189,7 @@ def suggest_category(description: str = Query(min_length=3, max_length=200), ctx
 
 @router.get('/export', summary='Exporta as despesas filtradas (xlsx ou pdf)')
 def export(fmt: Literal['xlsx', 'pdf'] = 'xlsx', f: dict = Depends(_filters), ctx: Ctx = Depends(get_ctx)):
-    q = _filtered_query(ctx, **f).order_by(Expense.year, Expense.month, Expense.day, Expense.created_at)
+    q = _filtered_query(ctx, **f).order_by(Expense.year, Expense.month, *Expense.by_purchase_date())
     rows = expense_rows(q.all())
     suffix = f"{f['year']}_{f['month']:02d}"
     if fmt == 'pdf':
