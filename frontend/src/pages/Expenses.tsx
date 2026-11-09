@@ -131,13 +131,17 @@ interface Bills {
   totals: { overdue: number; today: number; upcoming: number }; total: number
 }
 
+const DAYS = [3, 7, 15, 30]
+
 export function BillsPage() {
   const { dataVersion } = useSession()
   const act = useAction()
   const [params, setParams] = useSearchParams()
   const view = params.get('ver') === 'calendario' ? 'calendario' : 'lista'
   const { month, year, setPeriod } = usePeriod()
-  const [days, setDays] = useState(7)
+  // ?dias=3 vem do alerta "vencem em breve" (Ver agenda): o período fica no endereço
+  const days = DAYS.includes(Number(params.get('dias'))) ? Number(params.get('dias')) : 7
+  const setDays = (d: number) => setParams({ dias: d === 7 ? null : String(d) })
   const bills = useApi(() => view === 'lista' ? api.get<Bills>('/expenses/bills', { days_ahead: days }) : Promise.resolve(null),
     [days, dataVersion, view])
   const b = bills.data
@@ -157,7 +161,7 @@ export function BillsPage() {
           <Segmented ariaLabel="Ver como" value={view} onChange={(v) => setParams({ ver: v === 'lista' ? null : v })}
             options={[{ value: 'lista', label: 'Lista' }, { value: 'calendario', label: 'Calendário' }]} />
           {view === 'lista' && <Select value={String(days)} onChange={(e) => setDays(Number(e.target.value))} aria-label="Período"
-            options={[{ value: '7', label: 'Próximos 7 dias' }, { value: '15', label: 'Próximos 15 dias' }, { value: '30', label: 'Próximos 30 dias' }]} />}
+            options={DAYS.map((d) => ({ value: String(d), label: `Próximos ${d} dias` }))} />}
         </>} />
       {view === 'calendario' ? <BillsCalendar month={month} year={year} onPeriod={setPeriod} />
         : bills.error ? <ErrorBox message={bills.error} onRetry={bills.reload} /> : !b ? <Spinner /> : (

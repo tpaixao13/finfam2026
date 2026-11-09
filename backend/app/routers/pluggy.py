@@ -21,7 +21,7 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, true
 
 from app.core import ratelimit
 from app.core.config import settings
@@ -566,20 +566,34 @@ def _my_tx(ctx: Ctx, ids: list[int]) -> list[BankTransaction]:
 
 @router.get('/transactions', summary='Lançamentos que chegaram do banco, por situação')
 def list_transactions(status: Literal['pending', 'duplicate', 'ignored', 'imported'] = 'pending',
+                      month: int | None = Query(None, ge=1, le=12), year: int | None = Query(None, ge=2000, le=2100),
                       ctx: Ctx = Depends(get_ctx_session)):
+    """Para revisar: tudo (é a fila do que falta). Lançados, Já no FinFam e Ignorados: com `month` e `year`,
+    só o histórico desse mês (pela data da compra no banco), e as contagens dessas abas são do mesmo mês;
+    sem eles, tudo (como antes)."""
     _enabled_tenant(ctx)
     of.sync_stale(ctx.user.id)  # traz o que o webhook avisou
     if of.reconcile_payments(ctx.user.id):
         db.session.commit()
+    in_month = _month_filter(month, year) if month and year else true()
     counts = {s: 0 for s in STATUSES}
     for st, n in (db.session.query(BankTransaction.status, func.count(BankTransaction.id))
-                  .filter(_seen_tx(ctx)).group_by(BankTransaction.status)):
+                  .filter(_seen_tx(ctx), or_(BankTransaction.status == 'pending', in_month))
+                  .group_by(BankTransaction.status)):
         counts[st] = n
-    rows = (BankTransaction.query.filter(_seen_tx(ctx), BankTransaction.status == status)
-            .order_by(BankTransaction.date.desc(), BankTransaction.id.desc()).limit(500).all())
+    q = BankTransaction.query.filter(_seen_tx(ctx), BankTransaction.status == status)
+    if status != 'pending':
+        q = q.filter(in_month)
+    rows = q.order_by(BankTransaction.date.desc(), BankTransaction.id.desc()).limit(500).all()
     pool = bill_payments.Pool.of(ctx.user.id) if status == 'pending' else None
     return {'counts': counts, 'categories': tenant_categories(ctx.uids),
             'items': [_tx_out(t, ctx, pool) for t in rows]}
+
+
+def _month_filter(month: int, year: int):
+    """Lançamentos do mês (data da compra no banco)."""
+    first = date(year, month, 1)
+    return and_(BankTransaction.date >= first, BankTransaction.date < date(year + month // 12, month % 12 + 1, 1))
 
 
 @router.get('/review/next', summary='Próximo lançamento do banco para revisar (um por vez, para o bot)')

@@ -1396,3 +1396,27 @@ def test_bill_payment_abbreviated_is_not_an_expense(client, family, bank, txs): 
     r = family.post('/pluggy/transactions/approve', json={'items': [{'id': tx.id, 'category': 'Outros'}]})
     assert r.json()['imported'] == 1 and Expense.query.count() == before + 1
     session.remove()
+
+
+def test_review_history_tabs_by_month_pending_shows_all(client, family, bank, txs):  # noqa: F811
+    """Para revisar: tudo. Lançados/Já no FinFam/Ignorados: só o mês pedido (pela data da compra)."""
+    from app.models import BankTransaction as BT
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    old = TODAY - timedelta(days=35)  # sempre outro mês (35 > 31)
+    txs[acc] += [{'id': 'm-new', 'type': 'DEBIT', 'amount': -10.0, 'date': day(0), 'description': 'PADARIA NOVA'},
+                 {'id': 'm-old', 'type': 'DEBIT', 'amount': -20.0, 'date': old.isoformat() + 'T12:00:00.000Z', 'description': 'PADARIA VELHA'},
+                 {'id': 'm-old2', 'type': 'DEBIT', 'amount': -30.0, 'date': old.isoformat() + 'T12:00:00.000Z', 'description': 'MERCADO VELHO'}]
+    _post_item(family, months=3)
+    pend = family.get('/pluggy/transactions').json()
+    assert {'PADARIA NOVA', 'PADARIA VELHA', 'MERCADO VELHO'} <= {t['description'] for t in pend['items']}
+    ids = {t.pluggy_id: t.id for t in BT.query.all()}
+    session.remove()
+    family.post('/pluggy/transactions/ignore', json={'ids': [ids['m-new'], ids['m-old']]})
+    now = family.get(f'/pluggy/transactions?status=ignored&month={TODAY.month}&year={TODAY.year}').json()
+    assert [t['description'] for t in now['items']] == ['PADARIA NOVA'] and now['counts']['ignored'] == 1
+    every = family.get('/pluggy/transactions?status=ignored').json()     # sem mês: tudo (bot, MCP…)
+    assert len(every['items']) == 2 and every['counts']['ignored'] == 2
+    then = family.get(f'/pluggy/transactions?status=ignored&month={old.month}&year={old.year}').json()
+    assert [t['description'] for t in then['items']] == ['PADARIA VELHA'] and then['counts']['ignored'] == 1
+    assert then['counts']['pending'] == now['counts']['pending'] >= 1   # a fila não depende do mês
+    assert family.get('/pluggy/transactions?status=ignored&month=13&year=2026').status_code == 422

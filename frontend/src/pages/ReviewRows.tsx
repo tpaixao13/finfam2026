@@ -1,7 +1,7 @@
 // Peças das telas de revisão (saídas e entradas): abas, barra de seleção, rascunhos e linhas de saída.
 import { useState, type ReactNode } from 'react'
 import { Button, Check, IconButton, Input, Money, Segmented, Select } from '../components/ui'
-import { brl, dayMonth } from '../lib/format'
+import { MONTHS, brl, dayMonth } from '../lib/format'
 
 export type Status = 'pending' | 'duplicate' | 'ignored' | 'imported'
 export interface BankTx {
@@ -42,13 +42,42 @@ export function ReviewBar({ picked, count, total, onToggleAll, children }:
   )
 }
 
+/** Valor com sinal: estorno diminui o total. */
+export const signedAmount = (t: { amount: number; refund?: boolean }) => (t.refund ? -t.amount : t.amount)
+export const sumSigned = (items: { amount: number; refund?: boolean }[]) => items.reduce((s, t) => s + signedAmount(t), 0)
+
+/** Itens agrupados pelo mês da data (já vêm do mais novo para o mais antigo): [["2026-11", [...]], …]. */
+export function byMonth<T extends { date: string }>(items: T[]): [string, T[]][] {
+  const out = new Map<string, T[]>()
+  for (const t of items) {
+    const key = t.date.slice(0, 7)
+    out.set(key, [...(out.get(key) ?? []), t])
+  }
+  return [...out]
+}
+
+const monthName = (key: string) => `${MONTHS[Number(key.slice(5, 7)) - 1]} de ${key.slice(0, 4)}`
+
+/** Divisória de mês na fila "para revisar": marca/desmarca o mês inteiro e mostra quantos e quanto. */
+export function MonthDivider({ month, count, total, picked, onToggle }:
+  { month: string; count: number; total: number; picked: number; onToggle: (v: boolean) => void }) {
+  return (
+    <li className="review-month">
+      <Check checked={picked === count} label={`Marcar ${monthName(month).toLowerCase()}`} onChange={onToggle} />
+      <span className="muted small">{count} · {brl(total)}</span>
+    </li>
+  )
+}
+
 /** Rascunhos por id (um por linha pendente): editar uma linha e marcar/desmarcar todas. */
 export function useDrafts<D extends { selected: boolean }>() {
   const [drafts, setDrafts] = useState<Record<number, D>>({})
   const edit = (id: number, d: Partial<D>) => setDrafts((s) => ({ ...s, [id]: { ...s[id], ...d } }))
   const selectAll = (selected: boolean) =>
     setDrafts((s) => Object.fromEntries(Object.entries(s).map(([k, d]) => [k, { ...d, selected }])))
-  return { drafts, setDrafts, edit, selectAll }
+  const selectSome = (ids: number[], selected: boolean) =>
+    setDrafts((s) => ({ ...s, ...Object.fromEntries(ids.filter((id) => s[id]).map((id) => [id, { ...s[id], selected }])) }))
+  return { drafts, setDrafts, edit, selectAll, selectSome }
 }
 
 export interface Draft { selected: boolean; category: string; description: string; payment_method: string }
@@ -140,7 +169,7 @@ export function PendingRow({ tx, draft, categories, onChange, onPayBill }:
             onChange={(e) => onChange({ payment_method: e.target.value })} />
         )}
       </div>
-      <Money value={tx.refund ? -tx.amount : tx.amount} className="review-amount" />
+      <Money value={signedAmount(tx)} className="review-amount" />
     </li>
   )
 }
@@ -156,7 +185,7 @@ export function DoneRow({ tx, onRestore }: { tx: BankTx; onRestore?: () => void 
         )}
         {tx.status === 'ignored' && tx.reason && <span className="small">{tx.reason}</span>}
       </div>
-      <Money value={tx.refund ? -tx.amount : tx.amount} className="review-amount" />
+      <Money value={signedAmount(tx)} className="review-amount" />
       {onRestore && <Button variant="ghost" aria-label={`Revisar ${tx.description} de novo`} onClick={onRestore}>Revisar</Button>}
     </li>
   )

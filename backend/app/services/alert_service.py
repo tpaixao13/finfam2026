@@ -130,8 +130,8 @@ def generate_alerts(uids: list, month: int, year: int,
             'message': (f'{n} despesa{"s" if n > 1 else ""} com vencimento '
                         f'nos próximos {_TH["due_soon_days"]} dias, '
                         f'total de {_brl(total_soon)}.'),
-            'action_label': 'Ver agenda',
-            'action_url': _url('/expenses', month=month, year=year),
+            'action_label': 'Ver contas',
+            'action_url': _url('/bills', dias=_TH['due_soon_days']),  # Contas a pagar já nos próximos N dias
         })
 
     # ── 3. Limite dos cartões ────────────────────────────────────────

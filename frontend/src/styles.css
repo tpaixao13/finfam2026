@@ -521,6 +521,12 @@ a.insight:hover { background: #e8edf1; }
 .review-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: .85rem 1.1rem; border-bottom: 1px solid var(--line); }
 .review-bar .check { align-items: center; }
 .review-list { list-style: none; margin: 0; padding: 0; }
+.review-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1rem; }
+/* divisória de mês na fila: fica presa no topo enquanto a lista do mês rola */
+.review-month { position: sticky; top: 58px; z-index: 2; display: flex; align-items: center;
+  justify-content: space-between; gap: .75rem; padding: .5rem 1.1rem; background: var(--bg);
+  border-bottom: 1px solid var(--line); font-weight: 600; }
+.review-month .check { align-items: center; }
 .review-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 15rem) auto; align-items: center; gap: .5rem .9rem; padding: .8rem 1.1rem; border-top: 1px solid var(--line); }
 .review-row:first-child { border-top: 0; }
 .review-row.on { background: color-mix(in srgb, var(--primary) 5%, transparent); }

@@ -330,3 +330,17 @@ def test_dashboard_recent_orders_by_real_purchase_date(family):
     inv = family.get(f"/cards/{card['id']}/invoice", params={'month': 11, 'year': 2026}).json()
     assert [e['description'] for e in inv['credit']['expenses']] == ['Compra 31/10', 'Compra 01/11', 'Compra 04/11']
     session.remove()
+
+
+
+def test_due_soon_alert_opens_bills_for_the_next_days(family):
+    """"Vencem em breve" → Contas a pagar já nos próximos 3 dias (antes abria Despesas do mês inteiro)."""
+    from datetime import date
+    from app.services.alert_service import generate_alerts
+    today = date.today()
+    r = family.post('/expenses', json={'description': 'Luz', 'amount': '100', 'category': 'Moradia', 'payment_method': 'PIX',
+                                       'paid': False, 'date': today.isoformat()})
+    assert r.status_code in (200, 201), r.text
+    alerts = generate_alerts([family.user['id']], today.month, today.year, family.tenant['id'])
+    soon = next(a for a in alerts if 'vence' in a['title'])
+    assert soon['action_url'] == '/bills?dias=3' and soon['action_label'] == 'Ver contas'

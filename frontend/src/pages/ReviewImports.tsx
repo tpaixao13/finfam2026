@@ -1,30 +1,31 @@
 // Open Finance — etapa 3: o que chegou do banco espera aqui. Só vira despesa o que a pessoa aprovar.
 import { useEffect, useMemo, useState } from 'react'
-import { Badge, Button, Empty, ErrorBox, PageHeader, Panel, Spinner } from '../components/ui'
+import { Badge, Button, Empty, ErrorBox, MonthNav, PageHeader, Panel, Spinner } from '../components/ui'
 import { api } from '../lib/api'
-import { useApi } from '../lib/hooks'
+import { MONTHS } from '../lib/format'
+import { useApi, usePeriod } from '../lib/hooks'
 import { Link } from '../lib/router'
 import { useAction } from '../lib/session'
-import { DoneRow, PendingRow, ReviewBar, StatusTabs, canRestore, useDrafts, type Draft, type Status, type TxList } from './ReviewRows'
+import { DoneRow, MonthDivider, PendingRow, ReviewBar, StatusTabs, byMonth, canRestore, sumSigned, useDrafts, type Draft, type Status, type TxList } from './ReviewRows'
 
 const TABS: Record<Status, string> = {
   pending: 'Para revisar', duplicate: 'Já no FinFam', ignored: 'Ignorados', imported: 'Lançados',
 }
-const EMPTY: Record<Status, string> = {
-  pending: 'Nada para revisar agora',
-  duplicate: 'Nenhum lançamento repetido',
-  ignored: 'Nenhum lançamento ignorado',
-  imported: 'Nenhum lançamento aprovado ainda',
+// "Para revisar" é a fila do que falta: mostra tudo. As outras são histórico: um mês por vez.
+const EMPTY: Record<Exclude<Status, 'pending'>, string> = {
+  duplicate: 'Nenhum lançamento repetido', ignored: 'Nenhum lançamento ignorado', imported: 'Nada lançado',
 }
 
 export function ReviewImportsPage() {
   const [tab, setTab] = useState<Status>('pending')
-  const data = useApi(() => api.get<TxList>(`/pluggy/transactions?status=${tab}`).then((r) => ({ ...r, tab })), [tab])
+  const { month, year, setPeriod } = usePeriod()
+  const query = tab === 'pending' ? `status=${tab}` : `status=${tab}&month=${month}&year=${year}`
+  const data = useApi(() => api.get<TxList>(`/pluggy/transactions?${query}`).then((r) => ({ ...r, query })), [query])
   const act = useAction()
-  const { drafts, setDrafts, edit, selectAll } = useDrafts<Draft>()
+  const { drafts, setDrafts, edit, selectAll, selectSome } = useDrafts<Draft>()
   const [busy, setBusy] = useState(false)
   // ao trocar de aba, a lista anterior não fica na tela enquanto a nova carrega
-  const list = data.data?.tab === tab ? data.data : null
+  const list = data.data?.query === query ? data.data : null
 
   useEffect(() => {
     if (!list || tab !== 'pending') return
@@ -70,7 +71,7 @@ export function ReviewImportsPage() {
   })
   const restore = (id: number) => run(() => api.post('/pluggy/transactions/restore', { ids: [id] }))
   const payBill = (id: number, expenseId: number) => run(() => api.post(`/pluggy/transactions/${id}/pay-bill`, { expense_id: expenseId }))
-  const total = picked.reduce((s, t) => s + (t.refund ? -t.amount : t.amount), 0)
+  const total = sumSigned(picked)
 
   return (
     <div className="page">
@@ -80,11 +81,15 @@ export function ReviewImportsPage() {
           <Link to="/bank/incomes" className="btn btn-ghost">Entradas</Link>
           <Link to="/bank" className="btn btn-ghost">Contas conectadas</Link>
         </div>} />
-      <StatusTabs tabs={TABS} value={tab} counts={list?.counts} onChange={setTab} />
+      <div className="review-toolbar">
+        <StatusTabs tabs={TABS} value={tab} counts={list?.counts} onChange={setTab} />
+        {tab !== 'pending' && <MonthNav month={month} year={year} onChange={setPeriod} />}
+      </div>
       {data.error ? <ErrorBox message={data.error} onRetry={data.reload} /> : !list ? <Spinner /> : !list.items.length ? (
-        <Panel><Empty icon="check-all" title={EMPTY[tab]}>
-          {tab === 'pending' && 'Quando o banco mandar compras novas, elas aparecem aqui.'}
-        </Empty></Panel>
+        <Panel>{tab === 'pending'
+          ? <Empty icon="check-all" title="Nada para revisar agora">Quando o banco mandar compras novas, elas aparecem aqui.</Empty>
+          : <Empty icon="calendar-range" title={`${EMPTY[tab]} em ${MONTHS[month - 1].toLowerCase()}`}>Use as setas para ver outro mês.</Empty>}
+        </Panel>
       ) : tab === 'pending' ? (
         <Panel flush>
           <ReviewBar picked={picked.length} count={list.items.length} total={total} onToggleAll={selectAll}>
@@ -92,10 +97,15 @@ export function ReviewImportsPage() {
             <Button icon="check2" busy={busy} disabled={!picked.length} onClick={approve}>{progress ? `Lançando ${progress}…` : `Lançar ${picked.length || ''}`}</Button>
           </ReviewBar>
           <ul className="review-list">
-            {list.items.map((t) => drafts[t.id] && (
-              <PendingRow key={t.id} tx={t} draft={drafts[t.id]} categories={categories} onChange={(d) => edit(t.id, d)}
-                onPayBill={(expenseId) => payBill(t.id, expenseId)} />
-            ))}
+            {byMonth(list.items).map(([key, items]) => [
+              <MonthDivider key={key} month={key} count={items.length} picked={items.filter((t) => drafts[t.id]?.selected).length}
+                total={sumSigned(items)}
+                onToggle={(v) => selectSome(items.map((t) => t.id), v)} />,
+              ...items.map((t) => drafts[t.id] && (
+                <PendingRow key={t.id} tx={t} draft={drafts[t.id]} categories={categories} onChange={(d) => edit(t.id, d)}
+                  onPayBill={(expenseId) => payBill(t.id, expenseId)} />
+              )),
+            ])}
           </ul>
         </Panel>
       ) : (

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.13.0 — Revisar importados por mês; "Ver contas" do alerta já filtrado (09/11/2026)
+
+- **Revisar importados:**
+  - **Para revisar** continua com tudo (é a fila do que falta: nada antigo some), agora com uma **divisória por mês**
+    ("Novembro de 2026 · 2 · R$ 42,40") que fica presa no topo ao rolar e marca/desmarca o mês inteiro.
+  - **Lançados, Já no FinFam e Ignorados** mostram **um mês por vez**, com o mesmo seletor ◀ mês ▶ de Cartões e
+    Alertas (fica no endereço, `?month=&year=`). As contagens dessas abas são do mês escolhido.
+  - API: `GET /pluggy/transactions` aceita `month` e `year` (pela data da compra no banco); sem eles, devolve tudo
+    como antes (bot e MCP não mudam).
+- **Alertas → "vencem em breve":** o botão (agora **Ver contas**) abre **Contas a pagar** já em "Próximos 3 dias"
+  (`/bills?dias=3`). Antes abria Despesas do mês inteiro. O período de Contas a pagar fica no endereço e ganhou a
+  opção 3 dias.
+- Revisão visual-unix: a regra "estorno abate" do total em um lugar só (`sumSigned`), rótulo acessível na divisória.
+
 ## 2026.12.3 — revisão unix e de segurança da 2026.12.1 e 2026.12.2 (08/11/2026)
 
 - **Segurança:** sem falhas. Conferidos: a nova ordenação mantém o filtro por família; o pagamento de fatura só marca
