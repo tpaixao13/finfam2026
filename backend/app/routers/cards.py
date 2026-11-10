@@ -10,6 +10,7 @@ from app.core.db import db, get_or_404
 from app.core.deps import Ctx, Period, get_ctx, get_period
 from app.models import BankAccount, CreditCard, Expense
 from app.services import card_service as cs
+from app.services.card_cycles import bill_for_purchase, cycle_of_bill
 from app.services.finance import CREDIT, MONTH_NAMES_FULL
 from app.services.serializers import card_out, expense_out
 
@@ -62,6 +63,12 @@ def list_cards(period: Period = Depends(get_period), ctx: Ctx = Depends(get_ctx)
         'cards': [{**card_out(c), 'usage': cs.card_usage(c, period.month, period.year)} for c in cards],
         'history': cs.history_chart(cards, period.month, period.year) if cards else None,
     }
+
+
+def _cycle_out(card, month: int, year: int) -> dict | None:
+    """Fechamento e vencimento reais desta fatura, quando o banco informou."""
+    c = cycle_of_bill(card, year, month)
+    return {'close_date': c.close_date.isoformat(), 'due_date': c.due_date.isoformat()} if c else None
 
 
 @router.get('/invoices', summary='Faturas de crédito do mês: uma por conta/cartão e o total (sem duplicar)')
@@ -152,6 +159,7 @@ def invoice(card_id: int, period: Period = Depends(get_period), ctx: Ctx = Depen
         'card': card_out(card), 'month': period.month, 'year': period.year,
         'month_name': MONTH_NAMES_FULL[period.month - 1], 'gradient': gradient, 'text_color': text_color,
         'status': inv['status'],
+        'cycle': _cycle_out(card, period.month, period.year),
         'credit': {'expenses': out(inv['expenses']), 'total': round(inv['total'], 2),
                    'paid_total': round(inv['paid_total'], 2), 'pending_total': round(inv['pending_total'], 2),
                    'by_category': inv['chart'], 'future_installments': round(inv['future_total'], 2)},
@@ -189,8 +197,8 @@ def invoice_preview(card_id: int, day: int = Query(ge=1, le=31), month: int = Qu
         purchase = _date(year, month, day)
     except ValueError:
         raise HTTPException(status_code=422, detail='Data inválida.')
-    inv_year, inv_month = cs.get_invoice_reference(purchase, card.best_buy_day)
-    is_open = purchase.day <= card.best_buy_day
+    inv_year, inv_month = bill_for_purchase(card, purchase)  # fechamento real do banco, se informou
+    is_open = (inv_year, inv_month) == (year, month)
     limit = card.effective_limit
     usage = None
     if limit:

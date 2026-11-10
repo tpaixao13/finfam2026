@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026.14.0 — fechamento real do cartão a cada mês (10/11/2026)
+
+- **O banco fecha a fatura num dia diferente a cada mês** (fim de semana, feriado, regra do banco). O FinFam guardava
+  só o dia do último fechamento e usava esse dia fixo para todos os meses. Agora guarda a **data real de fechamento e
+  de vencimento de cada fatura** que o banco informa (tabela `bank_cycles`, `services/card_cycles.py`) e usa a data
+  certa de cada mês para:
+  - as compras que vêm do banco sem o código da fatura (e o realinhamento das já lançadas);
+  - as compras lançadas no **site e no bot** num cartão ligado ao banco;
+  - a situação da fatura (aberta/fechada) e o cabeçalho da fatura: "fechou 07/11 · vence 15/11".
+- Meses que o banco ainda não informou seguem o **melhor dia de compra** do cartão (o último dia que entra na fatura).
+  Em Cartões → Editar, o campo explica isso quando o banco informa o fechamento.
+- Antes do primeiro fechamento conhecido, só usa a data do banco quando é certo (até 26 dias antes dele).
+
 ## 2026.13.1 — fatura paga em parte diz quanto falta (10/11/2026)
 
 - **Cartões:** quando a fatura está paga em parte, o selo dizia "Fatura fechada" (em amarelo), como se nada tivesse

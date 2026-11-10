@@ -1420,3 +1420,42 @@ def test_review_history_tabs_by_month_pending_shows_all(client, family, bank, tx
     assert [t['description'] for t in then['items']] == ['PADARIA VELHA'] and then['counts']['ignored'] == 1
     assert then['counts']['pending'] == now['counts']['pending'] >= 1   # a fila não depende do mês
     assert family.get('/pluggy/transactions?status=ignored&month=13&year=2026').status_code == 422
+
+
+def test_card_closing_changes_each_month(client, family, bank, txs):  # noqa: F811
+    """O banco fecha num dia diferente a cada mês: vale a data real que ele informou (para compras do banco
+    e para o que a pessoa lança no site/bot); mês que o banco não informou segue o melhor dia do cartão."""
+    from datetime import date as d
+    from app.models import BankAccount, BankCycle, CreditCard, Expense
+    from app.services import card_cycles
+    acc, cc, _ = _connect(client, family, bank, txs)
+    _post_item(family)
+    card = family.post('/cards', json={'supports_credit': True, 'last_digits': '4594', 'bank': 'C6 Bank',
+                                       'due_day': 15, 'best_buy_day': 7}).json()['card']
+    ba = BankAccount.query.filter_by(type='CREDIT').first()
+    ba.card_id = card['id']
+    # outubro fechou dia 9 (vence 17/10), novembro fechou dia 7 (vence 15/11)
+    card_cycles.remember(ba, d(2026, 10, 9), d(2026, 10, 17))
+    card_cycles.remember(ba, d(2026, 11, 7), d(2026, 11, 15))
+    card_cycles.remember(ba, d(2026, 11, 7), d(2026, 11, 15))   # de novo: não duplica
+    card_cycles.remember(ba, d(2026, 11, 7), d(2027, 3, 1))     # vencimento sem sentido: ignora
+    session.commit()
+    assert BankCycle.query.count() == 2
+    c = session.get(CreditCard, card['id'])
+    assert card_cycles.bill_for_purchase(c, d(2026, 10, 8)) == (2026, 10)   # antes do fechamento de 09/10
+    assert card_cycles.bill_for_purchase(c, d(2026, 10, 10)) == (2026, 11)  # pelo dia fixo (7) iria para nov também
+    assert card_cycles.bill_for_purchase(c, d(2026, 11, 7)) == (2026, 11)
+    assert card_cycles.bill_for_purchase(c, d(2026, 11, 8)) == (2026, 12)   # depois do último conhecido: dia fixo
+    assert card_cycles.bill_for_purchase(c, d(2026, 8, 6)) == (2026, 8)     # antes de tudo que o banco informou:
+    assert card_cycles.bill_for_purchase(c, d(2026, 9, 8)) == (2026, 10)    # dia fixo (8 > 7 → outubro)
+    assert card_cycles.bill_for_purchase(c, d(2026, 9, 14)) == (2026, 10)   # 25 dias antes de 09/10: certeza
+    session.remove()
+    # lançar pelo site no dia 08/10 (o dia fixo 7 mandaria para novembro; o banco fechou dia 9 → outubro)
+    r = family.post('/expenses', json={'description': 'Padaria', 'amount': '10', 'category': 'Alimentação',
+                                       'payment_method': 'Cartão de Crédito', 'card_id': card['id'], 'date': '2026-10-08'})
+    assert r.status_code in (200, 201), r.text
+    e = Expense.query.filter_by(description='Padaria').one()
+    assert (e.year, e.month) == (2026, 10)
+    inv = family.get(f"/cards/{card['id']}/invoice", params={'month': 11, 'year': 2026}).json()
+    assert inv['cycle'] == {'close_date': '2026-11-07', 'due_date': '2026-11-15'}
+    session.remove()

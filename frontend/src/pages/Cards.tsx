@@ -5,7 +5,7 @@ import { Badge, Button, Check, ConfirmButton, Empty, ErrorBox, Field, IconButton
   PageHeader, Panel, Progress, Segmented, Select, Spinner } from '../components/ui'
 import { api } from '../lib/api'
 import { InvoiceCheck } from './open-finance/InvoiceCheck'
-import { brl, decimalBR, parseMoney } from '../lib/format'
+import { brl, dayMonth, decimalBR, parseMoney } from '../lib/format'
 import { useApi, useFormState, usePeriod } from '../lib/hooks'
 import { Link, navigate } from '../lib/router'
 import { useAction, useSession } from '../lib/session'
@@ -91,7 +91,9 @@ function CardForm({ open, editing, onClose, onSaved }: { open: boolean; editing:
             options={(me?.members ?? []).map((u) => ({ value: String(u.id), label: u.name }))} />
         </Field>
         {hasCredit && <>
-          <Field label="Melhor dia de compra" hint="Compras depois deste dia vão para a próxima fatura"><Input type="number" min={1} max={31} value={f.best_buy_day} onChange={(e) => set('best_buy_day', e.target.value)} /></Field>
+          <Field label="Melhor dia de compra" hint={editing?.closing_from_bank
+            ? 'O banco informa o fechamento de cada mês e ele vale primeiro. Este dia é usado só nos meses que o banco ainda não informou.'
+            : 'Compras depois deste dia vão para a próxima fatura'}><Input type="number" min={1} max={31} value={f.best_buy_day} onChange={(e) => set('best_buy_day', e.target.value)} /></Field>
           <Field label="Dia de vencimento"><Input type="number" min={1} max={31} value={f.due_day} onChange={(e) => set('due_day', e.target.value)} /></Field>
           <Field label="Limite (R$)" hint={editing?.limit_from_bank ? 'Vem do banco (Contas conectadas) e se atualiza sozinho' : 'Cartões do mesmo banco compartilham o limite'}>
             <Input inputMode="decimal" value={f.credit_limit} onChange={(e) => set('credit_limit', e.target.value)} readOnly={Boolean(editing?.limit_from_bank)} />
@@ -194,6 +196,7 @@ export function CardsPage() {
 
 interface InvoiceData {
   card: Card; month: number; year: number; month_name: string; gradient: string; text_color: string; status: string
+  cycle: { close_date: string; due_date: string } | null
   credit: { expenses: Expense[]; total: number; paid_total: number; pending_total: number; future_installments: number
     by_category: { labels: string[]; data: number[]; colors: string[] } | null }
   debit: { expenses: Expense[]; total: number; by_category: { labels: string[]; data: number[]; colors: string[] } | null }
@@ -217,7 +220,9 @@ export function InvoicePage({ id }: { id: string }) {
         actions={<Link to={`/cards?month=${month}&year=${year}`} className="btn btn-ghost">Voltar aos cartões</Link>} />
       {hasCredit && (
         <div className="invoice-head" style={{ background: d.gradient, color: d.text_color }}>
-          <div><span>Fatura de {d.month_name}</span><strong>{brl(d.credit.total)}</strong><small>{invoiceLabel(d.status, paymentOf(d.credit))} · vence dia {d.card.due_day}</small></div>
+          <div><span>Fatura de {d.month_name}</span><strong>{brl(d.credit.total)}</strong><small>{paymentOf(d.credit)?.status === 'pago' ? 'Fatura paga' : STATUS_LABEL[d.status]} · {d.cycle
+            ? `${d.status === 'fechada' ? 'fechou' : 'fecha'} ${dayMonth(d.cycle.close_date)} · vence ${dayMonth(d.cycle.due_date)}`
+            : `vence dia ${d.card.due_day}`}</small></div>
           <div><span>Pago</span><strong>{brl(d.credit.paid_total)}</strong></div>
           <div><span>Falta pagar</span><strong>{brl(d.credit.pending_total)}</strong></div>
           <div><span>Parcelas futuras</span><strong>{brl(d.credit.future_installments)}</strong></div>

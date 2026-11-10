@@ -3,7 +3,7 @@ card_service.py — Lógica de negócio para cartões de crédito e faturas.
 """
 
 import calendar as _calendar
-from datetime import datetime, date as _date
+from datetime import datetime, date as _date, timedelta
 from sqlalchemy import func, or_, and_
 from app.core.types import utcnow
 from app.core.db import db
@@ -92,7 +92,15 @@ def invoice_status(card: CreditCard, month: int, year: int) -> str:
     - aberta:  mês atual antes do best_buy_day
     - fechada: mês atual após best_buy_day, ou meses passados
     - futura:  meses futuros
+    Com o fechamento real do banco (card_cycles), vale a data dele.
     """
+    from app.services.card_cycles import cycle_of_bill
+    cycle = cycle_of_bill(card, year, month)
+    if cycle is not None:  # o banco informou o fechamento real desta fatura
+        day = datetime.now().date()
+        if day > cycle.close_date:
+            return 'fechada'
+        return 'aberta' if cycle.close_date - day < timedelta(days=31) else 'futura'
     now = datetime.now()
     cur = (year, month)
     today = (now.year, now.month)

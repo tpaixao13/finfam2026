@@ -1,6 +1,7 @@
 """Regras de negócio de despesas: lançamento (à vista, parcelado, recorrente),
 edição, pagamento e "contas a pagar". Sem dependência de HTTP/formulários."""
 from dataclasses import dataclass
+from calendar import monthrange
 from datetime import date as _date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -57,7 +58,9 @@ def resolve_card(uids: list, payment: str, card_id: int | None,
             if card_id:
                 raise ExpenseError('Cartão não encontrado.')
             return None, month, year
-        bm, by = month_offset(month, year, 1 if day > card.best_buy_day else 0)
+        from app.services.card_cycles import bill_for_purchase
+        last = monthrange(year, month)[1]
+        by, bm = bill_for_purchase(card, _date(year, month, min(day, last)))  # fechamento real, se o banco informou
         return card, bm, by
 
     if payment in (DEBIT, 'VR', 'VA'):

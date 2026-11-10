@@ -103,6 +103,12 @@ def limit_from_bank(c: CreditCard) -> bool:
                                     BankAccount.credit_limit.isnot(None)).first() is not None
 
 
+def closing_from_bank(c: CreditCard) -> bool:
+    """O banco informa o fechamento real de cada fatura deste cartão (card_cycles)."""
+    from app.services.card_cycles import card_cycles
+    return bool(c.supports_credit or c.card_type == 'credit') and bool(card_cycles(c))
+
+
 def card_out(c: CreditCard) -> dict:
     return {
         'id': c.id, 'user_id': c.user_id, 'owner_name': c.owner.name if c.owner else None,
@@ -111,6 +117,7 @@ def card_out(c: CreditCard) -> dict:
         'credit_limit': money(c.credit_limit) if c.credit_limit else None,
         'effective_limit': c.effective_limit,
         'limit_from_bank': limit_from_bank(c),
+        'closing_from_bank': closing_from_bank(c),
         'card_type': c.card_type, 'type_label': c.type_label,
         'supports_credit': bool(c.supports_credit), 'supports_debit': bool(c.supports_debit),
         'is_virtual': bool(c.is_virtual), 'is_additional': bool(c.is_additional),

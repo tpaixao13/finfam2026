@@ -9,7 +9,7 @@ import calendar
 from datetime import datetime, date as _date, timedelta
 
 from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, Integer,
-                        Numeric, String, Text, func)
+                        Numeric, String, Text, UniqueConstraint, func)
 from sqlalchemy.orm import relationship
 
 from app.core.types import utcnow
@@ -295,6 +295,7 @@ class BankAccount(Base):
 
     transactions = relationship('BankTransaction', backref='account', lazy='dynamic', cascade='all, delete-orphan')
     bills = relationship('BankBill', backref='account', lazy='dynamic', cascade='all, delete-orphan')
+    cycles = relationship('BankCycle', backref='account', lazy='dynamic', cascade='all, delete-orphan')
     incomes = relationship('BankIncome', backref='account', lazy='dynamic', cascade='all, delete-orphan')
 
 
@@ -320,6 +321,18 @@ class BankInvestment(Base):
     due_date = Column(Date, nullable=True)
     status = Column(String(16), nullable=True)            # ACTIVE | PENDING | TOTAL_WITHDRAWAL
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class BankCycle(Base):
+    """Fechamento e vencimento REAIS de uma fatura do cartão, como o banco informou (o dia de fechamento
+    muda de mês para mês: fim de semana, feriado, regra do banco). Um por fatura (vencimento)."""
+    __tablename__ = 'bank_cycles'
+    __table_args__ = (UniqueConstraint('account_id', 'due_date', name='uq_bank_cycle_due'),)
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey('bank_accounts.id'), nullable=False, index=True)
+    close_date = Column(Date, nullable=False)
+    due_date = Column(Date, nullable=False)
 
 
 class BankBill(Base):

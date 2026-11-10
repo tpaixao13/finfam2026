@@ -44,7 +44,7 @@ export interface Goal {
 export interface Card {
   id: number; user_id: number; owner_name: string | null; label: string; nickname: string | null
   last_digits: string; bank: string | null; due_day: number; best_buy_day: number
-  credit_limit: number | null; effective_limit: number | null; limit_from_bank?: boolean; card_type: string; type_label: string
+  credit_limit: number | null; effective_limit: number | null; limit_from_bank?: boolean; closing_from_bank?: boolean; card_type: string; type_label: string
   supports_credit: boolean; supports_debit: boolean; is_virtual: boolean; is_additional: boolean
   monthly_amount: number | null; renewal_day: number | null; account_id: number | null; account_label: string | null
 }

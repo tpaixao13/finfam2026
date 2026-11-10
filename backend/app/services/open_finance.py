@@ -18,6 +18,7 @@ from app.core.types import utcnow
 from app.models import BankAccount, BankBill, BankConnection, BankIncome, BankInvestment, BankTransaction, CreditCard, Expense, PluggyConfig, User
 from app.services import bank_incomes
 from app.services import bill_payments
+from app.services import card_cycles
 from app.services import pluggy_events
 from app.services import bank_categories
 from app.services import pluggy as pg
@@ -238,8 +239,8 @@ def infer_close_day(acc: BankAccount, raws: list[dict]) -> int | None:
 
 
 def tx_bill(acc: BankAccount, tx: BankTransaction) -> tuple[int, int] | None:
-    """Fatura (ano, mês) da compra do cartão: a que o banco diz (billId); senão pelos dias de
-    fechamento/vencimento; senão pela lista de faturas (a 1ª que vence 7+ dias depois da compra,
+    """Fatura (ano, mês) da compra do cartão: a que o banco diz (billId); senão pelo fechamento real
+    daquele mês (card_cycles); senão pelos dias de fechamento/vencimento; senão pela lista de faturas (a 1ª que vence 7+ dias depois da compra,
     ou a próxima depois da última conhecida). None quando o banco não dá pista nenhuma."""
     if acc.type != 'CREDIT':
         return None
@@ -247,6 +248,10 @@ def tx_bill(acc: BankAccount, tx: BankTransaction) -> tuple[int, int] | None:
         bill = BankBill.query.filter_by(pluggy_id=tx.bill_ref, account_id=acc.id).first()
         if bill is not None:
             return bill.due_date.year, bill.due_date.month
+    with db.session.no_autoflush:  # na leitura, a compra ainda pode ser descartada (velha demais): não grava antes
+        known = card_cycles.bill_of_day(acc.cycles.all(), tx.date)  # fechamento real daquele mês
+    if known:
+        return known
     if acc.close_day and acc.due_day:
         return bill_of(tx.date, acc.close_day, acc.due_day)
     bills = acc.bills.order_by(BankBill.due_date).all()
@@ -344,6 +349,7 @@ def sync_accounts(conn: BankConnection, client: pg.PluggyClient) -> None:
         close, due = local_date(credit.get('balanceCloseDate')), local_date(credit.get('balanceDueDate'))
         acc.close_day, acc.due_day = (close.day if close else None), (due.day if due else None)
         apply_close_day(acc, 'bank' if close else None)
+        card_cycles.remember(acc, close, due)  # a data real deste mês (o dia muda de mês para mês)
         _auto_card(conn, acc)
         apply_card_limit(acc)
     for acc in conn.accounts.all():
