@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.13.1 — fatura paga em parte diz quanto falta (10/11/2026)
+
+- **Cartões:** quando a fatura está paga em parte, o selo dizia "Fatura fechada" (em amarelo), como se nada tivesse
+  sido pago. Agora diz **"Falta pagar R$ X"**. Paga por inteiro continua "Fatura paga"; sem nada pago, a situação do
+  ciclo (aberta, fechada, futura). O cabeçalho da tela da fatura usa a mesma regra.
+
 ## 2026.13.0 — Revisar importados por mês; "Ver contas" do alerta já filtrado (09/11/2026)
 
 - **Revisar importados:**

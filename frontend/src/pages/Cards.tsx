@@ -23,6 +23,19 @@ function kindOf(c: Card): Kind {
 }
 
 const STATUS_LABEL: Record<string, string> = { aberta: 'Fatura aberta', fechada: 'Fatura fechada', futura: 'Fatura futura' }
+type Payment = { paid_total: number; pending_total: number; status: string } | null | undefined
+
+/** O que dizer da fatura: paga, paga em parte (quanto falta) ou a situação do ciclo (aberta/fechada/futura). */
+function invoiceLabel(cycle: string, payment: Payment): string {
+  if (payment?.status === 'pago') return 'Fatura paga'
+  if (payment?.status === 'parcial') return `Falta pagar ${brl(payment.pending_total)}`
+  return STATUS_LABEL[cycle] ?? ''
+}
+const invoiceTone = (payment: Payment): 'success' | 'warning' | 'neutral' =>
+  payment?.status === 'pago' ? 'success' : payment?.status === 'parcial' ? 'warning' : 'neutral'
+/** A mesma situação de pagamento a partir dos totais da fatura (tela da fatura). */
+const paymentOf = (c: { total: number; paid_total: number; pending_total: number }): Payment =>
+  !c.total ? null : { ...c, status: c.pending_total <= 0 ? 'pago' : c.paid_total > 0 ? 'parcial' : 'pendente' }
 
 /** Valor para o campo de texto: 1500.5 → "1500,5"; vazio quando não há (ou é zero). */
 const moneyField = (value: number | null) => (value ? decimalBR(value) : '')
@@ -129,9 +142,7 @@ function PlasticCard({ c, month, year, onEdit, onDelete }: { c: CardWithUsage; m
         )}
         <div className="row-between card-tile-foot">
           {c.supports_credit && u.payment_status && u.payment_status.status !== 'sem_despesas'
-            ? <Badge tone={u.payment_status.status === 'pago' ? 'success' : u.payment_status.status === 'parcial' ? 'warning' : 'neutral'}>
-                {u.payment_status.status === 'pago' ? 'Fatura paga' : `${STATUS_LABEL[u.status] ?? ''}`}
-              </Badge>
+            ? <Badge tone={invoiceTone(u.payment_status)}>{invoiceLabel(u.status, u.payment_status)}</Badge>
             : <span />}
           <span>
             <IconButton icon="pencil" label="Editar cartão" onClick={onEdit} />
@@ -206,7 +217,7 @@ export function InvoicePage({ id }: { id: string }) {
         actions={<Link to={`/cards?month=${month}&year=${year}`} className="btn btn-ghost">Voltar aos cartões</Link>} />
       {hasCredit && (
         <div className="invoice-head" style={{ background: d.gradient, color: d.text_color }}>
-          <div><span>Fatura de {d.month_name}</span><strong>{brl(d.credit.total)}</strong><small>{STATUS_LABEL[d.status]} · vence dia {d.card.due_day}</small></div>
+          <div><span>Fatura de {d.month_name}</span><strong>{brl(d.credit.total)}</strong><small>{invoiceLabel(d.status, paymentOf(d.credit))} · vence dia {d.card.due_day}</small></div>
           <div><span>Pago</span><strong>{brl(d.credit.paid_total)}</strong></div>
           <div><span>Falta pagar</span><strong>{brl(d.credit.pending_total)}</strong></div>
           <div><span>Parcelas futuras</span><strong>{brl(d.credit.future_installments)}</strong></div>
