@@ -348,3 +348,22 @@ def suggest_category_from_history(description: str, uids: list) -> str | None:
 def today_parts() -> tuple[int, int, int]:
     now = datetime.now()
     return now.day, now.month, now.year
+
+
+def move_invoice(e: Expense, months: int) -> list[Expense]:
+    """Leva a compra no crédito para a fatura seguinte (+1) ou anterior (-1); numa compra parcelada, as
+    parcelas seguintes andam junto. Fica marcada como escolha da pessoa: a leitura do banco não desfaz.
+    Devolve as despesas movidas."""
+    from app.models import BankTransaction
+    from app.services.open_finance import move_to_bill
+    if e.payment_method != CREDIT:
+        raise ExpenseError('Fatura: só compras no cartão de crédito mudam de fatura.')
+    target = month_offset(e.month, e.year, months)
+    rows = ([r for r in Expense.query.filter(Expense.installment_group_id == e.installment_group_id,
+                                             Expense.installment_number >= (e.installment_number or 0)).all()]
+            if e.installment_group_id else [e])
+    move_to_bill(e, (target[1], target[0]))
+    for tx in BankTransaction.query.filter(BankTransaction.expense_id.in_([r.id for r in rows])).all():
+        moved = db.session.get(Expense, tx.expense_id)
+        tx.bill_pinned, tx.bill_year, tx.bill_month = True, moved.year, moved.month
+    return rows

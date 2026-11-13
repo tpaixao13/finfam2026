@@ -93,10 +93,8 @@ def months_back(today: date, months: int) -> date:
 
 
 def add_months(d: date, months: int) -> date:
-    m, y = d.month + months, d.year
-    while m > 12:
-        m, y = m - 12, y + 1
-    return date(y, m, min(d.day, 28))
+    y, m = divmod(d.year * 12 + d.month - 1 + months, 12)  # também para trás: jan - 1 = dez do ano anterior
+    return date(y, m + 1, min(d.day, 28))
 
 
 # ── banco e contas ───────────────────────────────────────────────────────────
@@ -834,6 +832,8 @@ def align_to_bank(acc: BankAccount) -> int:
                                     BankTransaction.expense_id.isnot(None))
             .order_by(BankTransaction.date, BankTransaction.installment_number).all())
     for tx in rows:
+        if tx.bill_pinned:
+            continue  # a pessoa pôs em outra fatura (Mover para a próxima fatura): vale a escolha dela
         bill = tx_bill(acc, tx)
         if not bill:
             continue

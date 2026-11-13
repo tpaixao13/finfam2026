@@ -1459,3 +1459,61 @@ def test_card_closing_changes_each_month(client, family, bank, txs):  # noqa: F8
     inv = family.get(f"/cards/{card['id']}/invoice", params={'month': 11, 'year': 2026}).json()
     assert inv['cycle'] == {'close_date': '2026-11-07', 'due_date': '2026-11-15'}
     session.remove()
+
+
+def test_move_credit_purchase_to_next_invoice(client, family, other_family, bank, txs):  # noqa: F811
+    """Botão "próxima fatura": a compra (e as parcelas seguintes) muda de fatura, e a leitura do banco não desfaz."""
+    from app.models import BankAccount
+    acc, cc, card = _connect(client, family, bank, txs, card_digits='5162')
+    bank['accounts'][ITEM][1]['creditData'] = {'creditLimit': 5000, 'balanceCloseDate': f'{day(-20)[:10]}T03:00:00Z',
+                                               'balanceDueDate': f'{day(-28)[:10]}T03:00:00Z'}
+    txs[cc].append({'id': 'mv-1', 'type': 'DEBIT', 'amount': 80.0, 'date': day(2), 'description': 'LOJA X'})
+    _post_item(family)
+    tid = next(t['id'] for t in family.get('/pluggy/transactions').json()['items'] if t['description'] == 'LOJA X')
+    family.post('/pluggy/transactions/approve', json={'items': [{'id': tid, 'category': 'Compras'}]})
+    e = Expense.query.filter_by(description='LOJA X').one()
+    before = (e.year, e.month)
+    eid = e.id
+    session.remove()
+    assert other_family.post(f'/expenses/{eid}/move-invoice', json={'months': 1}).status_code == 404
+    r = family.post(f'/expenses/{eid}/move-invoice', json={'months': 1})
+    assert r.status_code == 200 and 'Movida para a fatura de' in r.json()['message'], r.text
+    e = session.get(Expense, eid)
+    after = (e.year, e.month)
+    assert after == ((before[0] + 1, 1) if before[1] == 12 else (before[0], before[1] + 1))
+    # a leitura do banco realinha as compras: esta fica onde a pessoa pôs
+    of.align_to_bank(BankAccount.query.filter_by(type='CREDIT').one())
+    session.commit()
+    assert (session.get(Expense, eid).year, session.get(Expense, eid).month) == after
+    session.remove()
+    # e volta com -1
+    assert family.post(f'/expenses/{eid}/move-invoice', json={'months': -1}).status_code == 200
+    assert (session.get(Expense, eid).year, session.get(Expense, eid).month) == before
+    assert family.post(f'/expenses/{eid}/move-invoice', json={'months': 2}).status_code == 422
+    session.remove()
+
+
+def test_move_invoice_takes_following_installments_and_only_credit(family):
+    r = family.post('/expenses', json={'description': 'TV', 'amount': '300', 'category': 'Casa', 'installments': 3,
+                                       'payment_method': 'Cartão de Crédito', 'date': '2026-11-02'})
+    assert r.status_code in (200, 201), r.text
+    rows = sorted(r.json()['expenses'], key=lambda x: x['series']['number'])
+    months = lambda: sorted((x.installment_number, x.month) for x in Expense.query.filter_by(description='TV'))  # noqa: E731
+    first = months()
+    out = family.post(f"/expenses/{rows[1]['id']}/move-invoice", json={'months': 1}).json()
+    assert out['moved'] == 2 and 'com as 1 parcelas seguintes' in out['message']
+    nxt = lambda m: m % 12 + 1  # noqa: E731
+    assert months() == [first[0], (2, nxt(first[1][1])), (3, nxt(first[2][1]))]  # a 1ª fica; 2ª e 3ª andam
+    pix = family.post('/expenses', json={'description': 'Pão', 'amount': '5', 'category': 'Alimentação',
+                                         'payment_method': 'PIX', 'date': '2026-11-02'}).json()['expenses'][0]
+    assert family.post(f"/expenses/{pix['id']}/move-invoice", json={'months': 1}).status_code == 422
+    session.remove()
+
+
+
+def test_add_months_crosses_the_year_both_ways():
+    from datetime import date as d
+    assert of.add_months(d(2027, 1, 15), -1) == d(2026, 12, 15)
+    assert of.add_months(d(2026, 12, 31), 1) == d(2027, 1, 28)
+    assert of.add_months(d(2026, 3, 10), -15) == d(2024, 12, 10)
+    assert of.add_months(d(2026, 11, 5), 0) == d(2026, 11, 5)

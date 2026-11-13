@@ -406,6 +406,7 @@ class BankTransaction(Base):
     payee_name = Column(String(120), nullable=True)       # nome de quem recebeu
     bill_prev_amount = Column(Numeric(12, 2), nullable=True)  # valor da conta antes de pagar pelo banco (para desfazer)
     bill_prev_bank = Column(Text, nullable=True)          # banco da conta antes ('' = sem banco), para desfazer
+    bill_pinned = Column(Boolean, default=False)          # a pessoa mudou a fatura à mão: a leitura do banco não desfaz
     created_at = Column(DateTime, default=utcnow)
     reviewed_at = Column(DateTime, nullable=True)
 

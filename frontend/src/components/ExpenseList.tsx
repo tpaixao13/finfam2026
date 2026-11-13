@@ -23,6 +23,8 @@ const STATUS: Record<Expense['status'], { tone: 'success' | 'warning' | 'danger'
   vencida: { tone: 'danger', label: 'Vencida' },
 }
 
+const CREDIT = 'Cartão de Crédito'
+
 /** Compra de um mês que entrou na fatura de outro (no crédito, year/month é o mês da fatura). */
 const otherMonth = (e: Expense) => e.purchase_month !== e.month || e.purchase_year !== e.year
 
@@ -63,6 +65,12 @@ export function ExpenseList({ items, onChange, showPerson = true, dateField = 'p
           </button>
           {!compact && (
             <span className="tx-actions">
+              {e.payment_method === CREDIT && <>
+                <IconButton icon="chevron-left" label={`Voltar ${e.description} para a fatura anterior`}
+                  onClick={() => act(() => api.post<{ message: string }>(`/expenses/${e.id}/move-invoice`, { months: -1 }), refresh)} />
+                <IconButton icon="chevron-right" label={`Mover ${e.description} para a próxima fatura`}
+                  onClick={() => act(() => api.post<{ message: string }>(`/expenses/${e.id}/move-invoice`, { months: 1 }), refresh)} />
+              </>}
               <IconButton icon="pencil" label={`Editar ${e.description}`} onClick={() => openExpense(e)} />
               <ConfirmButton label={`Excluir ${e.description}`} confirmLabel="Excluir"
                 onConfirm={() => act(() => api.del<{ message: string }>(`/expenses/${e.id}`), refresh)} />

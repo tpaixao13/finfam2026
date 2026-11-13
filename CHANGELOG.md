@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.15.0 — mover compra do cartão para a próxima fatura (13/11/2026)
+
+- **Botões ‹ e › nas compras do cartão de crédito** (na fatura em Cartões, em Despesas e em Contas a pagar):
+  **›** leva para a próxima fatura, **‹** volta para a anterior. Numa compra parcelada, as parcelas seguintes vão
+  junto. Avisa "Movida para a fatura de dezembro/2026".
+- **Vale para compras que vieram do banco:** a mudança fica travada (`bank_transactions.bill_pinned`, migração
+  automática) e a leitura seguinte do banco não devolve a compra para a fatura antiga.
+- API: `POST /expenses/{id}/move-invoice` com `{"months": 1}` ou `{"months": -1}`; só compras no crédito.
+- `add_months` (Open Finance) agora também volta meses atravessando o ano (jan − 1 = dez); no app ela só era usada
+  para frente, mas um teste quebrava perto da virada do ano.
+
 ## 2026.14.0 — fechamento real do cartão a cada mês (10/11/2026)
 
 - **O banco fecha a fatura num dia diferente a cada mês** (fim de semana, feriado, regra do banco). O FinFam guardava

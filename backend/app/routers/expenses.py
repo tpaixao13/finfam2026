@@ -14,7 +14,7 @@ from app.models import Expense, InstallmentGroup, RecurringGroup
 from app.services import expense_service as svc
 from app.services.categorizer import categorize
 from app.services.export_service import expense_rows, to_pdf, to_xlsx
-from app.services.finance import CREDIT, PAYMENT_METHODS
+from app.services.finance import CREDIT, MONTH_NAMES_FULL, PAYMENT_METHODS
 from app.services.serializers import expense_out, money
 
 router = APIRouter(prefix='/expenses', tags=['expenses'])
@@ -264,6 +264,25 @@ def toggle_paid(expense_id: int, ctx: Ctx = Depends(get_ctx)):
     db.session.commit()
     return {'message': 'Marcada como paga.' if expense.paid else 'Marcada como pendente.',
             'expense': expense_out(expense)}
+
+
+class MoveInvoiceIn(BaseModel):
+    months: Literal[-1, 1] = Field(1, description='1 = próxima fatura, -1 = fatura anterior')
+
+
+@router.post('/{expense_id}/move-invoice', summary='Leva a compra no crédito para a próxima fatura (ou a anterior)')
+def move_invoice(expense_id: int, body: MoveInvoiceIn, ctx: Ctx = Depends(get_ctx)):
+    """Numa compra parcelada, as parcelas seguintes vão junto. Vale mesmo para compras que vieram do banco:
+    a leitura seguinte não desfaz."""
+    expense = _get(ctx, expense_id)
+    try:
+        rows = svc.move_invoice(expense, body.months)
+    except svc.ExpenseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    db.session.commit()
+    where = f'fatura de {MONTH_NAMES_FULL[expense.month - 1].lower()}/{expense.year}'
+    extra = f' (com as {len(rows) - 1} parcelas seguintes)' if len(rows) > 1 else ''
+    return {'message': f'Movida para a {where}{extra}.', 'expense': expense_out(expense), 'moved': len(rows)}
 
 
 @router.post('/pay', summary='Marca várias despesas como pagas (ou pendentes com paid=false)')

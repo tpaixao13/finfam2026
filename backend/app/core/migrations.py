@@ -99,6 +99,7 @@ _ALTERS = [
     'ALTER TABLE bank_transactions ADD COLUMN payee_name VARCHAR(120)',
     'ALTER TABLE bank_transactions ADD COLUMN bill_prev_amount NUMERIC(12,2)',
     'ALTER TABLE bank_transactions ADD COLUMN bill_prev_bank TEXT',
+    'ALTER TABLE bank_transactions ADD COLUMN bill_pinned BOOLEAN DEFAULT 0',
     # limpeza de dados órfãos (usuário/família já excluídos) — não podem ser herdados
     'DELETE FROM goals WHERE user_id NOT IN (SELECT id FROM users)',
     'DELETE FROM category_rules WHERE tenant_id NOT IN (SELECT id FROM tenants)',
