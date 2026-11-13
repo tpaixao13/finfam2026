@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.15.1 — boleto que paga a fatura do cartão é reconhecido (13/11/2026)
+
+- **"PAGAMENTO DE BOLETO" que paga a fatura de um cartão** cuja fatura o banco não informa pela Pluggy (ex.: Caixa)
+  virava despesa nova e a fatura ficava pendente. Agora, se o valor é igual, ao centavo, ao total da **única**
+  fatura do FinFam ainda em aberto (mês do pagamento, anterior ou seguinte), a fatura fica paga e o boleto não vira
+  despesa. Com duas faturas de mesmo valor, fica para você decidir; PIX e outros textos não entram nessa regra.
+
 ## 2026.15.0 — mover compra do cartão para a próxima fatura (13/11/2026)
 
 - **Botões ‹ e › nas compras do cartão de crédito** (na fatura em Cartões, em Despesas e em Contas a pagar):

@@ -556,11 +556,29 @@ def reconcile_bill_payment(tx: BankTransaction, bills_only: bool = False, max_ga
                               Expense.year == y, Expense.month == m)
          .update({'paid': True}, synchronize_session=False))
         return f'Pagamento da fatura {name} de {MONTH_NAMES_SHORT[m - 1]}/{y}: fatura marcada como paga.'
-    if bills_only:
+    # 2) pela fatura do FinFam com o mesmo total (cartão que não está conectado ao banco, ex.: Caixa).
+    #    Boleto ("PAGAMENTO DE BOLETO") só quando é a ÚNICA fatura em aberto com esse valor, ao centavo.
+    found = _finfam_invoices(uids, tx.date, amount, unpaid_only=bills_only)
+    if bills_only and not (len(found) == 1 and _BILL_LIKE.search(tx.description or '')):
         return None
-    # 2) sem faturas do banco: pela fatura do FinFam com o mesmo total
+    if not found:
+        return None
+    items, m, y = found[0]
+    for e in items:
+        e.paid = True
+    card = db.session.get(CreditCard, items[0].card_id)
+    label = f"{card.bank or 'cartão'} •••• {card.last_digits}" if card else 'do cartão'
+    return (f'Pagamento da fatura {label} de {MONTH_NAMES_SHORT[m - 1]}/{y}: '
+            'fatura marcada como paga (as compras já vêm pelo cartão).')
+
+
+def _finfam_invoices(uids: list, day: date, amount: Decimal, unpaid_only: bool = False) -> list[tuple[list, int, int]]:
+    """Faturas do FinFam (uma por conta de crédito/cartão) de total igual ao valor, no mês do pagamento,
+    no anterior ou no seguinte: [(compras, mês, ano)]. unpaid_only: só faturas ainda sem nada pago."""
+    from app.services.finance import month_offset
+    out = []
     for delta in (0, -1, 1):
-        m, y = month_offset(tx.date.month, tx.date.year, delta)
+        m, y = month_offset(day.month, day.year, delta)
         rows = Expense.query.filter(Expense.user_id.in_(uids), Expense.payment_method == CREDIT,
                                     Expense.year == y, Expense.month == m, Expense.card_id.isnot(None)).all()
         groups: dict[tuple, list[Expense]] = {}
@@ -569,15 +587,11 @@ def reconcile_bill_payment(tx: BankTransaction, bills_only: bool = False, max_ga
             key = ('a', card.account_id) if card and card.account_id else ('c', e.card_id)
             groups.setdefault(key, []).append(e)
         for items in groups.values():
-            total = sum(Decimal(str(e.amount)) for e in items)
-            if abs(total - amount) <= Decimal('0.05'):
-                for e in items:
-                    e.paid = True
-                card = db.session.get(CreditCard, items[0].card_id)
-                label = f"{card.bank or 'cartão'} •••• {card.last_digits}" if card else 'do cartão'
-                return (f'Pagamento da fatura {label} de {MONTH_NAMES_SHORT[m - 1]}/{y}: '
-                        'fatura marcada como paga (as compras já vêm pelo cartão).')
-    return None
+            if unpaid_only and any(e.paid for e in items):
+                continue
+            if abs(sum(Decimal(str(e.amount)) for e in items) - amount) <= Decimal('0.05'):
+                out.append((items, m, y))
+    return out
 
 
 _BILL_LIKE = re.compile(r'boleto|pagamento|pgto|pagto|fatura|cart[aã]o', re.I)

@@ -232,7 +232,8 @@ def test_real_bank_cases(client, family, bank, txs):  # noqa: F811
     when = (TODAY - timedelta(days=2)).isoformat()
     family.post('/expenses', json={'description': 'Taxa Anuidade', 'amount': '17.25', 'category': 'Outros',
                                    'payment_method': 'Cartão de Crédito', 'card_id': card['id'], 'date': when})
-    txs[acc].append({'id': 'b-1', 'type': 'DEBIT', 'amount': -17.25, 'date': day(1), 'description': 'PAGAMENTO DE BOLETO'})
+    # boleto de OUTRO valor (o de 17,25 pagaria a fatura: test_boleto_pays_invoice_of_card_not_connected)
+    txs[acc].append({'id': 'b-1', 'type': 'DEBIT', 'amount': -23.4, 'date': day(1), 'description': 'PAGAMENTO DE BOLETO'})
     txs[cc] += [{'id': 'c-1', 'type': 'DEBIT', 'amount': 17.25, 'date': day(1), 'description': 'ANUIDADE NAC'},
                 {'id': 'c-2', 'type': 'DEBIT', 'amount': 99.0, 'date': day(1), 'description': 'TOTAL DA FATURA ANTERIOR'}]
     conn = _post_item(family)['item']
@@ -1517,3 +1518,36 @@ def test_add_months_crosses_the_year_both_ways():
     assert of.add_months(d(2026, 12, 31), 1) == d(2027, 1, 28)
     assert of.add_months(d(2026, 3, 10), -15) == d(2024, 12, 10)
     assert of.add_months(d(2026, 11, 5), 0) == d(2026, 11, 5)
+
+
+def test_boleto_pays_invoice_of_card_not_connected(client, family, bank, txs):  # noqa: F811
+    """Caixa (cartão só no FinFam): "PAGAMENTO DE BOLETO" de R$ 17,25 = a fatura em aberto → fatura paga, não vira despesa."""
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    caixa = family.post('/cards', json={'supports_credit': True, 'last_digits': '8379', 'bank': 'Caixa',
+                                        'due_day': 29, 'best_buy_day': 19}).json()['card']
+    r = family.post('/expenses', json={'description': 'ANUIDADE NAC DIFERENCIADA', 'amount': '17.25', 'category': 'Outros',
+                                       'payment_method': 'Cartão de Crédito', 'card_id': caixa['id'], 'date': day(5)[:10]})
+    assert r.status_code in (200, 201), r.text
+    anuidade = r.json()['expenses'][0]['id']
+    txs[acc] += [{'id': 'bol', 'type': 'DEBIT', 'amount': -17.25, 'date': day(1), 'description': 'PAGAMENTO DE BOLETO'},
+                 {'id': 'pix', 'type': 'DEBIT', 'amount': -17.25, 'date': day(1), 'description': 'PIX JOAO'}]
+    _post_item(family)
+    bol = BankTransaction.query.filter_by(pluggy_id='bol').one()
+    assert bol.status == 'ignored' and 'Caixa •••• 8379' in bol.reason and 'fatura marcada como paga' in bol.reason
+    assert session.get(Expense, anuidade).paid is True
+    assert BankTransaction.query.filter_by(pluggy_id='pix').one().status == 'pending'  # não é boleto: não mexe
+    session.remove()
+
+
+def test_boleto_with_two_invoices_of_same_total_asks(client, family, bank, txs):  # noqa: F811
+    acc, _cc, _ = _connect(client, family, bank, txs)
+    for digits, bank_name in (('8379', 'Caixa'), ('1111', 'Itaú')):
+        card = family.post('/cards', json={'supports_credit': True, 'last_digits': digits, 'bank': bank_name,
+                                           'due_day': 29, 'best_buy_day': 19}).json()['card']
+        family.post('/expenses', json={'description': f'Compra {bank_name}', 'amount': '50', 'category': 'Outros',
+                                       'payment_method': 'Cartão de Crédito', 'card_id': card['id'], 'date': day(5)[:10]})
+    txs[acc].append({'id': 'bol2', 'type': 'DEBIT', 'amount': -50.0, 'date': day(1), 'description': 'PAGAMENTO DE BOLETO'})
+    _post_item(family)
+    assert BankTransaction.query.filter_by(pluggy_id='bol2').one().status == 'pending'  # duas possíveis: você decide
+    assert not any(e.paid for e in Expense.query.filter(Expense.description.like('Compra %')))
+    session.remove()
