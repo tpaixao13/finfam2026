@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from sqlalchemy.exc import OperationalError
 from fastapi import Depends, Header, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -114,10 +115,15 @@ def _resolve(creds: HTTPAuthorizationCredentials | None, chat_id: str | None = N
 
 
 def _touch(user: User) -> None:
+    """Anota o "visto por último" (painel do admin). É só um detalhe: com o banco ocupado por outra gravação,
+    fica para a próxima vez em vez de derrubar o pedido com erro 500."""
     now = datetime.now()
     if not user.last_seen or now - user.last_seen > _LAST_SEEN_EVERY:
         user.last_seen = now
-        db.session.commit()
+        try:
+            db.session.commit()
+        except OperationalError:
+            db.session.rollback()
 
 
 def _build_ctx(creds, allow_expired: bool, chat_id: str | None = None, request: Request | None = None) -> Ctx:

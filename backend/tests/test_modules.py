@@ -344,3 +344,32 @@ def test_due_soon_alert_opens_bills_for_the_next_days(family):
     alerts = generate_alerts([family.user['id']], today.month, today.year, family.tenant['id'])
     soon = next(a for a in alerts if 'vence' in a['title'])
     assert soon['action_url'] == '/bills?dias=3' and soon['action_label'] == 'Ver contas'
+
+
+def test_last_seen_does_not_break_the_request_when_db_is_busy(family, monkeypatch):
+    """"database is locked" ao anotar o visto por último (a leitura da Pluggy gravando): o pedido segue."""
+    from datetime import timedelta
+    from sqlalchemy.exc import OperationalError
+    from app.core import deps
+    from app.models import User
+    u = session.get(User, family.user['id'])
+    u.last_seen = u.last_seen - timedelta(days=1) if u.last_seen else None
+    session.commit()
+    session.remove()
+    real = deps.db.session.commit
+
+    def busy():
+        raise OperationalError('UPDATE users SET last_seen', {}, Exception('database is locked'))
+    monkeypatch.setattr(deps.db.session, 'commit', busy, raising=False)
+    try:
+        assert family.get('/auth/me').status_code == 200
+    finally:
+        monkeypatch.setattr(deps.db.session, 'commit', real, raising=False)
+
+
+def test_sqlite_waits_and_uses_wal(tmp_path):
+    from app.core.db import SQLITE_BUSY_SECONDS, _make_engine
+    eng = _make_engine(f'sqlite:///{tmp_path}/x.db')
+    with eng.connect() as c:
+        assert c.exec_driver_sql('PRAGMA journal_mode').scalar() == 'wal'
+    assert SQLITE_BUSY_SECONDS >= 30

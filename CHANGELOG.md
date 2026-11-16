@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.15.3 — sem erro 500 quando o banco de dados está ocupado (16/11/2026)
+
+- **"database is locked":** enquanto a leitura de um banco pela Pluggy gravava, uma mensagem ao bot (ou um clique no
+  site) que também precisava gravar desistia em poucos segundos e voltava erro 500.
+  - O SQLite agora espera até **30 s** por uma gravação (`SQLITE_BUSY_SECONDS`) e usa o modo **WAL** (quem lê não
+    espera quem grava). Ao lado do banco aparecem os arquivos `-wal` e `-shm`: são do SQLite, não apague.
+  - O "visto por último" (painel do admin) não derruba mais o pedido: com o banco ocupado, fica para a próxima vez.
+- O backup continua consistente (usa a cópia do próprio SQLite, que inclui o que está no `-wal`).
+
 ## 2026.15.2 — bot: "gasto de energia" procura a conta de luz, não a categoria inteira (16/11/2026)
 
 - **Assuntos que não são categoria** (energia/luz, água, gás, internet, telefone, combustível, farmácia): a IA

@@ -9,7 +9,7 @@ import uuid
 from contextvars import ContextVar
 
 from fastapi import HTTPException
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, scoped_session, sessionmaker
 
 from app.core.config import settings
@@ -21,11 +21,27 @@ def _scopefunc():
     return _request_scope.get() or threading.get_ident()
 
 
+SQLITE_BUSY_SECONDS = 30  # quanto uma gravação espera a outra (ex.: a leitura do banco pela Pluggy) antes de desistir
+
+
 def _make_engine(url: str):
     kwargs = {}
     if url.startswith('sqlite'):
-        kwargs['connect_args'] = {'check_same_thread': False}
-    return create_engine(url, **kwargs)
+        kwargs['connect_args'] = {'check_same_thread': False, 'timeout': SQLITE_BUSY_SECONDS}
+    engine = create_engine(url, **kwargs)
+    if url.startswith('sqlite') and ':memory:' not in url and url.rstrip('/') != 'sqlite:':
+        event.listen(engine, 'connect', _sqlite_wal)
+    return engine
+
+
+def _sqlite_wal(dbapi_conn, _record) -> None:
+    """WAL: quem lê não espera quem grava (só uma gravação por vez continua valendo, por isso o timeout)."""
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute('PRAGMA journal_mode=WAL')
+        cur.execute('PRAGMA synchronous=NORMAL')
+    finally:
+        cur.close()
 
 
 engine = _make_engine(settings.database_url)
