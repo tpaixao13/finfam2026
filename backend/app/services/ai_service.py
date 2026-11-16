@@ -448,6 +448,37 @@ def mentioned_member(message: str | None, members: list[dict]) -> dict | None:
     return None
 
 
+# Assuntos que não são categoria ("energia" cai em Moradia junto com aluguel e prestação): procura pelas
+# palavras que costumam vir na descrição. {palavra na pergunta: (nome do assunto, palavras na descrição)}
+_TOPIC_TERMS = {
+    'energia': ('energia', ['energia', 'luz', 'eletric', 'enel', 'cemig', 'light', 'copel', 'celesc', 'coelba',
+                            'energisa', 'cpfl', 'equatorial', 'neoenergia', 'elektro', 'eletropaulo', 'edp', 'celpe',
+                            'cosern', 'ceee', 'rge sul']),
+    'agua': ('água', ['agua', 'água', 'ÁGUA', 'saneamento', 'sabesp', 'cedae', 'copasa', 'sanepar', 'embasa', 'caesb',
+                      'compesa', 'cagece', 'saneago', 'casan', 'corsan', 'cesan', 'aegea', 'iguá']),
+    'gas': ('gás', ['gás', 'GÁS', 'comgas', 'comgás', 'naturgy', 'ultragaz', 'liquigas', 'supergasbras', 'copergas',
+                    'botij']),
+    'internet': ('internet', ['internet', 'fibra', 'vivo', 'claro', 'telefonica', 'sky', 'starlink', 'brisanet']),
+    'telefone': ('telefone', ['telefone', 'celular', 'vivo', 'claro', 'telefonica', 'recarga']),
+    'combustivel': ('combustível', ['combust', 'gasolina', 'etanol', 'diesel', 'posto', 'shell', 'ipiranga',
+                                    'petrobras', 'br mania']),
+    'farmacia': ('farmácia', ['farm', 'drogaria', 'droga', 'raia', 'drogasil', 'pague menos', 'panvel', 'pacheco',
+                              'remedio', 'remédio']),
+}
+_TOPIC_WORDS = {'energia': 'energia', 'luz': 'energia', 'eletricidade': 'energia', 'agua': 'agua', 'gas': 'gas',
+                'internet': 'internet', 'telefone': 'telefone', 'celular': 'telefone', 'combustivel': 'combustivel',
+                'gasolina': 'combustivel', 'farmacia': 'farmacia', 'remedio': 'farmacia', 'remedios': 'farmacia'}
+
+
+def topic_of(message: str | None) -> tuple[str, str] | None:
+    """("energia", "energia|luz|enel|…") quando a pergunta cita um desses assuntos."""
+    for word in re.findall(r'[a-z]+', _norm(message)):
+        if word in _TOPIC_WORDS:
+            label, terms = _TOPIC_TERMS[_TOPIC_WORDS[word]]
+            return label, '|'.join(terms)
+    return None
+
+
 _SPENT_WORDS = re.compile(r'\b(gast\w*|despesa\w*|contas?|compr\w*|lancament\w*)\b')
 
 
@@ -467,8 +498,11 @@ def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str
     days = _int(raw.get('days'))
     category = match_category(raw.get('category'), categories)
     text = re.sub(r'[^\w\s.*-]', '', str(raw.get('text') or ''))[:60].strip() or None
+    terms = None
     if intent == 'spending' and (name := quoted_name(message, categories)):
         category, text = None, name[:60]
+    elif intent in ('spending', 'purchases') and (topic := topic_of(message)):
+        category, text, terms = None, topic[0], topic[1]  # "energia": luz, Enel, Cemig… (não a categoria inteira)
     method = str(raw.get('payment_method') or '')
     method = method if method in (methods or []) else _METHOD_ALIASES.get(_norm(method))
     if method and _norm(text or '') in (_norm(method), 'cartao de credito', 'credito', 'debito', 'pix', 'cartao'):
@@ -499,5 +533,5 @@ def to_query(raw: dict | None, *, intent: str, today: date, categories: list[str
     return {'person_id': person['id'] if person else None, 'person_name': person['name'] if person else None,'days': days if days and 0 <= days <= 90 else 7, 'category': category, 'payment_method': method,
             'months': months if months and 2 <= months <= 24 else None,
             'card_id': card_id, 'bank': bank,
-            'text': None if category else text, 'month': month, 'year': year,
+            'text': None if category else text, 'terms': terms, 'month': month, 'year': year,
             'date_from': start.isoformat() if start else None, 'date_to': end.isoformat() if end else None}

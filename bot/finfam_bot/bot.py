@@ -377,17 +377,17 @@ class Bot:
 
     def spending(self, chat_id: int, q: dict) -> None:
         if (q.get('months') or 1) > 1:  # "nos últimos meses": um total por mês
-            rows = [(m, y, self._search(chat_id, month=m, year=y, category=q.get('category'), search=q.get('text'),
+            rows = [(m, y, self._search(chat_id, month=m, year=y, category=q.get('category'), search=q.get('terms') or q.get('text'),
                                         payment_method=q.get('payment_method'), user_id=q.get('person_id')))
                     for m, y in months_back(q['month'], q['year'], q['months'])]
             return self.tg.send(chat_id, spending_months_text(q, rows))
-        r = self._search(chat_id, month=q['month'], year=q['year'], category=q.get('category'), search=q.get('text'),
+        r = self._search(chat_id, month=q['month'], year=q['year'], category=q.get('category'), search=q.get('terms') or q.get('text'),
                          payment_method=q.get('payment_method'), user_id=q.get('person_id'))
         self.tg.send(chat_id, spending_text(q, r))
 
     def purchases(self, chat_id: int, q: dict) -> None:
         r = self._search(chat_id, purchase_from=q['date_from'], purchase_to=q['date_to'],
-                         category=q.get('category'), search=q.get('text'), user_id=q.get('person_id'))
+                         category=q.get('category'), search=q.get('terms') or q.get('text'), user_id=q.get('person_id'))
         self.tg.send(chat_id, purchases_text(q, r))
 
     def ai_expense(self, chat_id: int, d: dict) -> None:

@@ -361,3 +361,20 @@ def test_interpret_invoice_for_a_bank(client, family, other_family, fake_ai):
     fake_ai['answer'] = {'intent': 'invoices', 'query': {'card_id': alien['id'], 'bank': 'nubank'}}
     q = family.post('/ai/interpret', json={'text': 'fatura do nubank'}).json()['query']
     assert q['card_id'] is None and q['bank'] is None  # cartão/banco de outra família não vale
+
+
+def test_topic_energia_searches_descriptions_not_the_whole_category(client, family, fake_ai):  # noqa: F811
+    """"gasto de energia": a IA diz Moradia (não há categoria Energia), mas o que se quer é a conta de luz."""
+    family.put('/settings/ai', json={'provider': 'openai', 'api_key': 'sk-teste-1234567890'})
+    for desc, amount in (('ENEL DISTRIBUICAO SP', '231.55'), ('Conta de luz', '180'), ('DEBITO PRESTACAO HAB', '1900.55')):
+        family.post('/expenses', json={'description': desc, 'amount': amount, 'category': 'Moradia',
+                                       'payment_method': 'PIX', 'date': '2026-10-13'})
+    fake_ai['answer'] = {'intent': 'spending', 'query': {'category': 'Moradia', 'month': 10, 'year': 2026}}
+    q = family.post('/ai/interpret', json={'text': 'qual foi meu gasto com energia em outubro?'}).json()['query']
+    assert q['category'] is None and q['text'] == 'energia' and 'enel' in q['terms'].split('|')
+    found = family.get('/expenses', params={'month': 10, 'year': 2026, 'search': q['terms']}).json()
+    names = {e['description'] for e in found['items']}
+    assert names == {'ENEL DISTRIBUICAO SP', 'Conta de luz'}  # sem a prestação da casa
+    # "gasto" contém "gas", mas não é o assunto gás
+    fake_ai['answer'] = {'intent': 'spending', 'query': {'category': 'Moradia', 'month': 10, 'year': 2026}}
+    assert family.post('/ai/interpret', json={'text': 'gasto com moradia'}).json()['query']['category'] == 'Moradia'

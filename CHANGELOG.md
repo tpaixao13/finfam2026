@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.15.2 — bot: "gasto de energia" procura a conta de luz, não a categoria inteira (16/11/2026)
+
+- **Assuntos que não são categoria** (energia/luz, água, gás, internet, telefone, combustível, farmácia): a IA
+  escolhia a categoria mais parecida ("energia" → Moradia, junto com aluguel e prestação). Agora o bot procura pelas
+  palavras que vêm na descrição: para energia, "luz", "Enel", "Cemig", "Light", "CPFL", "Copel"… ("gasto" não é
+  confundido com "gás").
+- API: o filtro `search` de `GET /expenses` aceita várias palavras separadas por `|` (qualquer uma).
+
 ## 2026.15.1 — boleto que paga a fatura do cartão é reconhecido (13/11/2026)
 
 - **"PAGAMENTO DE BOLETO" que paga a fatura de um cartão** cuja fatura o banco não informa pela Pluggy (ex.: Caixa)

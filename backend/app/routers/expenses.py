@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from app.core.db import db, get_or_404
 from app.core.deps import Ctx, Period, get_ctx, get_period
@@ -109,8 +109,9 @@ def _filtered_query(ctx: Ctx, *, user_id, month, year, category, payment_method,
         q = q.filter(Expense.paid == True)  # noqa: E712
     elif paid == 'pendente':
         q = q.filter(Expense.paid.isnot(True))
-    if search:
-        q = q.filter(func.lower(Expense.description).like(f'%{search.lower()}%'))
+    if search:  # "luz|enel|cemig": qualquer uma das palavras (até 25)
+        terms = [t.strip().lower() for t in search.split('|') if t.strip()][:25] or [search.lower()]
+        q = q.filter(or_(*[func.lower(Expense.description).like(f'%{t}%') for t in terms]))
     return q
 
 
@@ -122,7 +123,7 @@ def _filters(month: int | None = Query(None, ge=0, le=12, description='0 = todos
              date_from: _date | None = None, date_to: _date | None = None,
              purchase_from: _date | None = Query(None, description='Data da compra a partir de (real, não a da fatura)'),
              purchase_to: _date | None = Query(None, description='Data da compra até'),
-             search: str | None = Query(None, max_length=100)) -> dict:
+             search: str | None = Query(None, max_length=400)) -> dict:
     now = datetime.now()
     return dict(user_id=user_id, month=now.month if month is None else month,
                 year=year or now.year, category=category, payment_method=payment_method,
