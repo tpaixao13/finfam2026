@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.15.4 — janela de editar não fecha ao selecionar o valor com o mouse (18/11/2026)
+
+- **Editar despesa (e todas as janelas):** selecionar o valor arrastando o mouse e soltar fora da caixa contava como
+  "clique no fundo" e fechava a janela, perdendo o que tinha sido digitado. Agora o clique no fundo só fecha quando
+  começa e termina no fundo (`Modal` em `components/ui.tsx`).
+
 ## 2026.15.3 — sem erro 500 quando o banco de dados está ocupado (16/11/2026)
 
 - **"database is locked":** enquanto a leitura de um banco pela Pluggy gravava, uma mensagem ao bot (ou um clique no

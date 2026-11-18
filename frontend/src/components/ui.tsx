@@ -120,6 +120,9 @@ export function Segmented<T extends string>({ value, onChange, options, ariaLabe
 export function Modal({ open, title, onClose, children, footer, wide }:
   { open: boolean; title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null)
+  // Fecha clicando no fundo só se o clique COMEÇOU no fundo: selecionar um valor arrastando o mouse e
+  // soltar fora da caixa também gera um "clique no fundo", e fechava a janela perdendo o que foi digitado.
+  const pressedOnBackdrop = useRef(false)
   useEffect(() => {
     const d = ref.current
     if (!d) return
@@ -128,7 +131,8 @@ export function Modal({ open, title, onClose, children, footer, wide }:
   }, [open])
   return (
     <dialog ref={ref} className={`modal ${wide ? 'modal-wide' : ''}`} onClose={onClose}
-      onClick={(e) => { if (e.target === ref.current) onClose() }}>
+      onMouseDown={(e) => { pressedOnBackdrop.current = e.target === ref.current }}
+      onClick={(e) => { if (e.target === ref.current && pressedOnBackdrop.current) onClose(); pressedOnBackdrop.current = false }}>
       {open && (
         <div className="modal-box">
           <header className="modal-head">
